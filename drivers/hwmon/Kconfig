@@ -1861,6 +1861,12 @@ config SENSORS_XGENE
 	  If you say yes here you get support for the temperature
 	  and power sensors for APM X-Gene SoC.
 
+config SENSORS_NPCM7XX
+	tristate "Nuvoton NPCM7XX PWM and Fan driver"
+	help
+	  This driver provides support for Nuvoton NPCM7XX PWM and Fan
+	  controllers.
+
 if ACPI
 
 comment "ACPI drivers"
