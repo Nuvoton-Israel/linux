@@ -1,0 +1,23 @@
+Nuvoton NPCM7XX I2C bus
+
+The NPCM750x includes sixteen I2C busses
+
+Required properties:
+- compatible      : "nuvoton,npcm750-i2c-bus" for Poleg NPCM750.
+- reg             : Offset and length of the register set for the device.
+- interrupts      : Contain the I2C interrupt with flags for falling edge.
+- clocks          : phandle of I2C reference clock.
+
+Optional:
+- bus-frequency   : Contain the I2C bus frequency,
+					the defualt I2C bus frequency is 100000.
+
+Example:
+
+i2c0: i2c-bus@f0080000 {
+	reg = <0xf0080000 0x1000>;
+	compatible = "nuvoton,npcm750-i2c-bus";
+	clocks = <&clk NPCM7XX_CLK_APB2>;
+	bus-frequency = <100000>;
+	interrupts = <0 64 4>;
+};
