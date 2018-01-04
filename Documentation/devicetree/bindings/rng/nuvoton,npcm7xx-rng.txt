@@ -1,0 +1,16 @@
+NPCM7XX SoC random number generator.
+
+Required properties:
+- compatible  : "nuvoton,npcm750-rng" for Poleg NPCM750
+- reg         : Offset and length of the registers set for the rng device.
+
+Optional:
+- clocks          : phandle of rng reference clock.
+
+Example:
+
+rng: rng@f000b000 {
+	compatible = "nuvoton,npcm750-rng";
+	reg = <0xf000b000 0x1000>;
+	clocks = <&clk NPCM7XX_CLK_APB1>;
+};
