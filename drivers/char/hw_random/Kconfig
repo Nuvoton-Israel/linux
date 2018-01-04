@@ -180,6 +180,19 @@ config HW_RANDOM_OMAP
 
  	  If unsure, say Y.
 
+config HW_RANDOM_NPCM7XX
+	tristate "NPCM7XX Random Number Generator support"
+	depends on HW_RANDOM && ARCH_NPCM7XX
+	default HW_RANDOM
+ 	---help---
+ 	  This driver provides kernel-side support for the Random Number
+	  Generator hardware found on npcm7xx processor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called npcm7xx-rng.
+
+ 	  If unsure, say Y.
+
 config HW_RANDOM_OMAP3_ROM
 	tristate "OMAP3 ROM Random Number Generator support"
 	depends on ARCH_OMAP3
