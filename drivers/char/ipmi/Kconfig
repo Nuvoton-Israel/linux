@@ -81,6 +81,14 @@ config IPMI_POWEROFF
 
 endif # IPMI_HANDLER
 
+config IPMI_KCS_BMC
+	tristate 'IPMI KCS BMC Interface'
+	help
+	  Provides a device driver for the KCS (Keyboard Controller Style)
+	  IPMI interface which meets the requirement of the BMC (Baseboard
+	  Management Controllers) side for handling the IPMI request from
+	  host system software.
+
 config ASPEED_BT_IPMI_BMC
 	depends on ARCH_ASPEED || COMPILE_TEST
        depends on REGMAP && REGMAP_MMIO && MFD_SYSCON
