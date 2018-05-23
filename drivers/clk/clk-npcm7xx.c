@@ -87,8 +87,8 @@ static struct clk_hw *npcm7xx_clk_register_pll(void __iomem *pllcon,
 	if (!pll)
 		return ERR_PTR(-ENOMEM);
 
-	pr_debug("npcm7xx_clk_register_pll reg, reg=0x%x, name=%s, p=%s\n",
-		(unsigned int)pllcon, name, parent_name);
+	pr_debug("%s reg, reg=0x%x, name=%s, p=%s\n",
+		__func__, (unsigned int)pllcon, name, parent_name);
 
 	init.name = name;
 	init.ops = &npcm7xx_clk_pll_ops;
@@ -567,9 +567,8 @@ static void __init npcm7xx_clk_init(struct device_node *clk_np)
 	}
 
 	clk_base = ioremap(res.start, resource_size(&res));
-	if (clk_base == NULL) {
+	if (!clk_base)
 		goto npcm7xx_init_error;
-	}
 
 	npcm7xx_clk_data = kzalloc(sizeof(*npcm7xx_clk_data->hws) *
 		NPCM7XX_NUM_CLOCKS + sizeof(npcm7xx_clk_data), GFP_KERNEL);
@@ -693,7 +692,6 @@ npcm7xx_init_fail_no_clk_on_dt:
 	pr_err("see Documentation/devicetree/bindings/clock/");
 	pr_err("nuvoton,npcm750-clk.txt  for details\n");
 npcm7xx_init_fail:
-	pr_err("clk setup fail\n");
 	if (npcm7xx_clk_data->num)
 		kfree(npcm7xx_clk_data->hws);
 npcm7xx_init_np_err:
@@ -701,5 +699,6 @@ npcm7xx_init_np_err:
 		iounmap(clk_base);
 npcm7xx_init_error:
 	of_node_put(clk_np);
+	pr_err("clk setup fail\n");
 }
 CLK_OF_DECLARE(npcm7xx_clk_init, "nuvoton,npcm750-clk", npcm7xx_clk_init);
