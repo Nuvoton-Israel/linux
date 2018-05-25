@@ -4,3 +4,5 @@ NPCM750 SoC
 Required root node properties:
 	- compatible = "nuvoton,npcm750";
 
+Optional root node properties:
+	- nuvoton,npcm750-spswc : value of serial ports switch control register
