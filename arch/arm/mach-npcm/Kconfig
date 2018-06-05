@@ -22,6 +22,7 @@ config ARCH_NPCM7XX
 	select PL310_ERRATA_588369
 	select PL310_ERRATA_727915
 	select MFD_SYSCON
+	select MULTIPLEXER
 	help
 	  General support for NPCM7xx BMC (Poleg).
 
