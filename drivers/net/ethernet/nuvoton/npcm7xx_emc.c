@@ -1959,7 +1959,7 @@ static int npcm7xx_ether_proc_open(struct inode *inode, struct file *file)
 
 static const struct file_operations npcm7xx_ether_proc_fops = {
 	.open           = npcm7xx_ether_proc_open,
-	.read           = seq_read,
+	.read           = npcm7xx_proc_read,
 	.llseek         = seq_lseek,
 	.release        = single_release,
 };
@@ -1987,7 +1987,7 @@ static int npcm7xx_ether_proc_reset(struct inode *inode, struct file *file)
 
 static const struct file_operations npcm7xx_ether_proc_fops_reset = {
 	.open           = npcm7xx_ether_proc_reset,
-	.read           = seq_read,
+	.read           = npcm7xx_proc_read,
 	.llseek         = seq_lseek,
 	.release        = single_release,
 };
