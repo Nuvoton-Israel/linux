@@ -437,6 +437,27 @@ config USB_GADGET_XILINX
 	  Say "y" to link the driver statically, or "m" to build a
 	  dynamically linked module called "udc-xilinx" and force all
 	  gadget drivers to also be dynamically linked.
+	  
+config USB_GADGET_NPCMX50_USB2
+	bool "NPCMX50 Highspeed USB DR Peripheral Controller"
+	depends on ARCH_NPCM7XX
+	select USB_GADGET_DUALSPEED
+	help
+	   Some of Freescale PowerPC processors have a High Speed
+	   Dual-Role(DR) USB controller, which supports device mode.
+
+	   The number of programmable endpoints is different through
+	   SOC revisions.
+
+	   Say "y" to link the driver statically, or "m" to build a
+	   dynamically linked module called "npcmX50_usb2_udc" and force
+	   all gadget drivers to also be dynamically linked.
+
+config USB_NPCMX50_USB2
+	tristate
+	depends on USB_GADGET_NPCMX50_USB2
+	default USB_GADGET
+	select USB_GADGET_SELECTED
 
 #
 # LAST -- dummy/emulated controller
