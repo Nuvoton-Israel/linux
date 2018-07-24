@@ -1,0 +1,16 @@
+config CRYPTO_DEV_NPCM750_SHA
+	tristate "NPCM750 SHA acceleration support"
+	depends on CRYPTO_DEV_NPCMX50
+	default y	
+	select CRYPTO_SHA1
+	select CRYPTO_SHA256
+	help
+	  Support for BMC Nuvoton NPCM750 SHA HW.
+
+config CRYPTO_DEV_NPCM750_AES
+	tristate "NPCM750 AES acceleration support"
+	depends on CRYPTO_DEV_NPCMX50
+	default y
+	select CRYPTO_AES
+	help
+	  Support for Nuvoton BMC NPCM750 AES HW.
