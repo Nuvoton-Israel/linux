@@ -750,4 +750,13 @@ config CRYPTO_DEV_CCREE
 	  cryptographic operations on the system REE.
 	  If unsure say Y.
 
+config CRYPTO_DEV_NPCMX50
+	bool "Support Nuvoton BMC npcmx50 HW crypto engines"
+	depends on ARCH_NPCM7XX
+	default n
+	help
+	  Support Nuvoton BMC npcmx50 HW crypto engines.
+	  
+source drivers/crypto/npcmX50/Kconfig
+ 
 endif # CRYPTO_HW
