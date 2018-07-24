@@ -1,0 +1,3 @@
+obj-$(CONFIG_CRYPTO_DEV_NPCM750_AES) += npcm750_aes.o
+obj-$(CONFIG_CRYPTO_DEV_NPCM750_SHA) += npcm750_sha.o
+
