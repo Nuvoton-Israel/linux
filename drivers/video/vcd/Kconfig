@@ -1,0 +1,16 @@
+config NPCM750_VCD
+        tristate "Nuvoton npcm750 vcd support"
+        help
+          This enables support for npcm750 vcd.
+
+
+
+
+
+
+
+
+
+
+
+

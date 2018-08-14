@@ -1,0 +1,8 @@
+#
+# ECE configuration
+#
+
+config NPCM750_ECE
+    tristate "Nuvoton ECE support"
+    ---help---
+      Enable Nuvoton Encoding and Compression Engine.
