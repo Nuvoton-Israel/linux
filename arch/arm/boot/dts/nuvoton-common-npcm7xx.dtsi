@@ -269,12 +269,22 @@
 			interrupts = <0 23 4>;
 		};
 
-		vcd: vcd@0 {
+		vcd: vcd@f0810000 {
 			compatible = "nuvoton,npcm750-vcd";
-			reg = <0xf0810000 0x10000
-			       0xf0820000 0x2000>;
-			interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
+			reg = <0xf0810000 0x10000>;
+			mem-addr = <0x3e200000>;
+			mem-size = <0x600000>;
+			interrupts = <0 22 4>;
+			status = "disabled";
+		};
+
+		ece: ece@f0820000 {
+			compatible = "nuvoton,npcm750-ece";
+			reg = <0xf0820000 0x2000>;
+			mem-addr = <0x3e800000>;
+			mem-size = <0x600000>;
+			interrupts = <0 24 4>;
+			status = "disabled";
 		};
 
 		pcimbox: pcimbox@f0848000 {
@@ -654,6 +664,12 @@
 				pinctrl-0 = <&smb15_pins>;
 				status = "disabled";
 			};
+
+			gfxi: gfxi@f000e000 {
+				compatible = "nuvoton,npcm750-gfxi", "syscon", "simple-mfd";
+				reg = <0xf000e000 0x100>;
+			};
+
 		};
 	};
 
