@@ -222,6 +222,7 @@
 			chip-max-address-map = <0x8000000>;
 			clocks = <&clk NPCM7XX_CLK_AHB>;
 			clock-names = "clk_ahb";
+			status = "disabled";
 			spi-nor@0 {
 					compatible = "jedec,spi-nor";
 					#address-cells = <1>;
@@ -229,6 +230,7 @@
 					reg = <0>;
 			};
 		};
+
 		spi3: spi@c0000000 {
 			compatible = "nuvoton,npcm750-spi";
 			#address-cells = <1>;
@@ -240,8 +242,27 @@
 			clock-names = "clk_ahb";
 			pinctrl-names = "default";
 			pinctrl-0 = <&spi3_pins &spi3quad_pins>;
+			status = "disabled";
 			spi-nor@0 {
 					compatible = "jedec,spi-nor";
+					#address-cells = <1>;
+					#size-cells = <1>;
+					reg = <0>;
+			};
+		};
+
+		spix: spi@fb001000 {
+			compatible = "nuvoton,npcm750-spi";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0xfb001000 0x1000>, <0xf8000000 0x2000000>;
+			reg-names = "control", "memory";
+			chip-max-address-map = <0x1000000>;
+			clocks = <&clk NPCM7XX_CLK_AHB>;
+			clock-names = "clk_ahb";
+			status = "disabled";
+			spi-nor@0 {
+					compatible = "m25p80-nonjedec";
 					#address-cells = <1>;
 					#size-cells = <1>;
 					reg = <0>;
@@ -664,9 +685,9 @@
 				status = "disabled";
 			};
 
-			gfxi: gfxi@f000e000 {
+			gfxi: gfxi@e000 {
 				compatible = "nuvoton,npcm750-gfxi", "syscon", "simple-mfd";
-				reg = <0xf000e000 0x100>;
+				reg = <0xe000 0x100>;
 			};
 
 		};

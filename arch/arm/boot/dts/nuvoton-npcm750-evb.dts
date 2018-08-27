@@ -136,6 +136,7 @@
 		};
 
 		spi0: spi@fb000000 {
+			status = "okay";
 			spi-nor@0 {
 				partitions@80000000 {
 					compatible = "fixed-partitions";
@@ -189,7 +190,8 @@
 		};
 
 		spi3: spi@c0000000 {
-				spi-nor@0 {
+			status = "okay";
+			spi-nor@0 {
 				partitions@A0000000 {
 					compatible = "fixed-partitions";
 					#address-cells = <1>;
@@ -204,6 +206,11 @@
 					};
 				};
 			};
+		};
+
+		spix: spi@fb001000 {
+			status = "okay";
+			spix-mode;
 		};
 
 		sdhci0: sdhci@f0842000 {
