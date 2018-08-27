@@ -664,9 +664,9 @@
 				status = "disabled";
 			};
 
-			gfxi: gfxi@f000e000 {
+			gfxi: gfxi@e000 {
 				compatible = "nuvoton,npcm750-gfxi", "syscon", "simple-mfd";
-				reg = <0xf000e000 0x100>;
+				reg = <0xe000 0x100>;
 			};
 
 		};
