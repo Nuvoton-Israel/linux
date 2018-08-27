@@ -454,7 +454,7 @@
 				clock-names = "clk_apb4";
 			};
 
-			pwm_fan:pwm-fan-controller@103000 {	
+			pwm_fan:pwm-fan-controller@103000 {
 				#address-cells = <1>;
 				#size-cells = <0>;
 				compatible = "nuvoton,npcm750-pwm-fan";
