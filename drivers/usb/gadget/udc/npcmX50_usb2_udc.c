@@ -91,8 +91,6 @@ static const char drv_20_name[] = "npcmX50-usb20-udc";
 static const char driver_desc[] = DRIVER_DESC;
 #endif
 
-static u32 MAX_DTD_POOL = 20;   /* defualt dtd number */
-
 struct npcmX50_usb2_platform_data usb_data = {
         .operating_mode = NPCMX50_USB2_DR_DEVICE,
         .phy_mode = /*NPCMX50_USB2_PHY_SERIAL*/NPCMX50_USB2_PHY_UTMI_WIDE,
@@ -204,11 +202,6 @@ __acquires(ep->udc->lock)
 	unsigned char stopped = ep->stopped;
 	struct ep_td_struct *curr_td, *next_td;
 	int j;
-	
-#ifndef NPCMX50_USB_DESC_PHYS_BASE_ADDR
-	struct npcmX50_udc *udc = NULL;
-	udc = (struct npcmX50_udc *)ep->udc;
-#endif
 
 	/* Removed the req from npcmX50_ep->queue */
 	list_del_init(&req->queue);
@@ -227,9 +220,9 @@ __acquires(ep->udc->lock)
 			next_td = curr_td->next_td_virt;
 		}
 #ifdef NPCMX50_USB_DESC_PHYS_BASE_ADDR
-        curr_td->res = DTD_IS_FREE; // curr_td is free
+		curr_td->res = DTD_IS_FREE; // curr_td is free
 #else
-        dma_pool_free(udc->td_pool, curr_td, curr_td->td_dma);
+		dma_pool_free(ep->udc->td_pool, curr_td, curr_td->td_dma);
 #endif
 	}
 
@@ -323,7 +316,7 @@ static int dr_controller_setup(struct npcmX50_udc *udc)
 		portctrl |= PORTSCX_PTS_UTMI;
 		break;
 	case NPCMX50_USB2_PHY_SERIAL:
-		portctrl |= PORTSCX_PTS_NPCMX50S;
+		portctrl |= PORTSCX_PTS_FSLS;
 		break;
 	default:
 		return -EINVAL;
@@ -787,6 +780,11 @@ static void npcmX50_prime_ep(struct npcmX50_ep *ep, struct ep_td_struct *td)
 
 	/* Ensure that updates to the QH will occur before priming. */
 	wmb();
+	/* We add the read from qh->size_ioc_int_sts to make sure the previous
+	   write to it indeed got into the mamory so when we prime the DMA
+	   will read the updated data */
+	if (qh->size_ioc_int_sts & 0x80000000)
+		NPCMX50_USB_ERR("%s(): qh->size_ioc_int_sts=%08x\n", __func__, qh->size_ioc_int_sts);
 
 	/* Prime endpoint by writing correct bit to ENDPTPRIME */
 	npcmX50_writel(ep_is_in(ep) ? (1 << (ep_index(ep) + 16))
@@ -892,7 +890,7 @@ static struct ep_td_struct *npcmX50_build_dtd(struct npcmX50_req *req, unsigned 
     {
         int td_count;
         
-        for (td_count=0; td_count < MAX_DTD_POOL; td_count++)
+        for (td_count=0; td_count < udc->dtd_max_pool; td_count++)
         {
             dtd = (void *)(udc->dtd_virt_ba + 2*DTD_ALIGNMENT * td_count);
             if (dtd->res == DTD_IS_FREE)
@@ -902,11 +900,11 @@ static struct ep_td_struct *npcmX50_build_dtd(struct npcmX50_req *req, unsigned 
                 break;
             }            
         }
-        if (td_count == MAX_DTD_POOL)
+        if (td_count == udc->dtd_max_pool)
             dtd = NULL;
     }
 #else
-    dtd = dma_pool_alloc(udc->td_pool, GFP_KERNEL, dma);
+    dtd = dma_pool_alloc(udc->td_pool, gfp_flags, dma);
 #endif
 
 	if (dtd == NULL)
@@ -2374,12 +2372,12 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 		"Port Enabled/Disabled: %s\n"
 		"Current Connect Status: %s\n\n", ( {
 			const char *s;
-			switch (tmp_reg & PORTSCX_PTS_NPCMX50S) {
+			switch (tmp_reg & PORTSCX_PTS_FSLS) {
 			case PORTSCX_PTS_UTMI:
 				s = "UTMI"; break;
 			case PORTSCX_PTS_ULPI:
 				s = "ULPI "; break;
-			case PORTSCX_PTS_NPCMX50S:
+			case PORTSCX_PTS_FSLS:
 				s = "FS/LS Serial"; break;
 			default:
 				s = "None"; break;
@@ -2546,9 +2544,6 @@ static int struct_udc_setup(struct npcmX50_udc *udc,
 {
 	struct npcmX50_usb2_platform_data *pdata;
 	size_t size;
-	void __iomem *addr = NULL;
-	struct resource *res = NULL;
-	struct device *dev = &pdev->dev;
 
 	pdata = dev_get_platdata(&pdev->dev);
 	udc->phy_mode = pdata->phy_mode;
@@ -2568,26 +2563,31 @@ static int struct_udc_setup(struct npcmX50_udc *udc,
 		size &= ~(QH_ALIGNMENT - 1);
 	}
 #ifdef NPCMX50_USB_DESC_PHYS_BASE_ADDR
-  	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-  	if (!res) {
-		pr_err("platform_get_resource dtd error\n");
-		return -ENODEV;
-  	}
+	{
+		void __iomem *addr = NULL;
+		struct resource *res = NULL;
+                res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+                if (!res) {
+			pr_err("platform_get_resource dtd error\n");
+			return -ENODEV;
+                }
 
-	if (MINIMUM_NPCMX50_UDC_EPQ_DTD_SIZE > resource_size(res)) {
-		pr_err("Minimum UDC epq dtd size below 0x800\n");
-		return -ENODEV;
+		if (MINIMUM_NPCMX50_UDC_EPQ_DTD_SIZE > resource_size(res)) {
+			pr_err("Minimum UDC epq dtd size below 0x800\n");
+			return -ENODEV;
+		}
+
+		addr = devm_ioremap_resource(&pdev->dev, res);
+
+		udc->ep_qh_dma = (dma_addr_t)res->start;
+		udc->ep_qh = (void *)addr;
+		udc->dtd_size = resource_size(res);
+		VDBG("NPCMX50 USB DESC phy 0x%x virt 0x%x size 0x%x\n",(int)res->start,(int)addr,(int)resource_size(res));
 	}
-
-	addr = devm_ioremap_resource(dev, res);
-
-	udc->ep_qh_dma = (dma_addr_t)res->start;
-	udc->ep_qh = (void *)addr;
-	udc->dtd_size = resource_size(res);
-	VDBG("NPCMX50 USB DESC phy 0x%x virt 0x%x size 0x%x\n",(int)res->start,(int)addr,(int)resource_size(res)); 
 #else
 	udc->ep_qh = dma_alloc_coherent(&pdev->dev, size,
 					&udc->ep_qh_dma, GFP_KERNEL);
+	VDBG("size=%d udc->ep_qh = %p %08x udc->ep_qh_dma = %08x\n", size, udc->ep_qh, (u32)udc->ep_qh, (u32)udc->ep_qh_dma);
 	if (!udc->ep_qh) {
 		NPCMX50_USB_ERR("malloc QHs for udc failed\n");
 		kfree(udc->eps);
@@ -2941,10 +2941,10 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
         size_of_queue_heads = sizeof(struct ep_queue_head) * udc_controller->max_ep;
         udc_controller->dtd_phys_ba = (u32)udc_controller->ep_qh_dma + size_of_queue_heads;
         udc_controller->dtd_virt_ba = (u32)udc_controller->ep_qh + size_of_queue_heads;
-		MAX_DTD_POOL = ((udc_controller->dtd_size - size_of_queue_heads) / (2 * DTD_ALIGNMENT));
-		VDBG("udc_controller->dtd_phys_ba 0x%x , udc_controller->dtd_virt_ba 0x%x MAX_DTD_POOL %d\n",udc_controller->dtd_phys_ba,
-				udc_controller->dtd_virt_ba,MAX_DTD_POOL);
-        for (td_count=0; td_count < MAX_DTD_POOL; td_count++)
+		udc_controller->dtd_max_pool = ((udc_controller->dtd_size - size_of_queue_heads) / (2 * DTD_ALIGNMENT));
+		VDBG("udc_controller->dtd_phys_ba 0x%x , udc_controller->dtd_virt_ba 0x%x udc_controller->dtd_max_pool %d\n",udc_controller->dtd_phys_ba,
+				udc_controller->dtd_virt_ba,udc_controller->dtd_max_pool);
+        for (td_count=0; td_count < udc_controller->dtd_max_pool; td_count++)
         {
             dtd = (void *)(udc_controller->dtd_virt_ba + 2*DTD_ALIGNMENT * td_count);
             dtd->res = DTD_IS_FREE;          
@@ -3029,7 +3029,7 @@ static int npcmX50_udc_remove(struct platform_device *pdev)
         int td_count;
         struct ep_td_struct *dtd;
         
-        for (td_count=0; td_count < MAX_DTD_POOL; td_count++)
+        for (td_count=0; td_count < udc_controller->dtd_max_pool; td_count++)
         {
             dtd = (void *)(udc_controller->dtd_virt_ba + 2*DTD_ALIGNMENT * td_count);
             dtd->res = DTD_IS_FREE;          

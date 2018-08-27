@@ -267,7 +267,7 @@ struct usb_sys_interface {
 /* bit 31-30 are port transceiver select */
 #define  PORTSCX_PTS_UTMI                     0x00000000
 #define  PORTSCX_PTS_ULPI                     0x80000000
-#define  PORTSCX_PTS_NPCMX50S                     0xC0000000
+#define  PORTSCX_PTS_FSLS                     0xC0000000
 #define  PORTSCX_PTS_BIT_POS                  30
 
 /* otgsc Register Bit Masks */
@@ -569,6 +569,7 @@ struct npcmX50_udc {
     u32 dtd_virt_ba;
     u32 dtd_phys_ba;
     u32 dtd_size;
+    u32 dtd_max_pool;   /* defualt dtd number */
 #else
     struct dma_pool *td_pool;   /* dma pool for DTD */
 #endif
