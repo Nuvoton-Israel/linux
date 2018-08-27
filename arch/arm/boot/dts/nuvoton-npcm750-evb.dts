@@ -450,7 +450,7 @@
 			/*
 			pspi: pspi@0 {
 				pinctrl-names = "default";
-				pinctrl-0 = <&pspi1_pins &pspi2_pins 
+				pinctrl-0 = <&pspi1_pins &pspi2_pins
 					&gpio20o_pins &gpio203o_pins>;
 				cs-gpios = <&gpio 20 1>, <&gpio 203 1>;
 				status = "okay";
