@@ -173,7 +173,7 @@ static inline void SET_REG_MASK(void __iomem *mem, u32 val)
 /*---------------------------------------------------------------------------------------------------------*/
 /* AES module local functions declaration                                                                  */
 /*---------------------------------------------------------------------------------------------------------*/
-static int  AES_Config(NPCMX50_AES_OP_T op, NPCMX50_AES_MODE_T mode, NPCMX50_AES_KEY_SIZE_T keySize); 
+static int  AES_Config(NPCMX50_AES_OP_T op, NPCMX50_AES_MODE_T mode, NPCMX50_AES_KEY_SIZE_T keySize);
 static void AES_LoadCTR         (u32 *ctr);
 static void AES_LoadIV          (u32 *iv, int iv_size);
 
@@ -203,11 +203,11 @@ static DEFINE_MUTEX(npcmx50_aes_lock);
 /*---------------------------------------------------------------------------------------------------------*/
 /* Dummy key: call AES with this key to indicate user wants to use OTP keys                                */
 /*---------------------------------------------------------------------------------------------------------*/
-static unsigned char dummy[AES_KEYSIZE_256 - 1] = { 
-  /* first number is the key num */ 
+static unsigned char dummy[AES_KEYSIZE_256 - 1] = {
+  /* first number is the key num */
 
   /*key_num*/  0xd0, 0x78, 0x50,   0x7d, 0xc3, 0x3c, 0x9c,   0x66, 0x96, 0x69, 0xbe,   0x8a, 0x8d, 0xda, 0x51,
-       0xf3,   0xdc, 0xe8, 0xd0,   0x20, 0x5a, 0xb0, 0xe6,   0x80,	0x2c, 0x3d, 0x9c,  0xfe, 0x68, 0x3a, 0x6d           
+       0xf3,   0xdc, 0xe8, 0xd0,   0x20, 0x5a, 0xb0, 0xe6,   0x80,	0x2c, 0x3d, 0x9c,  0xfe, 0x68, 0x3a, 0x6d
 };
 
 // missing first byte on dummy array is 0..3 is used to indicate the key number
@@ -238,7 +238,7 @@ static void aes_print_hex_dump(char *note, unsigned char *buf, unsigned int len)
 		print_hex_dump(KERN_CONT, "", DUMP_PREFIX_OFFSET,
 				16, 1,
 				buf, len, false);
-#endif				
+#endif
 }
 
 
@@ -281,7 +281,7 @@ static int AES_Config (
 )
 {
     u32 ctrl = ioread32(AES_CONTROL);
-    u32 orgctrlval = ctrl; 
+    u32 orgctrlval = ctrl;
 
     /* Determine AES Operation - Encrypt / Decrypt */
     SET_VAR_FIELD(ctrl, AES_CONTROL_DEC_ENC, operation);
@@ -296,42 +296,42 @@ static int AES_Config (
     }
 
     aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES_Config ctrl=0x%x\n", ctrl);
-    if (ctrl != orgctrlval) 
+    if (ctrl != orgctrlval)
     {
-        
-        iowrite32(ctrl, AES_CONTROL); 
-        
-        /* Workaround to over come Errata #648 - 
+
+        iowrite32(ctrl, AES_CONTROL);
+
+        /* Workaround to over come Errata #648 -
            oWDEN bit in FUSTRAP register affects the AES module: when set, it forces NK_KEY0 field to 0
            during writing to AES_CONTROL register. This means that the key is limited to 128 bits. */
-        if (ctrl != ioread32(AES_CONTROL)) 
+        if (ctrl != ioread32(AES_CONTROL))
         {
-            
-            u16 keyctrl; 
-            u32 wrtimeout; 
-            u32 read_ctrl; 
-            int intwr; 
-            
-            keyctrl = (u16)((ctrl & 0x301D) | ((ctrl >> 16) & 0x8000)); 
-            for (wrtimeout = 0; wrtimeout < 1000; wrtimeout++) 
+
+            u16 keyctrl;
+            u32 wrtimeout;
+            u32 read_ctrl;
+            int intwr;
+
+            keyctrl = (u16)((ctrl & 0x301D) | ((ctrl >> 16) & 0x8000));
+            for (wrtimeout = 0; wrtimeout < 1000; wrtimeout++)
             {
                 /* Write configurable info in a single write operation */
-                for (intwr=0;intwr<10;intwr++) 
+                for (intwr=0;intwr<10;intwr++)
                 {
-	                iowrite32(ctrl, AES_CONTROL); 
+	                iowrite32(ctrl, AES_CONTROL);
 	                iowrite16(ctrl, AES_CONTROL_WORD_HIGH);
-	                wmb(); 
+	                wmb();
                 }
-                
-                read_ctrl = ioread32(AES_CONTROL); 
-                if (ctrl != read_ctrl) 
+
+                read_ctrl = ioread32(AES_CONTROL);
+                if (ctrl != read_ctrl)
                 {
                     aes_print(KERN_NOTICE  "\nexpected data=0x%x Actual AES_CONTROL data 0x%x wrtimeout %d\n\n", ctrl, read_ctrl, wrtimeout);
-                } else 
+                } else
                     break;
             }
-            
-            if (wrtimeout == 1000) 
+
+            if (wrtimeout == 1000)
             {
                 pr_err("\nTIMEOUT expected data=0x%x Actual AES_CONTROL data 0x%x\n\n", ctrl, read_ctrl);
                 return -EAGAIN;
@@ -402,7 +402,7 @@ static void AES_ReadIV (u32 *iv)
     for (i = 0; i < (AES_MAX_IV_SIZE / sizeof(u32)); i++, iv++)
     {
         *iv = __cpu_to_le32((MEMR32((AES_IV_0) + i*sizeof(u32)))) ;
-        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES_ReadIV read=0x%x\n", (*iv));        
+        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES_ReadIV read=0x%x\n", (*iv));
     }
 }
 
@@ -473,10 +473,10 @@ static void AES_LoadKeyByIndex (
     NPCMX50_AES_KEY_SIZE_T size
 )
 {
-    CRYPTO_TIMEOUT(AES_IS_BUSY(), SECOND_TIMEOUT) 
+    CRYPTO_TIMEOUT(AES_IS_BUSY(), SECOND_TIMEOUT)
 
     aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES_LoadKeyByIndex: index %d -> size %d\n", index, size);
-        
+
 
     /* Upload key from OTP to AES engine through side-band port */
     npcm750_otp_ioctl(NULL, IOCTL_SELECT_AES_KEY, (unsigned long)index);
@@ -540,7 +540,7 @@ static void AES_WriteBlock (u32 *dataIn)
     for (i = 0; i < (AES_BLOCK_SIZE / sizeof(u32)); i++, dataIn++)
     {
         iowrite32(__le32_to_cpu(*dataIn),AES_FIFO_DATA);
-    }			
+    }
 }
 
 /*---------------------------------------------------------------------------------------------------------*/
@@ -560,11 +560,11 @@ static void AES_ReadBlock (u32 *dataOut)
 
     /* Data is read in 32-bit chunks */
      for (i = 0; i < (AES_BLOCK_SIZE / sizeof(u32)); i++, dataOut++)
-    {       
-        *dataOut = __cpu_to_le32(ioread32(AES_FIFO_DATA)); 
+    {
+        *dataOut = __cpu_to_le32(ioread32(AES_FIFO_DATA));
     }
 
-     
+
     aes_print_hex_dump("\t\t\t\t\t\t\t\t\t\t  <= ",(void *)pReadData, AES_BLOCK_SIZE);
 }
 
@@ -593,7 +593,7 @@ static void AES_CryptData (
 
 
     aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES_CryptData: size %d\n", size);
-     
+
 
     /* Calculate the number of complete blocks */
     totalBlocks = blocksLeft = AES_COMPLETE_BLOCKS(size);
@@ -615,7 +615,7 @@ static void AES_CryptData (
     /* Write the second block */
     if (totalBlocks > 2)
     {
-        CRYPTO_TIMEOUT(!AES_DIN_FIFO_IS_EMPTY(), SECOND_TIMEOUT) 
+        CRYPTO_TIMEOUT(!AES_DIN_FIFO_IS_EMPTY(), SECOND_TIMEOUT)
         AES_WriteBlock(dataIn);
         dataIn += AesDataBlock;
         blocksLeft--;
@@ -796,7 +796,7 @@ static int npcmx50aes_ecb_decrypt(struct ablkcipher_request *req );
 
 #ifdef CONFIG_CRYPTO_CBC
 static int npcmx50aes_cbc_encrypt(struct ablkcipher_request *req);
-static int npcmx50aes_cbc_decrypt(struct ablkcipher_request *req);	
+static int npcmx50aes_cbc_decrypt(struct ablkcipher_request *req);
 #endif
 
 #ifdef CONFIG_CRYPTO_CTR
@@ -822,7 +822,7 @@ static int  npcmx50aes_register_algs(void);
  */
 struct npcmx50_aes_ctx {
     u8             in_key[AES_MAX_KEY_SIZE];
-    unsigned int   key_len; 
+    unsigned int   key_len;
 	int            useHRK;
 	int            key_num; // HRK key num (0..3)
 };
@@ -901,8 +901,8 @@ static struct crypto_alg aes_algs[] = {
     		.decrypt	= npcmx50aes_ctr_decrypt,
     	}
     }
-#endif    
-#if 0 // CONFIG_CRYPTO_CCM    
+#endif
+#if 0 // CONFIG_CRYPTO_CCM
     ,{
         .cra_name       = "ccm(aes)",   // cbc-mac
         .cra_driver_name    = "Nuvoton-cbc-mac-aes-ccm",
@@ -924,18 +924,18 @@ static struct crypto_alg aes_algs[] = {
 
         }
     }
-#endif // CONFIG_CRYPTO_CCM	
+#endif // CONFIG_CRYPTO_CCM
 };
 
 
 static inline struct npcmx50_aes_ctx *npcmx50_aes_ctx_common(void *ctx)
 {
 	unsigned long addr = (unsigned long)ctx;
-	unsigned long align = 4; 
+	unsigned long align = 4;
 
 	if (align <= crypto_tfm_ctx_alignment())
 		align = 1;
-		
+
 	return (struct npcmx50_aes_ctx *)addr;
 }
 
@@ -959,8 +959,8 @@ static inline struct npcmx50_aes_ctx *npcmx50_aead_aes_ctx(struct crypto_aead *t
 
 static int npcmx50_aes_set_key_internal(struct npcmx50_aes_ctx *ctx, u32 *flags, const u8 *in_key, unsigned int key_len)
 {
-    aes_print("\t\t\t*npcmX50-AES: set key, key_len=%d bits, flags = 0x%08X\n", 8 * key_len, *flags); 
-    
+    aes_print("\t\t\t*npcmX50-AES: set key, key_len=%d bits, flags = 0x%08X\n", 8 * key_len, *flags);
+
 	if (key_len % 8) {
     	*flags |= CRYPTO_TFM_RES_BAD_KEY_LEN;
     	aes_print(KERN_ERR  "\t\t\t*npcmX50-AES: set key, bad key len\n");
@@ -971,30 +971,30 @@ static int npcmx50_aes_set_key_internal(struct npcmx50_aes_ctx *ctx, u32 *flags,
     {
         memcpy(ctx->in_key, in_key, key_len);
         ctx->key_len = key_len;
-		ctx->useHRK = 0; 
+		ctx->useHRK = 0;
     }
     else
     {
         ctx->key_len = 0;
-		ctx->useHRK = 1; 
+		ctx->useHRK = 1;
     }
-	
+
 	// if key is equal to dummy key , and it's not a nul key:
 	if(in_key != NULL) {
 		ctx->useHRK = 1;
 		/* Check for dummy */
-        if (memcmp(&in_key[1], dummy, key_len - 1)) 
+        if (memcmp(&in_key[1], dummy, key_len - 1))
         {
             ctx->useHRK = 0;
         }
-        
+
 		// in HRK mode: select the key number according to the last byte on the dummy key.
 		if(ctx->useHRK == 1)
 		{
 		    ctx->key_num = in_key[0];
 		    aes_print("\nAES set key: use HRK%d\n", ctx->key_num);
 		}
-	}   
+	}
 
 	return 0;
 }
@@ -1013,7 +1013,7 @@ static inline void npcmx50_reset_key(void)
 {
     aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: reset key\n");
     // reset and clear everything.
-	AES_SOFTWARE_RESET();	
+	AES_SOFTWARE_RESET();
 	SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DIN_FIFO_OVERFLOW, 1);
 	SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DOUT_FIFO_UNDERFLOW, 1);
 }
@@ -1029,7 +1029,7 @@ static int npcmx50aes_ecb_encrypt(struct ablkcipher_request *req )
     struct ablkcipher_walk walk;
 	struct crypto_tfm *tfm = req->base.tfm;
 	struct npcmx50_aes_ctx *ctx = npcmx50_aes_ctx(tfm);
-	
+
 	unsigned int nbytes = req->nbytes;
 	int err;
 
@@ -1037,59 +1037,59 @@ static int npcmx50aes_ecb_encrypt(struct ablkcipher_request *req )
 
 	ablkcipher_walk_init(&walk, req->dst, req->src, nbytes);
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ablkcipher_walk_init dst=0x%x, src=0x%x, nbytes=%d\n", (u32)req->dst, (u32)req->src, nbytes);
-	
-	err = ablkcipher_walk_phys(req, &walk);	
-	if (err)	
+
+	err = ablkcipher_walk_phys(req, &walk);
+	if (err)
 	{
 	    pr_err("[%s]: ablkcipher_walk_phys() failed!",	__func__);
 	    return err;
 	}
-	
+
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ecb encrypt 0\n");
 
 	mutex_lock(&npcmx50_aes_lock);
-	
+
 	npcmx50_reset_key();
 
     /* Configure AES Engine */
     err = AES_Config(AES_OP_ENCRYPT, AES_MODE_ECB, NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len));
     if (err)
     {
-        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n"); 
-        mutex_unlock(&npcmx50_aes_lock); 
+        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n");
+        mutex_unlock(&npcmx50_aes_lock);
         return err;
     }
-    
+
  	// load from side band\external source:
     AES_LoadKey(((ctx->useHRK == 0)? (u32 *)ctx->in_key : NULL), NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len), ctx->key_num);
 
-    
+
 	/* Switch from configuration mode to data processing mode */
     AES_SWITCH_TO_DATA_MODE();
 
-	while ((nbytes = walk.nbytes) != 0) {		
-	    u32  *dest_paddr, *src_paddr;		
-	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);		
-	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);		
+	while ((nbytes = walk.nbytes) != 0) {
+	    u32  *dest_paddr, *src_paddr;
+	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);
+	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);
 
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DIN_FIFO_OVERFLOW, 1);
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DOUT_FIFO_UNDERFLOW, 1);
 		aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ecb encrypt 1, nbytes=%d\n", nbytes);
-		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);		
-		
+		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);
+
 		nbytes &= AES_BLOCK_SIZE - 1;
 		err = ablkcipher_walk_done(req, &walk, nbytes);
-        if (err) 
+        if (err)
             break;
 	}
 
-    if (!err) 
-        ablkcipher_walk_complete(&walk); 
+    if (!err)
+        ablkcipher_walk_complete(&walk);
 	mutex_unlock(&npcmx50_aes_lock);
 
-	
+
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ecb encrypt done, err = %d\n", err);
-	
+
 	AES_PrintRegs();
 
 	return err;
@@ -1106,12 +1106,12 @@ static int npcmx50aes_ecb_decrypt(struct ablkcipher_request *req )
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ecb decrypt %d\n", nbytes);
 
-	
-    
+
+
 	ablkcipher_walk_init(&walk, req->dst, req->src, nbytes);
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ablkcipher_walk_init dst=0x%x, src=0x%x, nbytes=%d\n", (u32)req->dst, (u32)req->src, nbytes);
-	err = ablkcipher_walk_phys(req, &walk);	
-	if (err)	
+	err = ablkcipher_walk_phys(req, &walk);
+	if (err)
 	{
 	    pr_err("[%s]: ablkcipher_walk_phys() failed!",	__func__);
 	    return err;
@@ -1126,38 +1126,38 @@ static int npcmx50aes_ecb_decrypt(struct ablkcipher_request *req )
     err = AES_Config(AES_OP_DECRYPT, AES_MODE_ECB, NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len));
     if (err)
     {
-        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n"); 
-        mutex_unlock(&npcmx50_aes_lock); 
+        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n");
+        mutex_unlock(&npcmx50_aes_lock);
         return err;
     }
-    
+
  	// load from side band\external source:
     AES_LoadKey(((ctx->useHRK == 0)? (u32 *)ctx->in_key : NULL), NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len), ctx->key_num);
-	    
+
 	/* Switch from configuration mode to data processing mode */
     AES_SWITCH_TO_DATA_MODE();
 
-	while ((nbytes = walk.nbytes) != 0) {		
-	    u32  *dest_paddr, *src_paddr;		
-	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);		
-	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);	
+	while ((nbytes = walk.nbytes) != 0) {
+	    u32  *dest_paddr, *src_paddr;
+	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);
+	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);
 
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DIN_FIFO_OVERFLOW, 1);
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DOUT_FIFO_UNDERFLOW, 1);
 	    aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ecb decrypt 1, nbytes=%d\n", nbytes);
-		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);	
+		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);
 		nbytes &= AES_BLOCK_SIZE - 1;
 		err = ablkcipher_walk_done(req, &walk, nbytes);
-        if (err) 
+        if (err)
             break;
 	}
-    if (!err) 
-        ablkcipher_walk_complete(&walk); 
+    if (!err)
+        ablkcipher_walk_complete(&walk);
 
 	mutex_unlock(&npcmx50_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ecb decrypt done, err = %d\n", err);
-	
+
 	AES_PrintRegs();
 
 	return err;
@@ -1171,37 +1171,37 @@ static int npcmx50aes_ecb_decrypt(struct ablkcipher_request *req )
 #ifdef CONFIG_CRYPTO_CBC
 static int npcmx50aes_cbc_encrypt(struct ablkcipher_request *req)
 {
-	
+
 	struct ablkcipher_walk walk;
 	struct crypto_tfm *tfm = req->base.tfm;
 	struct npcmx50_aes_ctx *ctx = npcmx50_aes_ctx(tfm);
 	unsigned int nbytes = req->nbytes;
 	int err;
-	
+
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: cbc encrypt %d\n", nbytes);
-    
+
 	ablkcipher_walk_init(&walk, req->dst, req->src, nbytes);
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ablkcipher_walk_init dst=0x%x, src=0x%x, nbytes=%d\n", (u32)req->dst, (u32)req->src, nbytes);
-	err = ablkcipher_walk_phys(req, &walk);	
-	if (err)	
+	err = ablkcipher_walk_phys(req, &walk);
+	if (err)
 	{
 	    pr_err("[%s]: ablkcipher_walk_phys() failed!",	__func__);
 	    return err;
 	}
     mutex_lock(&npcmx50_aes_lock);
-	
+
 	npcmx50_reset_key();
-	    
+
 	/* Configure AES Engine */
     err = AES_Config(AES_OP_ENCRYPT, AES_MODE_CBC, NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len));
     if (err)
     {
-        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n"); 
-        mutex_unlock(&npcmx50_aes_lock); 
+        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n");
+        mutex_unlock(&npcmx50_aes_lock);
         return err;
     }
-    
+
  	// load from side band\external source:
     AES_LoadKey(((ctx->useHRK == 0)? (u32 *)ctx->in_key : NULL), NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len), ctx->key_num);
 
@@ -1210,63 +1210,63 @@ static int npcmx50aes_cbc_encrypt(struct ablkcipher_request *req)
     AES_SWITCH_TO_DATA_MODE();
 
     AES_LoadIV((u32 *)walk.iv, AES_BLOCK_SIZE);
-    
-	while ((nbytes = walk.nbytes) != 0) {		
-	    u32  *dest_paddr, *src_paddr;		
-	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);		
-	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);		
+
+	while ((nbytes = walk.nbytes) != 0) {
+	    u32  *dest_paddr, *src_paddr;
+	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);
+	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);
 
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DIN_FIFO_OVERFLOW, 1);
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DOUT_FIFO_UNDERFLOW, 1);
-		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);	
+		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);
 		nbytes &= AES_BLOCK_SIZE - 1;
 		err = ablkcipher_walk_done(req, &walk, nbytes);
-        if (err) 
+        if (err)
             break;
 	}
-    if (!err) 
-        ablkcipher_walk_complete(&walk); 
+    if (!err)
+        ablkcipher_walk_complete(&walk);
 
 	mutex_unlock(&npcmx50_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: cbc encrypt done, err = %d\n", err);
-	
+
 	AES_PrintRegs();
 
 	return err;
 }
 
 static int npcmx50aes_cbc_decrypt(struct ablkcipher_request *req)
-{	
+{
 	struct ablkcipher_walk walk;
 	struct crypto_tfm *tfm = req->base.tfm;
 	struct npcmx50_aes_ctx *ctx = npcmx50_aes_ctx(tfm);
 	unsigned int nbytes = req->nbytes;
 	int err;
-	
+
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: cbc decrypt %d\n", nbytes);
-    
+
 	ablkcipher_walk_init(&walk, req->dst, req->src, nbytes);
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ablkcipher_walk_init dst=0x%x, src=0x%x, nbytes=%d\n", (u32)req->dst, (u32)req->src, nbytes);
-	err = ablkcipher_walk_phys(req, &walk);	
-	if (err)	
+	err = ablkcipher_walk_phys(req, &walk);
+	if (err)
 	{
 	    pr_err("[%s]: ablkcipher_walk_phys() failed!",	__func__);
 	    return err;
 	}
     mutex_lock(&npcmx50_aes_lock);
-	
+
 	npcmx50_reset_key();
-	    
+
 	/* Configure AES Engine */
-    err = AES_Config(AES_OP_DECRYPT, AES_MODE_CBC, NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len)); 
+    err = AES_Config(AES_OP_DECRYPT, AES_MODE_CBC, NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len));
     if (err)
     {
-        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n"); 
-        mutex_unlock(&npcmx50_aes_lock); 
+        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n");
+        mutex_unlock(&npcmx50_aes_lock);
         return err;
     }
-    
+
  	// load from side band\external source:
     AES_LoadKey(((ctx->useHRK == 0)? (u32 *)ctx->in_key : NULL), NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len), ctx->key_num);
 
@@ -1274,27 +1274,27 @@ static int npcmx50aes_cbc_decrypt(struct ablkcipher_request *req)
 
 	/* Switch from configuration mode to data processing mode */
     AES_SWITCH_TO_DATA_MODE();
-    
-	while ((nbytes = walk.nbytes) != 0) {		
-	    u32  *dest_paddr, *src_paddr;		
-	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);		
-	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);	
+
+	while ((nbytes = walk.nbytes) != 0) {
+	    u32  *dest_paddr, *src_paddr;
+	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);
+	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);
 
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DIN_FIFO_OVERFLOW, 1);
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DOUT_FIFO_UNDERFLOW, 1);
-		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);	
+		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);
 		nbytes &= AES_BLOCK_SIZE - 1;
 		err = ablkcipher_walk_done(req, &walk, nbytes);
-        if (err) 
+        if (err)
             break;
 	}
-    if (!err) 
-        ablkcipher_walk_complete(&walk); 
+    if (!err)
+        ablkcipher_walk_complete(&walk);
 
 	mutex_unlock(&npcmx50_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: cbc decrypt done, err = %d\n", err);
-	
+
 	AES_PrintRegs();
 
 	return err;
@@ -1309,7 +1309,7 @@ static int npcmx50aes_cbc_decrypt(struct ablkcipher_request *req)
 #ifdef CONFIG_CRYPTO_CTR
 static int npcmx50aes_ctr_encrypt(struct ablkcipher_request *req)
 {
-	
+
 	struct ablkcipher_walk walk;
 	struct crypto_tfm *tfm = req->base.tfm;
 	struct npcmx50_aes_ctx *ctx = npcmx50_aes_ctx(tfm);
@@ -1317,28 +1317,28 @@ static int npcmx50aes_ctr_encrypt(struct ablkcipher_request *req)
 	int err;
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ctr encrypt %d\n", nbytes);
-    
+
 	ablkcipher_walk_init(&walk, req->dst, req->src, nbytes);
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ablkcipher_walk_init dst=0x%x, src=0x%x, nbytes=%d\n", (u32)req->dst, (u32)req->src, nbytes);
-	err = ablkcipher_walk_phys(req, &walk);	
-	if (err)	
+	err = ablkcipher_walk_phys(req, &walk);
+	if (err)
 	{
 	    pr_err("[%s]: ablkcipher_walk_phys() failed!",	__func__);
 	    return err;
 	}
     mutex_lock(&npcmx50_aes_lock);
-	
+
 	npcmx50_reset_key();
-	    
+
 	/* Configure AES Engine */
-    err = AES_Config(AES_OP_ENCRYPT, AES_MODE_CTR, NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len)); 
+    err = AES_Config(AES_OP_ENCRYPT, AES_MODE_CTR, NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len));
     if (err)
     {
-        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n"); 
-        mutex_unlock(&npcmx50_aes_lock); 
+        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n");
+        mutex_unlock(&npcmx50_aes_lock);
         return err;
     }
-    
+
  	// load from side band\external source:
     AES_LoadKey(((ctx->useHRK == 0)? (u32 *)ctx->in_key : NULL), NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len), ctx->key_num);
 
@@ -1347,27 +1347,27 @@ static int npcmx50aes_ctr_encrypt(struct ablkcipher_request *req)
     AES_SWITCH_TO_DATA_MODE();
 
     AES_LoadCTR((u32 *)walk.iv);
-    
-	while ((nbytes = walk.nbytes) != 0) {		
-	    u32  *dest_paddr, *src_paddr;		
-	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);		
-	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);		
+
+	while ((nbytes = walk.nbytes) != 0) {
+	    u32  *dest_paddr, *src_paddr;
+	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);
+	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);
 
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DIN_FIFO_OVERFLOW, 1);
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DOUT_FIFO_UNDERFLOW, 1);
-		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);			
+		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);
 		nbytes &= AES_BLOCK_SIZE - 1;
-        err = ablkcipher_walk_done(req, &walk, nbytes); 
-        if (err) 
+        err = ablkcipher_walk_done(req, &walk, nbytes);
+        if (err)
             break;
 	}
-    if (!err) 
-        ablkcipher_walk_complete(&walk); 
+    if (!err)
+        ablkcipher_walk_complete(&walk);
 
 	mutex_unlock(&npcmx50_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ctr encrypt done, err = %d\n", err);
-	
+
 	AES_PrintRegs();
 
 	return err;
@@ -1375,66 +1375,66 @@ static int npcmx50aes_ctr_encrypt(struct ablkcipher_request *req)
 
 static int npcmx50aes_ctr_decrypt(struct ablkcipher_request *req)
 {
-	
+
 	struct ablkcipher_walk walk;
 	struct crypto_tfm *tfm = req->base.tfm;
 	struct npcmx50_aes_ctx *ctx = npcmx50_aes_ctx(tfm);
 	unsigned int nbytes = req->nbytes;
 	int err;
-	
+
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ctr decrypt %d\n", nbytes);
-    
+
 	ablkcipher_walk_init(&walk, req->dst, req->src, nbytes);
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ablkcipher_walk_init dst=0x%x, src=0x%x, nbytes=%d\n", (u32)req->dst, (u32)req->src, nbytes);
-	err = ablkcipher_walk_phys(req, &walk);	
-	if (err)	
+	err = ablkcipher_walk_phys(req, &walk);
+	if (err)
 	{
 	    pr_err("[%s]: ablkcipher_walk_phys() failed!",	__func__);
 	    return err;
 	}
     mutex_lock(&npcmx50_aes_lock);
-	
+
 	npcmx50_reset_key();
-	    
+
 	/* Configure AES Engine */
     err = AES_Config(AES_OP_DECRYPT, AES_MODE_CTR, NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len));
     if (err)
     {
-        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n"); 
-        mutex_unlock(&npcmx50_aes_lock); 
+        aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: AES set Configuration failed please try again\n");
+        mutex_unlock(&npcmx50_aes_lock);
         return err;
     }
-    
+
  	// load from side band\external source:
     AES_LoadKey(((ctx->useHRK == 0)? (u32 *)ctx->in_key : NULL), NPCMX50_AES_KEY_SIZE_TO_ENUM(ctx->key_len), ctx->key_num);
 
     AES_LoadCTR((u32 *)walk.iv);
-    
+
 	/* Switch from configuration mode to data processing mode */
     AES_SWITCH_TO_DATA_MODE();
-    
-	while ((nbytes = walk.nbytes) != 0) {		
-	    u32  *dest_paddr, *src_paddr;		
-	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);		
-	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);	
-	    
+
+	while ((nbytes = walk.nbytes) != 0) {
+	    u32  *dest_paddr, *src_paddr;
+	    src_paddr =  phys_to_virt(page_to_phys(walk.src.page) +	walk.src.offset);
+	    dest_paddr = phys_to_virt(page_to_phys(walk.dst.page) + walk.dst.offset);
+
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DIN_FIFO_OVERFLOW, 1);
 	    SET_REG_FIELD(AES_FIFO_STATUS, AES_FIFO_STATUS_DOUT_FIFO_UNDERFLOW, 1);
-		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);	
+		AES_CryptData((u32)nbytes & AES_BLOCK_MASK, (u32 *)src_paddr, (u32 *)dest_paddr);
 		nbytes &= AES_BLOCK_SIZE - 1;
 		err = ablkcipher_walk_done(req, &walk, nbytes);
-        if (err) 
+        if (err)
             break;
 	}
-    
-    if (!err) 
-        ablkcipher_walk_complete(&walk); 
+
+    if (!err)
+        ablkcipher_walk_complete(&walk);
 
 	mutex_unlock(&npcmx50_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*npcmX50-AES: ctr decrypt done, err = %d\n", err);
-	
+
 	AES_PrintRegs();
 
 	return err;
@@ -1474,7 +1474,7 @@ static int npcmx50aes_register_algs(/*struct npcmx50aes_dev *dd*/ )
 		if (IS_ERR_VALUE(err))
 			goto err_aes_algs;
 	}
-	
+
 
 	return 0;
 
@@ -1520,7 +1520,7 @@ static int npcm750aes_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto err_ioremap;
 	}
-    
+
 	ret = npcmx50aes_register_algs();
 	if (IS_ERR_VALUE(ret)) {
 		goto err_register;
