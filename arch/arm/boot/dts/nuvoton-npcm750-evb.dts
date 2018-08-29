@@ -56,6 +56,20 @@
 		reg = <0 0x40000000>;
 	};
 
+	leds {
+		compatible = "gpio-leds";
+
+		heartbeat {
+			label = "heartbeat";
+			gpios = <&gpio4 18 1>;
+		};
+
+		identify {
+			label = "identify";
+			gpios = <&gpio4 19 1>;
+		};
+	};
+
 	ahb {
 	        gmac0: eth@f0802000 {
 			phy-mode = "rgmii-id";
