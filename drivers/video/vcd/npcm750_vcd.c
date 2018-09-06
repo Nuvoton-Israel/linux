@@ -24,7 +24,6 @@
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <asm/fb.h>
-
 #include "vcd.h"
 
 #define VCD_IOC_MAGIC     'v'
@@ -108,8 +107,7 @@ npcm750_vcd_release(struct inode *inode, struct file *file)
 {
 	struct vcd_inst *vcd = file->private_data;
 
-	if (vcd->smem_base)
-		memset(vcd->smem_base, 0x00, vcd->smem_len);
+	vcd_deinit(vcd);
 
 	return 0;
 }
@@ -117,14 +115,19 @@ npcm750_vcd_release(struct inode *inode, struct file *file)
 static int
 npcm750_vcd_open(struct inode *inode, struct file *file)
 {
-	int res = 0;
+	int ret = 0;
 
 	if (!registered_vcd)
 		return -ENODEV;
 
 	file->private_data = registered_vcd;
 
-	return res;
+	ret = vcd_init(registered_vcd);
+	if (ret)
+		dev_err(registered_vcd->dev, "%s: failed to init vcd module\n",
+			__func__);
+
+	return ret;
 }
 
 static long
@@ -143,22 +146,23 @@ npcm750_do_vcd_ioctl(struct vcd_inst *vcd, unsigned int cmd,
 	case VCD_IOCSENDCMD:
 	{
 		int vcd_cmd;
+		unsigned long timeout;
 
 		ret = copy_from_user(&vcd_cmd, argp, sizeof(vcd_cmd))
 			? -EFAULT : 0;
+
 		vcd_command(vcd, vcd_cmd);
-		if (vcd_cmd > 0) {
-			unsigned long timeout;
-			/* Wait for cmd to complete */
-			timeout = jiffies + VCD_OP_TIMEOUT;
-			while (!vcd_is_op_ok(vcd)) {
-				if (time_after(jiffies, timeout)) {
-					vcd_reset(vcd);
-					break;
-				}
-				cpu_relax();
+
+		/* Wait for cmd to complete */
+		timeout = jiffies + VCD_OP_TIMEOUT;
+		while (!vcd_is_op_ok(vcd)) {
+			if (time_after(jiffies, timeout)) {
+				vcd_reset(vcd);
+				break;
 			}
+			cpu_relax();
 		}
+
 		break;
 	}
 	case VCD_IOCCHKRES:
@@ -358,13 +362,6 @@ static int npcm750_vcd_probe(struct platform_device *pdev)
 	ret = npcm750_vcd_device_create(vcd);
 	if (ret)
 		goto err;
-
-	ret = vcd_init(vcd);
-	if (ret) {
-		dev_err(&pdev->dev, "%s: failed to init vcd module\n",
-			__func__);
-		goto err;
-	}
 
 	irq = of_irq_get(pdev->dev.of_node, 0);
 	ret = request_irq(irq, npcm750_vcd_interrupt,

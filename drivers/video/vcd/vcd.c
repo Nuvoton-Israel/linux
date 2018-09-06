@@ -404,6 +404,8 @@ void vcd_free_frame_memory(struct vcd_inst *vcd)
 	if (vcd->smem_base)
 		dma_free_coherent(vcd->dev, PAGE_ALIGN(vcd->smem_len),
 				  vcd->smem_base, vcd->smem_start);
+
+	vcd->smem_base = NULL;
 }
 
 u8 vcd_is_busy(struct vcd_inst *vcd)
@@ -424,7 +426,6 @@ u8 vcd_is_done(struct vcd_inst *vcd)
 u8 vcd_is_op_ok(struct vcd_inst *vcd)
 {
 	struct vcd_reg *reg = vcd->reg;
-	u8 changed = 0;
 	u32 vdisp = read32(reg->cap_res) & VCD_CAPRES_MASK;
 	u32 vcd_stat = read32(reg->vcd_stat);
 	u32 mask = VCD_STAT_DONE |
@@ -436,9 +437,8 @@ u8 vcd_is_op_ok(struct vcd_inst *vcd)
 	    vcd->info.pixel_clk == 0)
 		return 1;
 
-	changed = ((vcd->info.hdisp != vcd_get_hres(vcd)) ||
-		   (vcd->info.vdisp != vcd_get_vres(vcd)));
-	if (changed)
+	if ((vcd->info.hdisp != vcd_get_hres(vcd)) ||
+		   (vcd->info.vdisp != vcd_get_vres(vcd)))
 		return 1;
 
 	return ((vcd_stat & mask) == 0) && (vcd_get_cur_line(vcd) == vdisp);
@@ -519,7 +519,6 @@ vcd_merge_rect(struct vcd_inst *vcd, struct vcd_list_info *list_info)
 	struct list_head *head = &vcd->list.list;
 	struct vcd_diff_list *list = list_info->list;
 	struct vcd_diff_list *first = list_info->first;
-	int cont_x = 0, cont_y = 0;
 
 	if (!first) {
 		first = list;
@@ -527,17 +526,15 @@ vcd_merge_rect(struct vcd_inst *vcd, struct vcd_list_info *list_info)
 		list_add_tail(&list->list, head);
 		vcd->diff_cnt++;
 	} else {
-		if (((list->diff.x -
-		      (first->diff.x + cont_x * 16)) == 16) &&
+		if (((list->diff.x ==
+		      (first->diff.x + first->diff.w))) &&
 		      (list->diff.y == first->diff.y)) {
 			first->diff.w += list->diff.w;
-			cont_x++;
 			kfree(list);
-		} else if (((list->diff.y -
-			     (first->diff.y + cont_y * 16)) == 16) &&
+		} else if (((list->diff.y ==
+			     (first->diff.y + first->diff.h))) &&
 			    (list->diff.x == first->diff.x)) {
 			first->diff.h += list->diff.h;
-			cont_y++;
 			kfree(list);
 		} else if (((list->diff.y > first->diff.y) &&
 			    (list->diff.y < (first->diff.y + first->diff.h))) &&
@@ -547,9 +544,7 @@ vcd_merge_rect(struct vcd_inst *vcd, struct vcd_list_info *list_info)
 		} else {
 			list_add_tail(&list->list, head);
 			vcd->diff_cnt++;
-			first = list;
-			cont_x = 0;
-			cont_y = 0;
+			list_info->first = list;
 		}
 	}
 }
@@ -710,10 +705,10 @@ int vcd_init(struct vcd_inst *vcd)
 		& (~VCD_MODE_VS_EDGE), reg->vcd_mode);
 
 	vcd_set_frame_addrs(vcd, vcd->frame_start, vcd->frame_start);
-	vcd_check_res(vcd);
 	vcd_init_diff_bit(vcd, 1);
 	vcd_set_color_mode(vcd, VCD_MODE_CM_565);
 	vcd_set_int(vcd, VCD_INTE_VAL);
+	vcd_check_res(vcd);
 	return 0;
 }
 
@@ -721,7 +716,9 @@ void vcd_deinit(struct vcd_inst *vcd)
 {
 	struct vcd_reg *reg = vcd->reg;
 
+	vcd_set_int(vcd, 0);
 	vcd_free_frame_memory(vcd);
 	vcd_free_diff_table(vcd);
 	write32(read32(reg->vcd_mode) & ~VCD_MODE_VCDE, reg->vcd_mode);
+	memset(&vcd->info, 0, sizeof(struct vcd_info));
 }
