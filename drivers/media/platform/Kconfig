@@ -638,3 +638,12 @@ config VIDEO_RCAR_DRIF
 	  will be called rcar_drif.
 
 endif # SDR_PLATFORM_DRIVERS
+
+menuconfig VIDEO_NUVOTON
+        bool "Nuvoton VCD/ECE Driver"
+
+if VIDEO_NUVOTON
+
+source "drivers/media/platform/nuvoton/Kconfig"
+
+endif #VIDEO_NUVOTON
