@@ -447,8 +447,7 @@
 		vcd: vcd@f0810000 {
 			compatible = "nuvoton,npcm750-vcd";
 			reg = <0xf0810000 0x10000>;
-			mem-addr = <0x3e200000>;
-			mem-size = <0x600000>;
+			phy-memory = <0x3e200000 0x600000>;
 			interrupts = <0 22 4>;
 			status = "disabled";
 		};
@@ -456,8 +455,7 @@
 		ece: ece@f0820000 {
 			compatible = "nuvoton,npcm750-ece";
 			reg = <0xf0820000 0x2000>;
-			mem-addr = <0x3e800000>;
-			mem-size = <0x600000>;
+			phy-memory  = <0x3e800000 0x600000>;
 			interrupts = <0 24 4>;
 			status = "disabled";
 		};

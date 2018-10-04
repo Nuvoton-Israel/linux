@@ -1,0 +1,9 @@
+config NPCM750_VCD
+	tristate "Nuvoton VCD support"
+        help
+          Enable Nuvoton vcd.
+
+config NPCM750_ECE
+	tristate "Nuvoton ECE support"
+	help
+	  Enable Nuvoton Encoding and Compression Engine.
