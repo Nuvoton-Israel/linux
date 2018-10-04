@@ -27,39 +27,37 @@
 #include <linux/dma-mapping.h>
 #include <asm/fb.h>
 
-/* ECE registers*/
-#define DDA_CTRL        0x0000
-#define DDA_STS         0x0004
-#define FBR_BA          0x0008
-#define ED_BA           0x000C
-#define RECT_XY         0x0010
-#define RECT_DIMEN      0x0014
-#define RESOL           0x001C
-#define HEX_CTRL        0x0040
+/* ECE Register */
+#define DDA_CTRL	0x0000
+#define  DDA_CTRL_ECEEN BIT(0)
+
+#define DDA_STS	0x0004
+#define  DDA_STS_CDREADY BIT(8)
+
+#define FBR_BA	0x0008
+#define ED_BA	0x000C
+#define RECT_XY	0x0010
+
+#define RECT_DIMEN	0x0014
+#define	 RECT_DIMEN_HLTR_OFFSET	27
+#define	 RECT_DIMEN_HR_OFFSET	16
+#define	 RECT_DIMEN_WLTR_OFFSET	11
+#define	 RECT_DIMEN_WR_OFFSET	0
+
+#define RESOL	0x001C
+#define  RESOL_FB_LP_512	0
+#define  RESOL_FB_LP_1024	1
+#define  RESOL_FB_LP_2048	2
+#define  RESOL_FB_LP_2560	3
+#define  RESOL_FB_LP_4096	4
+
+#define HEX_CTRL	0x0040
+#define  HEX_CTRL_ENCDIS BIT(0)
+#define  HEX_CTRL_ENC_GAP 0x1f00
+#define  HEX_CTRL_ENC_GAP_OFFSET 8
+#define  HEX_CTRL_ENC_MIN_GAP_SIZE 4
+
 #define HEX_RECT_OFFSET 0x0048
-
-#define FIFOSTSI 0x003
-#define FIFOSTSE 0x030
-#define ACDREADY BIT(10)
-#define CDREADY BIT(8)
-#define ENC_GAP 0x1f00
-#define ENC_GAP_OFFSET 8
-#define ENC_MIN_GAP_SIZE 4
-
-#define	ECE_RECT_DIMEN_HLTR_OFFSET	27
-#define	ECE_RECT_DIMEN_HR_OFFSET	16
-#define	ECE_RECT_DIMEN_WLTR_OFFSET	11
-#define	ECE_RECT_DIMEN_WR_OFFSET	0
-
-#define ECEEN BIT(0)
-#define ENCDIS BIT(0)
-
-/* ECE Line pitch*/
-#define LP_512	0
-#define LP_1024	1
-#define LP_2048	2
-#define LP_2560	3
-#define LP_4096 4
 
 #define DEFAULT_WIDTH 640
 #define DEFAULT_HEIGHT 640
@@ -91,68 +89,81 @@ struct ece_ioctl_cmd {
 };
 
 struct npcm750_ece {
+	void __iomem *base;
+	char __iomem *ed_buffer;
 	struct mutex mlock; /* protect  ioctl*/
 	struct device *dev;
 	struct device *dev_p;
 	struct cdev *dev_cdevp;
 	struct class *ece_class;
 	dev_t dev_t;
-	void __iomem *base_addr;
-	char __iomem *ed_buffer;
-	u32 smem_len;
-	u32 smem_start;
+	u32 comp_len;
+	u32 comp_start;
 	u32 lin_pitch;
 	u32 enc_gap;
 };
 
 struct npcm750_ece *registered_ece;
 
-static void update_bits(struct npcm750_ece *ece, u32 offset,
-				unsigned long mask, u32 bits)
+static void npcm750_ece_update_bits(struct npcm750_ece *ece, u32 offset,
+				    unsigned long mask, u32 bits)
 {
-	u32 t = readl(ece->base_addr + offset);
+	u32 t = readl(ece->base + offset);
 
 	t &= ~mask;
 	t |= bits & mask;
-	writel(t, ece->base_addr + offset);
+	writel(t, ece->base + offset);
+}
+
+static u32 npcm750_ece_read(struct npcm750_ece *ece, u32 reg)
+{
+	u32 t = readl(ece->base + reg);
+
+	return t;
+}
+
+static void npcm750_ece_write(struct npcm750_ece *ece, u32 reg, u32 val)
+{
+	writel(val, ece->base + reg);
 }
 
 /* Rectangle Compressed Data Ready */
 static void
-ece_clear_drs(struct npcm750_ece *ece)
+npcm750_ece_clear_drs(struct npcm750_ece *ece)
 {
-	update_bits(ece, DDA_STS, CDREADY, CDREADY);
+	npcm750_ece_update_bits(ece, DDA_STS, DDA_STS_CDREADY, DDA_STS_CDREADY);
 }
 
 /* Clear Offset of Compressed Rectangle*/
-static void ece_clear_rect_offset(struct npcm750_ece *ece)
+static void npcm750_ece_clear_rect_offset(struct npcm750_ece *ece)
 {
-	writel(0, ece->base_addr + HEX_RECT_OFFSET);
+	npcm750_ece_write(ece, HEX_RECT_OFFSET, 0);
 }
 
 /* Read Offset of Compressed Rectangle*/
-static u32 ece_read_rect_offset(struct npcm750_ece *ece)
+static u32 npcm750_ece_read_rect_offset(struct npcm750_ece *ece)
 {
-	return readl(ece->base_addr + HEX_RECT_OFFSET);
+	return npcm750_ece_read(ece, HEX_RECT_OFFSET);
 }
 
 /* Return TRUE if a rectangle finished to be compressed */
-static u32 ece_is_rect_compressed(struct npcm750_ece *ece)
+static u32 npcm750_ece_is_rect_compressed(struct npcm750_ece *ece)
 {
-	u32 temp = readl(ece->base_addr + DDA_STS);
+	u32 temp = npcm750_ece_read(ece, DDA_STS);
 
-	if (!(temp & CDREADY))
+	if (!(temp & DDA_STS_CDREADY))
 		return 0;
 
 	return 1;
 }
 
-static u32 ece_get_ed_size(struct npcm750_ece *ece, u32 offset)
+/* Return data if a rectangle finished to be compressed */
+static u32 npcm750_ece_get_ed_size(struct npcm750_ece *ece, u32 offset)
 {
 	u32 size;
 	char *buffer = ece->ed_buffer + offset;
 
-	while (!ece_is_rect_compressed(ece))
+	while (!npcm750_ece_is_rect_compressed(ece))
 		;
 
 	size = (u32)(buffer[0]
@@ -160,21 +171,20 @@ static u32 ece_get_ed_size(struct npcm750_ece *ece, u32 offset)
 			| (buffer[2] << 16)
 			| (buffer[3] << 24));
 
-	ece_clear_drs(ece);
+	npcm750_ece_clear_drs(ece);
 	return size;
 }
 
-
 /* This routine reset the FIFO as a bypass for Z1 chip */
-static void ece_fifo_reset_bypass(struct npcm750_ece *ece)
+static void npcm750_ece_fifo_reset_bypass(struct npcm750_ece *ece)
 {
-	update_bits(ece, DDA_CTRL, ECEEN, ~ECEEN);
-	update_bits(ece, DDA_CTRL, ECEEN, ECEEN);
+	npcm750_ece_update_bits(ece, DDA_CTRL, DDA_CTRL_ECEEN, ~DDA_CTRL_ECEEN);
+	npcm750_ece_update_bits(ece, DDA_CTRL, DDA_CTRL_ECEEN, DDA_CTRL_ECEEN);
 }
 
 /* This routine Encode the desired rectangle */
-static void ece_enc_rect(struct npcm750_ece *ece,
-			 u32 r_off_x, u32 r_off_y, u32 r_w, u32 r_h)
+static void npcm750_ece_enc_rect(struct npcm750_ece *ece,
+				 u32 r_off_x, u32 r_off_y, u32 r_w, u32 r_h)
 {
 	u32 rect_offset =
 		(r_off_y * ece->lin_pitch) + (r_off_x * 2);
@@ -184,9 +194,9 @@ static void ece_enc_rect(struct npcm750_ece *ece,
 	u32 w_size = ECE_TILE_W;
 	u32 h_size = ECE_TILE_H;
 
-	ece_fifo_reset_bypass(ece);
+	npcm750_ece_fifo_reset_bypass(ece);
 
-	writel(rect_offset, ece->base_addr + RECT_XY);
+	npcm750_ece_write(ece, RECT_XY, rect_offset);
 
 	w_tile = r_w / ECE_TILE_W;
 	h_tile = r_h / ECE_TILE_H;
@@ -201,89 +211,95 @@ static void ece_enc_rect(struct npcm750_ece *ece,
 		h_size = r_h % ECE_TILE_H;
 	}
 
-	temp = ((w_size - 1) << ECE_RECT_DIMEN_WLTR_OFFSET)
-		| ((h_size - 1) << ECE_RECT_DIMEN_HLTR_OFFSET)
-		| ((w_tile - 1) << ECE_RECT_DIMEN_WR_OFFSET)
-		| ((h_tile - 1) << ECE_RECT_DIMEN_HR_OFFSET);
+	temp = ((w_size - 1) << RECT_DIMEN_WLTR_OFFSET)
+		| ((h_size - 1) << RECT_DIMEN_HLTR_OFFSET)
+		| ((w_tile - 1) << RECT_DIMEN_WR_OFFSET)
+		| ((h_tile - 1) << RECT_DIMEN_HR_OFFSET);
 
-	writel(temp, ece->base_addr + RECT_DIMEN);
+	npcm750_ece_write(ece, RECT_DIMEN, temp);
 }
 
 /* This routine sets the Encoded Data base address */
-static u32 ece_set_enc_dba(struct npcm750_ece *ece, u32 addr)
+static u32 npcm750_ece_set_enc_dba(struct npcm750_ece *ece, u32 addr)
 {
-	writel(addr, ece->base_addr + ED_BA);
+	npcm750_ece_write(ece, ED_BA, addr);
 
 	return 0;
 }
 
 /* This routine sets the Frame Buffer base address */
-static u32 ece_set_fb_addr(struct npcm750_ece *ece, u32 buffer)
+static u32 npcm750_ece_set_fb_addr(struct npcm750_ece *ece, u32 buffer)
 {
-	writel(buffer, ece->base_addr + FBR_BA);
+	npcm750_ece_write(ece, FBR_BA, buffer);
 
 	return 0;
 }
 
 /* Set the line pitch (in bytes) for the frame buffers. */
 /* Can be on of those values: 512, 1024, 2048, 2560 or 4096 bytes */
-static void ece_set_lp(struct npcm750_ece *ece, u32 pitch)
+static void npcm750_ece_set_lp(struct npcm750_ece *ece, u32 pitch)
 {
 	u32 lp;
 
 	switch (pitch) {
 	case 512:
-		lp = LP_512;
+		lp = RESOL_FB_LP_512;
 		break;
 	case 1024:
-		lp = LP_1024;
+		lp = RESOL_FB_LP_1024;
 		break;
 	case 2048:
-		lp = LP_2048;
+		lp = RESOL_FB_LP_2048;
 		break;
 	case 2560:
-		lp = LP_2560;
+		lp = RESOL_FB_LP_2560;
 		break;
 	case 4096:
-		lp = LP_4096;
+		lp = RESOL_FB_LP_4096;
 		break;
 	default:
 		return;
 	}
 
 	ece->lin_pitch = pitch;
-	writel(lp, ece->base_addr + RESOL);
+	npcm750_ece_write(ece, RESOL, lp);
 }
 
 /* Stop and reset the ECE state machine */
-static void ece_reset(struct npcm750_ece *ece)
+static void npcm750_ece_reset(struct npcm750_ece *ece)
 {
-	update_bits(ece, DDA_CTRL, ECEEN, ~ECEEN);
-	update_bits(ece, HEX_CTRL, ENCDIS, ENCDIS);
-	update_bits(ece, DDA_CTRL, ECEEN, ECEEN);
-	update_bits(ece, HEX_CTRL, ENCDIS, ~ENCDIS);
+	npcm750_ece_update_bits(ece,
+				DDA_CTRL, DDA_CTRL_ECEEN, ~DDA_CTRL_ECEEN);
+	npcm750_ece_update_bits(ece,
+				HEX_CTRL, HEX_CTRL_ENCDIS, HEX_CTRL_ENCDIS);
+	npcm750_ece_update_bits(ece,
+				DDA_CTRL, DDA_CTRL_ECEEN, DDA_CTRL_ECEEN);
+	npcm750_ece_update_bits(ece,
+				HEX_CTRL, HEX_CTRL_ENCDIS, ~HEX_CTRL_ENCDIS);
 
-	ece_clear_rect_offset(ece);
+	npcm750_ece_clear_rect_offset(ece);
 }
 
 /* Initialise the ECE block and interface library */
-static int ece_initialise(struct npcm750_ece *ece)
+static int npcm750_ece_initialise(struct npcm750_ece *ece)
 {
-	ece_reset(ece);
-	ece_clear_drs(ece);
-	ece_set_enc_dba(ece, ece->smem_start);
+	npcm750_ece_reset(ece);
+	npcm750_ece_clear_drs(ece);
+	npcm750_ece_set_enc_dba(ece, ece->comp_start);
 	ece->lin_pitch = DEFAULT_LP;
 
 	return 0;
 }
 
 /* Disable the ECE block*/
-static int ece_deinit(struct npcm750_ece *ece)
+static int npcm750_ece_deinit(struct npcm750_ece *ece)
 {
-	update_bits(ece, DDA_CTRL, ECEEN, ~ECEEN);
-	update_bits(ece, HEX_CTRL, ENCDIS, ENCDIS);
-	ece_clear_rect_offset(ece);
-	ece_clear_drs(ece);
+	npcm750_ece_update_bits(ece,
+				DDA_CTRL, DDA_CTRL_ECEEN, ~DDA_CTRL_ECEEN);
+	npcm750_ece_update_bits(ece,
+				HEX_CTRL, HEX_CTRL_ENCDIS, HEX_CTRL_ENCDIS);
+	npcm750_ece_clear_rect_offset(ece);
+	npcm750_ece_clear_drs(ece);
 
 	return 0;
 }
@@ -298,8 +314,8 @@ npcm750_ece_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!ece)
 		return -ENODEV;
 
-	start = ece->smem_start;
-	len = ece->smem_len;
+	start = ece->comp_start;
+	len = ece->comp_len;
 
 	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
 	fb_pgprotect(file, vma, start);
@@ -313,7 +329,7 @@ static int npcm750_ece_open(struct inode *inode, struct file *filp)
 
 	filp->private_data = registered_ece;
 
-	ece_initialise(registered_ece);
+	npcm750_ece_initialise(registered_ece);
 
 	return 0;
 }
@@ -322,7 +338,7 @@ static int npcm750_ece_release(struct inode *inode, struct file *filp)
 {
 	struct npcm750_ece *ece = filp->private_data;
 
-	ece_deinit(ece);
+	npcm750_ece_deinit(ece);
 
 	return 0;
 }
@@ -337,12 +353,12 @@ long npcm750_ece_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
 	switch (cmd) {
 	case ECE_IOCCLEAR_OFFSET:
 
-		ece_clear_rect_offset(ece);
+		npcm750_ece_clear_rect_offset(ece);
 
 		break;
 	case ECE_IOCGET_OFFSET:
 	{
-		u32 offset = ece_read_rect_offset(ece);
+		u32 offset = npcm750_ece_read_rect_offset(ece);
 
 		err = copy_to_user((int __user *)args, &offset, sizeof(offset))
 			? -EFAULT : 0;
@@ -360,7 +376,7 @@ long npcm750_ece_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
 		}
 
 		if (!(data.lp % ECE_MIN_LP) && data.lp <= ECE_MAX_LP)
-			ece_set_lp(ece, data.lp);
+			npcm750_ece_set_lp(ece, data.lp);
 
 		break;
 	}
@@ -380,7 +396,7 @@ long npcm750_ece_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
 			break;
 		}
 
-		ece_set_fb_addr(ece, data.framebuf);
+		npcm750_ece_set_fb_addr(ece, data.framebuf);
 		break;
 	}
 	case ECE_IOCGETED:
@@ -396,16 +412,16 @@ long npcm750_ece_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
 			return err;
 		}
 
-		offset = ece_read_rect_offset(ece);
-		ece_enc_rect(ece, data.x, data.y, data.w, data.h);
-		ed_size = ece_get_ed_size(ece, offset);
+		offset = npcm750_ece_read_rect_offset(ece);
+		npcm750_ece_enc_rect(ece, data.x, data.y, data.w, data.h);
+		ed_size = npcm750_ece_get_ed_size(ece, offset);
 
 		ece->enc_gap =
-			(readl(ece->base_addr + HEX_CTRL) & ENC_GAP)
-			>> ENC_GAP_OFFSET;
+			(npcm750_ece_read(ece, HEX_CTRL) & HEX_CTRL_ENC_GAP)
+			>> HEX_CTRL_ENC_GAP_OFFSET;
 
 		if (ece->enc_gap == 0)
-			ece->enc_gap = ENC_MIN_GAP_SIZE;
+			ece->enc_gap = HEX_CTRL_ENC_MIN_GAP_SIZE;
 
 		data.gap_len = ece->enc_gap;
 		data.len = ed_size;
@@ -491,20 +507,20 @@ static int npcm750_ece_probe(struct platform_device *pdev)
 
 	mutex_init(&ece->mlock);
 
-	of_property_read_u32(pdev->dev.of_node,
-			     "mem-addr", &ece->smem_start);
-	of_property_read_u32(pdev->dev.of_node,
-			     "mem-size", &ece->smem_len);
+	of_property_read_u32_index(pdev->dev.of_node,
+			     "phy-memory", 0, &ece->comp_start);
+	of_property_read_u32_index(pdev->dev.of_node,
+			     "phy-memory", 1, &ece->comp_len);
 
-	if (request_mem_region(ece->smem_start,
-			       ece->smem_len, "npcm750-ece") == NULL) {
+	if (request_mem_region(ece->comp_start,
+			       ece->comp_len, "npcm750-ece") == NULL) {
 		dev_err(&pdev->dev, "%s: failed to request ece memory region\n",
 			__func__);
 		ret = -EBUSY;
 		goto err;
 	}
 
-	ece->ed_buffer = ioremap(ece->smem_start, ece->smem_len);
+	ece->ed_buffer = ioremap(ece->comp_start, ece->comp_len);
 	if (!ece->ed_buffer) {
 		dev_err(&pdev->dev, "%s: cannot map ece memory region\n",
 			__func__);
@@ -512,11 +528,11 @@ static int npcm750_ece_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	ece->base_addr = of_iomap(pdev->dev.of_node, 0);
-	if (IS_ERR(ece->base_addr)) {
+	ece->base = of_iomap(pdev->dev.of_node, 0);
+	if (IS_ERR(ece->base)) {
 		dev_err(&pdev->dev, "%s: failed to ioremap ece base address\n",
 			__func__);
-		ret = PTR_ERR(ece->base_addr);
+		ret = PTR_ERR(ece->base);
 		goto err;
 	}
 

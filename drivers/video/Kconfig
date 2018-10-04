@@ -45,7 +45,4 @@ if FB || SGI_NEWPORT_CONSOLE
 
 endif
 
-source "drivers/video/vcd/Kconfig"
-source "drivers/video/compression/Kconfig"
-
 endmenu
