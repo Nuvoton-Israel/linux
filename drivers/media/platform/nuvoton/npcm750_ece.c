@@ -94,16 +94,15 @@ struct npcm750_ece {
 	struct mutex mlock; /* protect  ioctl*/
 	struct device *dev;
 	struct device *dev_p;
-	struct cdev *dev_cdevp;
+	struct cdev dev_cdev;
 	struct class *ece_class;
 	dev_t dev_t;
 	u32 comp_len;
 	u32 comp_start;
 	u32 lin_pitch;
 	u32 enc_gap;
+	atomic_t clients;
 };
-
-struct npcm750_ece *registered_ece;
 
 static void npcm750_ece_update_bits(struct npcm750_ece *ece, u32 offset,
 				    unsigned long mask, u32 bits)
@@ -281,7 +280,7 @@ static void npcm750_ece_reset(struct npcm750_ece *ece)
 }
 
 /* Initialise the ECE block and interface library */
-static int npcm750_ece_initialise(struct npcm750_ece *ece)
+static int npcm750_ece_init(struct npcm750_ece *ece)
 {
 	npcm750_ece_reset(ece);
 	npcm750_ece_clear_drs(ece);
@@ -292,7 +291,7 @@ static int npcm750_ece_initialise(struct npcm750_ece *ece)
 }
 
 /* Disable the ECE block*/
-static int npcm750_ece_deinit(struct npcm750_ece *ece)
+static int npcm750_ece_stop(struct npcm750_ece *ece)
 {
 	npcm750_ece_update_bits(ece,
 				DDA_CTRL, DDA_CTRL_ECEEN, ~DDA_CTRL_ECEEN);
@@ -322,24 +321,30 @@ npcm750_ece_mmap(struct file *file, struct vm_area_struct *vma)
 	return vm_iomap_memory(vma, start, len);
 }
 
-static int npcm750_ece_open(struct inode *inode, struct file *filp)
+static int npcm750_ece_open(struct inode *inode, struct file *file)
 {
-	if (!registered_ece)
+	struct npcm750_ece *ece =
+		container_of(inode->i_cdev, struct npcm750_ece, dev_cdev);
+
+	if (!ece)
 		return -ENODEV;
 
-	filp->private_data = registered_ece;
+	file->private_data = ece;
 
-	npcm750_ece_initialise(registered_ece);
+	atomic_inc_return(&ece->clients);
+
+	dev_dbg(ece->dev, "open: client %d\n", atomic_read(&ece->clients));
 
 	return 0;
 }
 
-static int npcm750_ece_release(struct inode *inode, struct file *filp)
+static int npcm750_ece_release(struct inode *inode, struct file *file)
 {
-	struct npcm750_ece *ece = filp->private_data;
+	struct npcm750_ece *ece = file->private_data;
 
-	npcm750_ece_deinit(ece);
+	atomic_dec_return(&ece->clients);
 
+	dev_dbg(ece->dev, "close: client %d\n", atomic_read(&ece->clients));
 	return 0;
 }
 
@@ -449,7 +454,7 @@ static int npcm750_ece_device_create(struct npcm750_ece *ece)
 {
 	int ret;
 	dev_t dev;
-	struct cdev *dev_cdevp = ece->dev_cdevp;
+	struct cdev *dev_cdev = &ece->dev_cdev;
 
 	ret = alloc_chrdev_region(&dev, 0, 1, "hextile");
 	if (ret < 0) {
@@ -457,14 +462,10 @@ static int npcm750_ece_device_create(struct npcm750_ece *ece)
 		goto err;
 	}
 
-	dev_cdevp = kmalloc(sizeof(*dev_cdevp), GFP_KERNEL);
-	if (!dev_cdevp)
-		goto err;
-
-	cdev_init(dev_cdevp, &npcm750_ece_fops);
-	dev_cdevp->owner = THIS_MODULE;
+	cdev_init(dev_cdev, &npcm750_ece_fops);
+	dev_cdev->owner = THIS_MODULE;
 	ece->dev_t = dev;
-	ret = cdev_add(dev_cdevp, MKDEV(MAJOR(dev),  MINOR(dev)), 1);
+	ret = cdev_add(dev_cdev, MKDEV(MAJOR(dev),  MINOR(dev)), 1);
 	if (ret < 0) {
 		pr_err("add chr dev failed\n");
 		goto err;
@@ -491,8 +492,6 @@ static int npcm750_ece_device_create(struct npcm750_ece *ece)
 	return 0;
 
 err:
-	if (!dev_cdevp)
-		kfree(dev_cdevp);
 	return ret;
 }
 
@@ -536,6 +535,8 @@ static int npcm750_ece_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	npcm750_ece_init(ece);
+
 	ece->dev_p = &pdev->dev;
 
 	ret = npcm750_ece_device_create(ece);
@@ -544,8 +545,6 @@ static int npcm750_ece_probe(struct platform_device *pdev)
 			__func__);
 		goto err;
 	}
-
-	registered_ece = ece;
 
 	pr_info("NPCM750 ECE Driver probed\n");
 	return 0;
@@ -559,9 +558,11 @@ static int npcm750_ece_remove(struct platform_device *pdev)
 {
 	struct npcm750_ece *ece = platform_get_drvdata(pdev);
 
+	npcm750_ece_stop(ece);
+
 	device_destroy(ece->ece_class, ece->dev_t);
+
 	kfree(ece);
-	registered_ece = NULL;
 
 	return 0;
 }

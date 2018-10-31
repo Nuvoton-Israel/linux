@@ -27,6 +27,8 @@
 #include <linux/slab.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
+#include <linux/wait.h>
+#include <linux/workqueue.h>
 #include <asm/fb.h>
 
 #define VCD_IOC_MAGIC     'v'
@@ -35,9 +37,10 @@
 #define VCD_IOCCHKRES	_IOR(VCD_IOC_MAGIC,  3, int)
 #define VCD_IOCGETDIFF	_IOR(VCD_IOC_MAGIC,  4, struct rect)
 #define VCD_IOCDIFFCNT	_IOR(VCD_IOC_MAGIC,  5, int)
+#define VCD_IOCDEMODE	_IOR(VCD_IOC_MAGIC,  6, u8)
 #define VCD_IOC_MAXNR     6
 
-#define VCD_OP_TIMEOUT 100
+#define VCD_OP_TIMEOUT msecs_to_jiffies(100)
 
 #define DEVICE_NAME "vcd"
 
@@ -63,7 +66,9 @@
 #define  VCD_CAPRES_MASK 0x7ff
 
 #define VCD_DVO_DEL 0x8010
+#define  VCD_DVO_DEL_VERT_HOFF GENMASK(31, 27)
 #define  VCD_DVO_DEL_MASK 0x7ff
+#define  VCD_DVO_DEL_VERT_HOFF_OFFSET 27
 #define  VCD_DVO_DEL_VSYNC_DEL_OFFSET 16
 #define  VCD_DVO_DEL_HSYNC_DEL_OFFSET 0
 
@@ -133,6 +138,64 @@
 #define  VCD_INTE_BSD3_IE	BIT(13)
 #define  VCD_INTE_VAL	(VCD_INTE_DONE_IE | VCD_INTE_IFOR_IE)
 
+#define VCD_RCHG	0x8028
+#define VCD_RCHG_TIM_PRSCL_OFFSET 9
+#define VCD_RCHG_IG_CHG2_OFFSET 6
+#define VCD_RCHG_IG_CHG1_OFFSET 3
+#define VCD_RCHG_IG_CHG0_OFFSET 0
+#define VCD_RCHG_TIM_PRSCL  GENMASK(12, VCD_RCHG_TIM_PRSCL_OFFSET)
+#define VCD_RCHG_IG_CHG2  GENMASK(8, VCD_RCHG_IG_CHG2_OFFSET)
+#define VCD_RCHG_IG_CHG1  GENMASK(5, VCD_RCHG_IG_CHG1_OFFSET)
+#define VCD_RCHG_IG_CHG0  GENMASK(2, VCD_RCHG_IG_CHG0_OFFSET)
+
+#define VCD_HOR_CYC_TIM	0x802C
+#define VCD_HOR_CYC_TIM_NEW	BIT(31)
+#define VCD_HOR_CYC_TIM_HCT_DIF	BIT(30)
+#define VCD_HOR_CYC_TIM_VALUE	GENMASK(11, 0)
+
+#define VCD_HOR_CYC_LAST	0x8030
+#define VCD_HOR_CYC_LAST_VALUE	GENMASK(11, 0)
+
+#define VCD_HOR_HI_TIM	0x8034
+#define VCD_HOR_HI_TIM_NEW	BIT(31)
+#define VCD_HOR_HI_TIM_HHT_DIF	BIT(30)
+#define VCD_HOR_HI_TIM_VALUE	GENMASK(11, 0)
+
+#define VCD_HOR_HI_LAST	0x8038
+#define VCD_HOR_HI_LAST_VALUE	GENMASK(11, 0)
+
+#define VCD_VER_CYC_TIM	0x803C
+#define VCD_VER_CYC_TIM_NEW	BIT(31)
+#define VCD_VER_CYC_TIM_VCT_DIF	BIT(30)
+#define VCD_VER_CYC_TIM_VALUE	GENMASK(23, 0)
+
+#define VCD_VER_CYC_LAST	0x8040
+#define VCD_VER_CYC_LAST_VALUE	GENMASK(23, 0)
+
+#define VCD_VER_HI_TIM	0x8044
+#define VCD_VER_HI_TIM_NEW	BIT(31)
+#define VCD_VER_HI_TIM_VHT_DIF	BIT(30)
+#define VCD_VER_HI_TIM_VALUE	GENMASK(23, 0)
+
+#define VCD_VER_HI_LAST	0x8048
+#define VCD_VER_HI_LAST_VALUE	GENMASK(23, 0)
+
+#define VCD_HOR_AC_TIM	0x804C
+#define VCD_HOR_AC_TIM_NEW	BIT(31)
+#define VCD_HOR_AC_TIM_HAC_DIF	BIT(30)
+#define VCD_HOR_AC_TIM_VALUE	GENMASK(13, 0)
+
+#define VCD_HOR_AC_LAST	0x8050
+#define VCD_HOR_AC_LAST_VALUE	GENMASK(13, 0)
+
+#define VCD_HOR_LIN_TIM	0x8054
+#define VCD_HOR_LIN_TIM_NEW	BIT(31)
+#define VCD_HOR_LIN_TIM_HLC_DIF	BIT(30)
+#define VCD_HOR_LIN_TIM_VALUE	GENMASK(11, 0)
+
+#define VCD_HOR_LIN_LAST	0x8058
+#define VCD_HOR_LIN_LAST_VALUE	GENMASK(11, 0)
+
 #define VCD_FIFO		0x805C
 #define  VCD_FIFO_TH	0x100350ff
 
@@ -157,15 +220,20 @@
 
 #define HVCNTL	0x10
 #define  HVCNTL_MASK	0xff
-
 #define HVCNTH	0x14
 #define  HVCNTH_MASK	0x07
-
+#define HBPCNTL	0x18
+#define  HBPCNTL_MASK	0xff
+#define HBPCNTH	0x1c
+#define  HBPCNTH_MASK	0x01
 #define VVCNTL	0x20
 #define  VVCNTL_MASK	0xff
-
 #define VVCNTH	0x24
 #define  VVCNTH_MASK	0x07
+#define VPBCNTL	0x28
+#define  VPBCNTL_MASK	0xff
+#define VPBCNTH	0x2C
+#define  VPBCNTH_MASK	0x01
 
 #define GPLLINDIV	0x40
 #define  GPLLINDIV_MASK	0x3f
@@ -191,27 +259,10 @@
 #define VCD_G_SHIFT	5
 #define VCD_B_SHIFT	0
 
-struct class *vcd_class;
-static struct npcm750_vcd *registered_vcd;
-static const char vcd_name[] = "NPCM750 VCD";
+#define VCD_KVM_BW_PCLK 120000000UL
 
-struct video_mode {
-	char *name;
-	char *video_name;
-	int internal_video;
-	u32 pixelclk;
-	int hdisp;
-	int hfrontporch;
-	int hsync;
-	int hbackporch;
-	int vdisp;
-	int vfrontporch;
-	int vsync;
-	int vbackporch;
-	int refresh_rate;
-	int hpositive;
-	int vpositive;
-};
+struct class *vcd_class;
+static const char vcd_name[] = "NPCM750 VCD";
 
 struct vcd_info {
 	u32 vcd_fb;
@@ -266,8 +317,9 @@ struct npcm750_vcd {
 	spinlock_t lock;	/*for irq*/
 	struct device *dev;
 	struct device *dev_p;
+	struct cdev dev_cdev;
 	struct vcd_info info;
-	struct rect_list list;
+	struct list_head list;
 	void __iomem *base;
 	struct regmap *gcr_regmap;
 	struct regmap *gfx_regmap;
@@ -276,14 +328,16 @@ struct npcm750_vcd {
 	u32 rect_cnt;
 	char *video_name;
 	int cmd;
-	dev_t dev_id;
+	dev_t dev_t;
+	wait_queue_head_t wait;
+	atomic_t clients;
+	u8 de_mode;
 };
 
 static void npcm750_vcd_update(struct npcm750_vcd *vcd, u32 reg,
 			       unsigned long mask, u32 bits)
 {
 	u32 t = readl(vcd->base + reg);
-	u32 before = t;
 
 	t &= ~mask;
 	t |= (bits & mask);
@@ -309,6 +363,28 @@ static u8 npcm750_vcd_is_mga(struct npcm750_vcd *vcd)
 
 	regmap_read(gfxi, DISPST, &dispst);
 	return ((dispst & DISPST_MGAMODE) == DISPST_MGAMODE);
+}
+
+static u32 npcm750_vcd_horbp(struct npcm750_vcd *vcd)
+{
+	struct regmap *gfxi = vcd->gfx_regmap;
+	u32 hpchth, hpchtl;
+
+	regmap_read(gfxi, HBPCNTH, &hpchth);
+	regmap_read(gfxi, HBPCNTL, &hpchtl);
+	return (((hpchth & HBPCNTH_MASK) << 8)
+		+ (hpchtl & HBPCNTL_MASK) + 1);
+}
+
+static u32 npcm750_vcd_verbp(struct npcm750_vcd *vcd)
+{
+	struct regmap *gfxi = vcd->gfx_regmap;
+	u32 vpchth, vpchtl;
+
+	regmap_read(gfxi, VPBCNTH, &vpchth);
+	regmap_read(gfxi, VPBCNTL, &vpchtl);
+	return (((vpchth & VPBCNTH_MASK) << 8)
+		+ (vpchtl & VPBCNTL_MASK) + 1);
 }
 
 static u32 npcm750_vcd_hres(struct npcm750_vcd *vcd)
@@ -364,8 +440,8 @@ static void npcm750_vcd_local_display(struct npcm750_vcd *vcd, u8 enable)
 static int npcm750_vcd_dvod(struct npcm750_vcd *vcd, u32 hdelay, u32 vdelay)
 {
 	npcm750_vcd_write(vcd, VCD_DVO_DEL,
-			  (hdelay & VCD_DVO_DEL_MASK) |
-		((vdelay & VCD_DVO_DEL_MASK) << VCD_DVO_DEL_VSYNC_DEL_OFFSET));
+			(hdelay & VCD_DVO_DEL_MASK) |
+			((vdelay & VCD_DVO_DEL_MASK) << VCD_DVO_DEL_VSYNC_DEL_OFFSET));
 
 	return 0;
 }
@@ -524,16 +600,18 @@ static void npcm750_vcd_kvm_bw(struct npcm750_vcd *vcd, u8 bandwidth)
 
 static void npcm750_vcd_detect_video_mode(struct npcm750_vcd *vcd)
 {
-	u32 h_delay= 0, v_delay = 0;
-
 	vcd->info.hdisp = npcm750_vcd_hres(vcd);
 	vcd->info.vdisp = npcm750_vcd_vres(vcd);
 	vcd->video_name = "Digital";
 	vcd->info.pixelclk = npcm750_vcd_pclk(vcd);
-	vcd->info.hpositive = 1;
-	vcd->info.vpositive = 0;
 	vcd->info.bpp = npcm750_vcd_get_bpp(vcd);
 	vcd->info.refresh_rate = 60;
+	vcd->info.hfrontporch = 0;
+	vcd->info.hbackporch = 0;
+	vcd->info.vfrontporch = 0;
+	vcd->info.vbackporch = 0;
+	vcd->info.hpositive = 1;
+	vcd->info.vpositive = 0;
 
 	if (vcd->info.hdisp > VCD_MAX_WIDTH)
 		vcd->info.hdisp = VCD_MAX_WIDTH;
@@ -542,11 +620,19 @@ static void npcm750_vcd_detect_video_mode(struct npcm750_vcd *vcd)
 		vcd->info.vdisp = VCD_MAX_HIGHT;
 
 	npcm750_vcd_capres(vcd, vcd->info.hdisp, vcd->info.vdisp);
+
+	if (!vcd->de_mode) {
+		vcd->info.hbackporch = npcm750_vcd_horbp(vcd);
+		vcd->info.vbackporch = npcm750_vcd_verbp(vcd);
+	}
+
+	/* TODO: HSYNC mode: adjust delay when using internal gfx */
+	npcm750_vcd_dvod(vcd, vcd->info.hbackporch, vcd->info.vbackporch);
+
 	npcm750_vcd_set_linepitch(
 		vcd, vcd->info.hdisp * npcm750_vcd_get_bpp(vcd));
 	vcd->info.line_pitch = npcm750_vcd_get_linepitch(vcd);
-	npcm750_vcd_kvm_bw(vcd, vcd->info.pixelclk > 120000000UL);
-	npcm750_vcd_dvod(vcd, h_delay, v_delay);
+	npcm750_vcd_kvm_bw(vcd, vcd->info.pixelclk > VCD_KVM_BW_PCLK);
 
 	npcm750_vcd_reset(vcd);
 
@@ -615,6 +701,7 @@ static int npcm750_vcd_get_resolution(struct npcm750_vcd *vcd)
 	/* check with GFX registers if resolution changed from last time */
 	if ((vcd->info.hdisp != npcm750_vcd_hres(vcd)) ||
 		(vcd->info.vdisp != npcm750_vcd_vres(vcd))) {
+
 		npcm750_vcd_inte(vcd, 0);
 
 		/* wait for valid and stable resolution */
@@ -624,7 +711,10 @@ static int npcm750_vcd_get_resolution(struct npcm750_vcd *vcd)
 				npcm750_vcd_pclk(vcd) == 0);
 
 		npcm750_vcd_detect_video_mode(vcd);
+
+		/* Enable interrupt */
 		npcm750_vcd_inte(vcd, VCD_INTE_VAL);
+
 		return 1;
 	}
 	return 0;
@@ -635,7 +725,9 @@ static void npcm750_vcd_free_diff_table(struct npcm750_vcd *vcd)
 	struct list_head *head, *pos, *nx;
 	struct rect_list *tmp;
 
-	head = &vcd->list.list;
+	vcd->rect_cnt = 0;
+
+	head = &vcd->list;
 	list_for_each_safe(pos, nx, head) {
 		tmp = list_entry(pos, struct rect_list, list);
 		if (tmp) {
@@ -648,7 +740,7 @@ static void npcm750_vcd_free_diff_table(struct npcm750_vcd *vcd)
 static void
 npcm750_vcd_merge_rect(struct npcm750_vcd *vcd, struct rect_info *info)
 {
-	struct list_head *head = &vcd->list.list;
+	struct list_head *head = info->head;
 	struct rect_list *list = info->list;
 	struct rect_list *first = info->first;
 
@@ -750,7 +842,7 @@ static int npcm750_vcd_get_diff_table(struct npcm750_vcd *vcd)
 	u32 mod, tile_cnt = 0;
 
 	memset(&info, 0, sizeof(struct rect_info));
-	info.head = &vcd->list.list;
+	info.head = &vcd->list;
 
 	info.tile_perline = vcd->info.hdisp >> 4;
 	mod = vcd->info.hdisp % RECT_TILE_W;
@@ -813,17 +905,17 @@ static int npcm750_vcd_init(struct npcm750_vcd *vcd)
 	/* Set the FIFO thresholds */
 	npcm750_vcd_write(vcd, VCD_FIFO, VCD_FIFO_TH);
 
-	/* Data enabled is selected */
-	npcm750_vcd_dehs(vcd, 1);
-
-	/* Set vcd frame physical address*/
+	/* Set vcd frame physical address */
 	npcm750_vcd_write(vcd, VCD_FBA_ADR, vcd->frame_start);
 	npcm750_vcd_write(vcd, VCD_FBB_ADR, vcd->frame_start);
 
-	/* Set vcd mode*/
+	/* Set vcd mode */
 	npcm750_vcd_update(vcd, VCD_MODE, 0xFFFFFFFF,
 			   VCD_MODE_VCDE | VCD_MODE_CM_565 |
 			   VCD_MODE_IDBC | VCD_MODE_KVM_BW_SET);
+
+	/* Set DVDE/DVHSYNC */
+	npcm750_vcd_dehs(vcd, vcd->de_mode);
 
 	vcd->info.vcd_fb = vcd->frame_start;
 	vcd->info.r_max = VCD_R_MAX;
@@ -833,9 +925,14 @@ static int npcm750_vcd_init(struct npcm750_vcd *vcd)
 	vcd->info.g_shift = VCD_G_SHIFT;
 	vcd->info.b_shift = VCD_B_SHIFT;
 
+	/* Enable local disaply */
 	npcm750_vcd_local_display(vcd, 1);
 
-	npcm750_vcd_get_resolution(vcd);
+	/* Detect video mode */
+	npcm750_vcd_detect_video_mode(vcd);
+
+	/* Enable interrupt */
+	npcm750_vcd_inte(vcd, VCD_INTE_VAL);
 
 	return 0;
 }
@@ -859,7 +956,6 @@ static irqreturn_t npcm750_vcd_interrupt(int irq, void *dev_instance)
 	status = npcm750_vcd_read(vcd, VCD_STAT);
 	if (status & VCD_STAT_IRQ) {
 		if (status & VCD_STAT_DONE) {
-			vcd->rect_cnt = 0;
 			if (vcd->cmd != VCD_CMD_OP_CAPTURE) {
 				npcm750_vcd_free_diff_table(vcd);
 				npcm750_vcd_get_diff_table(vcd);
@@ -867,7 +963,10 @@ static irqreturn_t npcm750_vcd_interrupt(int irq, void *dev_instance)
 		}
 	}
 	npcm750_vcd_write(vcd, VCD_STAT, status & VCD_STAT_CLEAR);
+
 	spin_unlock(&vcd->lock);
+
+	wake_up(&vcd->wait);
 	return IRQ_HANDLED;
 }
 
@@ -890,31 +989,31 @@ npcm750_vcd_mmap(struct file *file, struct vm_area_struct *vma)
 }
 
 static int
-npcm750_vcd_release(struct inode *inode, struct file *file)
+npcm750_vcd_open(struct inode *inode, struct file *file)
 {
-	struct npcm750_vcd *vcd = file->private_data;
+	struct npcm750_vcd *vcd =
+		container_of(inode->i_cdev, struct npcm750_vcd, dev_cdev);
 
-	npcm750_vcd_stop(vcd);
+	if (!vcd)
+		return -ENODEV;
 
+	file->private_data = vcd;
+
+	atomic_inc_return(&vcd->clients);
+
+	dev_dbg(vcd->dev, "open: client %d\n", atomic_read(&vcd->clients));
 	return 0;
 }
 
 static int
-npcm750_vcd_open(struct inode *inode, struct file *file)
+npcm750_vcd_release(struct inode *inode, struct file *file)
 {
-	int ret = 0;
+	struct npcm750_vcd *vcd = file->private_data;
 
-	if (!registered_vcd)
-		return -ENODEV;
+	atomic_dec_return(&vcd->clients);
 
-	file->private_data = registered_vcd;
-
-	ret = npcm750_vcd_init(registered_vcd);
-	if (ret)
-		dev_err(registered_vcd->dev, "%s: failed to init vcd module\n",
-			__func__);
-
-	return ret;
+	dev_dbg(vcd->dev, "close: client %d\n", atomic_read(&vcd->clients));
+	return 0;
 }
 
 static long
@@ -932,24 +1031,21 @@ npcm750_do_vcd_ioctl(struct npcm750_vcd *vcd, unsigned int cmd,
 		break;
 	case VCD_IOCSENDCMD:
 	{
-		int vcd_cmd;
-		unsigned long timeout;
+		int vcd_cmd, timeout;
 
 		ret = copy_from_user(&vcd_cmd, argp, sizeof(vcd_cmd))
 			? -EFAULT : 0;
-
-		npcm750_vcd_command(vcd, vcd_cmd);
-
-		/* Wait for cmd to complete */
-		timeout = jiffies + VCD_OP_TIMEOUT;
-		while (!npcm750_vcd_op_done(vcd)) {
-			if (time_after(jiffies, timeout)) {
+		if (!ret) {
+			npcm750_vcd_command(vcd, vcd_cmd);
+			timeout = wait_event_timeout(vcd->wait,
+						npcm750_vcd_op_done(vcd),
+						VCD_OP_TIMEOUT);
+			if (!timeout) {
+				dev_dbg(vcd->dev, "VCD_OP_TIMEOUT\n");
 				npcm750_vcd_reset(vcd);
-				break;
+				ret = -EBUSY;
 			}
-			cpu_relax();
 		}
-
 		break;
 	}
 	case VCD_IOCCHKRES:
@@ -963,7 +1059,7 @@ npcm750_do_vcd_ioctl(struct npcm750_vcd *vcd, unsigned int cmd,
 	{
 		struct rect_list *list;
 		struct rect r;
-		struct list_head *head = &vcd->list.list;
+		struct list_head *head = &vcd->list;
 
 		if (vcd->rect_cnt == 0) {
 			r.x = 0;
@@ -999,6 +1095,20 @@ npcm750_do_vcd_ioctl(struct npcm750_vcd *vcd, unsigned int cmd,
 		ret = copy_to_user(argp, &vcd->rect_cnt, sizeof(int))
 			? -EFAULT : 0;
 		break;
+	case VCD_IOCDEMODE:
+	{
+		u8 mode;
+
+		ret = copy_from_user(&mode, argp, sizeof(mode))
+			? -EFAULT : 0;
+		if (!ret && vcd->de_mode != mode) {
+			vcd->de_mode = mode;
+			npcm750_vcd_stop(vcd);
+			npcm750_vcd_init(vcd);
+		}
+
+		break;
+	}
 	default:
 		break;
 	}
@@ -1028,7 +1138,6 @@ static int npcm750_vcd_device_create(struct npcm750_vcd *vcd)
 {
 	int ret;
 	dev_t dev;
-	struct cdev *dev_cdevp = NULL;
 
 	ret = alloc_chrdev_region(&dev, 0, 1, DEVICE_NAME);
 	if (ret < 0) {
@@ -1036,17 +1145,11 @@ static int npcm750_vcd_device_create(struct npcm750_vcd *vcd)
 		goto err;
 	}
 
-	vcd->dev_id = dev;
+	vcd->dev_t = dev;
 
-	dev_cdevp = kmalloc(sizeof(*dev_cdevp), GFP_KERNEL);
-	if (!dev_cdevp) {
-		ret = -ENOMEM;
-		goto err;
-	}
-
-	cdev_init(dev_cdevp, &npcm750_vcd_fops);
-	dev_cdevp->owner = THIS_MODULE;
-	ret = cdev_add(dev_cdevp, MKDEV(MAJOR(dev),  MINOR(dev)), 1);
+	cdev_init(&vcd->dev_cdev, &npcm750_vcd_fops);
+	vcd->dev_cdev.owner = THIS_MODULE;
+	ret = cdev_add(&vcd->dev_cdev, MKDEV(MAJOR(dev),  MINOR(dev)), 1);
 	if (ret < 0) {
 		pr_err("Couldn't cdev_add for vcd, error=%d\n", ret);
 		goto err;
@@ -1075,15 +1178,12 @@ static int npcm750_vcd_device_create(struct npcm750_vcd *vcd)
 	return 0;
 
 err:
-	if (!dev_cdevp)
-		kfree(dev_cdevp);
 	return ret;
 }
 
 static int npcm750_vcd_probe(struct platform_device *pdev)
 {
 	struct npcm750_vcd *vcd;
-	void __iomem *reg_base;
 	int irq;
 	int ret;
 
@@ -1118,10 +1218,19 @@ static int npcm750_vcd_probe(struct platform_device *pdev)
 			     "phy-memory", 1, &vcd->frame_len);
 
 	vcd->base = of_iomap(pdev->dev.of_node, 0);
-	if (IS_ERR(reg_base)) {
+	if (IS_ERR(vcd->base)) {
 		dev_err(&pdev->dev, "%s: failed to ioremap vcd base address\n",
 			__func__);
-		ret = PTR_ERR(reg_base);
+		ret = PTR_ERR(vcd->base);
+		goto err;
+	}
+
+	of_property_read_u8(pdev->dev.of_node,
+			     "de-mode", &vcd->de_mode);
+	ret = npcm750_vcd_init(vcd);
+	if (ret) {
+		dev_err(&pdev->dev, "%s: failed to init vcd module\n",
+			__func__);
 		goto err;
 	}
 
@@ -1137,15 +1246,18 @@ static int npcm750_vcd_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(&pdev->dev, "%s: failed to request irq for vcd\n",
 			__func__);
-		goto err;
+		goto irq_err;
 	}
 
 	platform_set_drvdata(pdev, vcd);
-	INIT_LIST_HEAD(&vcd->list.list);
-	registered_vcd = vcd;
+	INIT_LIST_HEAD(&vcd->list);
+	init_waitqueue_head(&vcd->wait);
 
 	pr_info("NPCM750 VCD Driver probed\n");
 	return 0;
+
+irq_err:
+	device_destroy(vcd_class, vcd->dev_t);
 err:
 	kfree(vcd);
 	return ret;
@@ -1155,13 +1267,11 @@ static int npcm750_vcd_remove(struct platform_device *pdev)
 {
 	struct npcm750_vcd *vcd = platform_get_drvdata(pdev);
 
-	device_destroy(vcd_class, vcd->dev_id);
-
 	npcm750_vcd_stop(vcd);
 
-	kfree(vcd);
+	device_destroy(vcd_class, vcd->dev_t);
 
-	registered_vcd = NULL;
+	kfree(vcd);
 
 	return 0;
 }

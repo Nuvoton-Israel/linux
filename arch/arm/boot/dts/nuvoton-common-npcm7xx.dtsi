@@ -294,6 +294,7 @@
 			compatible = "nuvoton,npcm750-vcd";
 			reg = <0xf0810000 0x10000>;
 			phy-memory = <0x3e200000 0x600000>;
+			de-mode = /bits/ 8 <1>;
 			interrupts = <0 22 4>;
 			status = "disabled";
 		};
