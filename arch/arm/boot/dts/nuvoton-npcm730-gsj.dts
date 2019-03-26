@@ -5,7 +5,7 @@
 #include "nuvoton-npcm730.dtsi"
 #include "nuvoton-npcm730-gsj-gpio.dtsi"
 / {
-	model = "Quanta GSJ Board (Device Tree v7))";
+	model = "Quanta GSJ Board (Device Tree v7)";
 	compatible = "nuvoton,npcm750";
 
 	aliases {
@@ -47,7 +47,7 @@
 		};
 
 		mc: memory-controller@f0824000 {
-			compatible = "nuvton,ECC";
+			compatible = "nuvoton,npcm7xx-sdram-edac";
 			reg = <0xf0824000 0x1000>;
 			interrupts = <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>;
 		};
