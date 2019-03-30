@@ -5,7 +5,7 @@
 #include "nuvoton-npcm730.dtsi"
 #include "nuvoton-npcm730-gsj-gpio.dtsi"
 / {
-	model = "Quanta GSJ Board (Device Tree v7)";
+	model = "Quanta GSJ Board (Device Tree v8)";
 	compatible = "nuvoton,npcm750";
 
 	aliases {
@@ -113,8 +113,8 @@
 							label = "rwfs";
 							reg = <0x1c00000 0x300000>;
 						};
-						haven-update@1f00000 {
-							label = "haven-update";
+						reserved@1f00000 {
+							label = "reserved";
 							reg = <0x1f00000 0x100000>;
 						};
 				};
