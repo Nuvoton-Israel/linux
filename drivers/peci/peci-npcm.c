@@ -81,6 +81,7 @@ static int npcm_peci_xfer_native(struct npcm_peci *priv,
 {
 	long err, timeout = msecs_to_jiffies(priv->cmd_timeout_ms);
 	unsigned long flags;
+	unsigned int msg_rd;
 	u32 cmd_sts;
 	int i, rc;
 
@@ -138,9 +139,10 @@ static int npcm_peci_xfer_native(struct npcm_peci *priv,
 		goto err_irqrestore;
 	}
 
-	for (i = 0; i < msg->rx_len; i++)
-		regmap_read(priv->regmap, NPCM_PECI_DAT_INOUT(i),
-			    (unsigned int *)msg->rx_buf + i);
+	for (i = 0; i < msg->rx_len; i++) {
+		regmap_read(priv->regmap, NPCM_PECI_DAT_INOUT(i), &msg_rd);
+		msg->rx_buf[i] = (u8)msg_rd;
+	}
 
 err_irqrestore:
 	spin_unlock_irqrestore(&priv->lock, flags);

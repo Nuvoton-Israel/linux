@@ -429,6 +429,9 @@ stmmac_probe_config_dt(struct platform_device *pdev, const char **mac)
 	plat->en_tx_lpi_clockgating =
 		of_property_read_bool(np, "snps,en-tx-lpi-clockgating");
 
+	plat->eee_force_disable =
+		of_property_read_bool(np, "snps,eee-force-disable");
+
 	/* Set the maxmtu to a default of JUMBO_LEN in case the
 	 * parameter is not present in the device tree.
 	 */

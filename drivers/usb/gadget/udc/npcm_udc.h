@@ -1,17 +1,17 @@
 /*
  * Freescale USB device/endpoint management registers
  */
-#ifndef __NPCMX50_USB2_UDC_H
-#define __NPCMX50_USB2_UDC_H
+#ifndef __NPCM_UDC_H
+#define __NPCM_UDC_H
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 
-#define NPCMX50_USB_DESC_PHYS_BASE_ADDR
+#define NPCM_USB_DESC_PHYS_BASE_ADDR
 
-/* Flags in npcmX50_usb2_mph_platform_data */
-#define NPCMX50_USB2_PORT0_ENABLED  0x00000001
-#define NPCMX50_USB2_PORT1_ENABLED  0x00000002
+/* Flags in npcm_usb2_mph_platform_data */
+#define NPCM_USB2_PORT0_ENABLED  0x00000001
+#define NPCM_USB2_PORT1_ENABLED  0x00000002
 
 // USB Devices
 #define USB_DEV1            1
@@ -457,26 +457,27 @@ struct ep_td_struct {
 #define UDC_DMA_BOUNDARY			0x1000
 
 
-enum npcmX50_usb2_operating_modes {
-    NPCMX50_USB2_MPH_HOST,
-    NPCMX50_USB2_DR_HOST,
-    NPCMX50_USB2_DR_DEVICE,
-    NPCMX50_USB2_DR_OTG,
+enum npcm_usb2_operating_modes {
+    NPCM_USB2_MPH_HOST,
+    NPCM_USB2_DR_HOST,
+    NPCM_USB2_DR_DEVICE,
+    NPCM_USB2_DR_OTG,
 };
 
-enum npcmX50_usb2_phy_modes {
-    NPCMX50_USB2_PHY_NONE,
-    NPCMX50_USB2_PHY_ULPI,
-    NPCMX50_USB2_PHY_UTMI,
-    NPCMX50_USB2_PHY_UTMI_WIDE,
-    NPCMX50_USB2_PHY_SERIAL,
+enum npcm_usb2_phy_modes {
+    NPCM_USB2_PHY_NONE,
+    NPCM_USB2_PHY_ULPI,
+    NPCM_USB2_PHY_UTMI,
+    NPCM_USB2_PHY_UTMI_WIDE,
+    NPCM_USB2_PHY_SERIAL,
+    NPCM_USB2_PHY_UTMI_DUAL,
 };
 
-struct npcmX50_usb2_platform_data {
+struct npcm_usb2_platform_data {
 	/* board specific information */
 	int                             controller_ver;
-    enum npcmX50_usb2_operating_modes   operating_mode;
-    enum npcmX50_usb2_phy_modes     phy_mode;
+    enum npcm_usb2_operating_modes   operating_mode;
+    enum npcm_usb2_phy_modes     phy_mode;
 	unsigned int			port_enables;
 	unsigned int			workaround;
 
@@ -513,12 +514,12 @@ struct npcmX50_usb2_platform_data {
 
 /* ### driver private data
  */
-struct npcmX50_req {
+struct npcm_req {
 	struct usb_request req;
 	struct list_head queue;
 	/* ep_queue() func will add
 	   a request->queue into a udc_ep->queue 'd tail */
-	struct npcmX50_ep *ep;
+	struct npcm_ep *ep;
 	unsigned mapped:1;
 
 	struct ep_td_struct *head, *tail;	/* For dTD List
@@ -528,10 +529,10 @@ struct npcmX50_req {
 
 #define REQ_UNCOMPLETE			1
 
-struct npcmX50_ep {
+struct npcm_ep {
 	struct usb_ep ep;
 	struct list_head queue;
-	struct npcmX50_udc *udc;
+	struct npcm_udc *udc;
 	struct ep_queue_head *qh;
 	struct usb_gadget *gadget;
 
@@ -542,12 +543,12 @@ struct npcmX50_ep {
 #define EP_DIR_IN	1
 #define EP_DIR_OUT	0
 
-struct npcmX50_udc {
+struct npcm_udc {
 	struct usb_gadget gadget;
 	struct usb_gadget_driver *driver;
-	struct npcmX50_usb2_platform_data *pdata;
+	struct npcm_usb2_platform_data *pdata;
 	struct completion *done;	/* to make sure release() is done */
-	struct npcmX50_ep *eps;
+	struct npcm_ep *eps;
 	struct usb_dr_device *dr_regs;
 	unsigned int max_ep;
 	int irq;
@@ -564,8 +565,8 @@ struct npcmX50_udc {
 	unsigned big_endian_desc:1;
 
 	struct ep_queue_head *ep_qh;	/* Endpoints Queue-Head */
-	struct npcmX50_req *status_req;	/* ep0 status request */
-#ifdef NPCMX50_USB_DESC_PHYS_BASE_ADDR
+	struct npcm_req *status_req;	/* ep0 status request */
+#ifdef NPCM_USB_DESC_PHYS_BASE_ADDR
     u32 dtd_virt_ba;
     u32 dtd_phys_ba;
     u32 dtd_size;
@@ -573,7 +574,7 @@ struct npcmX50_udc {
 #else
     struct dma_pool *td_pool;   /* dma pool for DTD */
 #endif
-	enum npcmX50_usb2_phy_modes phy_mode;
+	enum npcm_usb2_phy_modes phy_mode;
 
 	size_t ep_qh_size;		/* size after alignment adjustment*/
 	dma_addr_t ep_qh_dma;		/* dma address of QH */
@@ -633,9 +634,9 @@ static void dump_msg(const char *label, const u8 * buf, unsigned int length)
 #define VDBG(stuff...)	do{}while(0)
 #endif
 
-#define NPCMX50_USB_ERR(stuff...)       printk(KERN_ERR "udc: " stuff)
-#define NPCMX50_USB_WARN(stuff...)      printk(KERN_WARNING "udc: " stuff)
-#define NPCMX50_USB_INFO(stuff...)      printk(KERN_INFO "udc: " stuff)
+#define NPCM_USB_ERR(stuff...)       pr_err("udc: " stuff)
+#define NPCM_USB_WARN(stuff...)      pr_warn("udc: " stuff)
+#define NPCM_USB_INFO(stuff...)     pr_info("udc: " stuff)
 
 /*-------------------------------------------------------------------------*/
 
@@ -648,15 +649,15 @@ static void dump_msg(const char *label, const u8 * buf, unsigned int length)
 #define USB_RECV	0	/* OUT EP */
 #define USB_SEND	1	/* IN EP */
 
-#define NPCMX50_NUM_DEVICES 10
+#define NPCM_NUM_DEVICES 10
 
 /*
  * ### internal used help routines.
  */
-#define gadget_to_npcmX50(_gadget) \
-    container_of(_gadget, struct npcmX50_udc, gadget)
-#define npcmX50_to_gadget(npcmX50) (&npcmX50->gadget)
-#define npcmX50_to_dev(npcmX50) (npcmX50->gadget.dev.parent)
+#define gadget_to_npcm(_gadget) \
+    container_of(_gadget, struct npcm_udc, gadget)
+#define npcm_to_gadget(npcm) (&npcm->gadget)
+#define npcm_to_dev(npcm) (npcm->gadget.dev.parent)
 
 #define ep_index(EP)		((EP)->ep.desc->bEndpointAddress&0xF)
 #define ep_maxpacket(EP)	((EP)->ep.maxpacket)
@@ -669,7 +670,7 @@ static void dump_msg(const char *label, const u8 * buf, unsigned int length)
 					* 2 + ((windex & USB_DIR_IN) ? 1 : 0))
 #define get_pipe_by_ep(EP)	(ep_index(EP) * 2 + ep_is_in(EP))
 
-static inline struct ep_queue_head *get_qh_by_ep(struct npcmX50_ep *ep)
+static inline struct ep_queue_head *get_qh_by_ep(struct npcm_ep *ep)
 {
 	/* we only have one ep0 structure but two queue heads */
 	if (ep_index(ep) != 0)
@@ -681,19 +682,19 @@ static inline struct ep_queue_head *get_qh_by_ep(struct npcmX50_ep *ep)
 
 struct platform_device;
 #ifdef CONFIG_ARCH_MXC
-int npcmX50_udc_clk_init(struct platform_device *pdev);
-void npcmX50_udc_clk_finalize(struct platform_device *pdev);
-void npcmX50_udc_clk_release(void);
+int npcm_udc_clk_init(struct platform_device *pdev);
+void npcm_udc_clk_finalize(struct platform_device *pdev);
+void npcm_udc_clk_release(void);
 #else
-static inline int npcmX50_udc_clk_init(struct platform_device *pdev)
+static inline int npcm_udc_clk_init(struct platform_device *pdev)
 {
 	return 0;
 }
-static inline void npcmX50_udc_clk_finalize(struct platform_device *pdev)
+static inline void npcm_udc_clk_finalize(struct platform_device *pdev)
 {
 	return;
 }
-static inline void npcmX50_udc_clk_release(void)
+static inline void npcm_udc_clk_release(void)
 {
 }
 #endif

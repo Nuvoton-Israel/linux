@@ -39,6 +39,6 @@ obj-$(CONFIG_USB_MV_U3D)	+= mv_u3d_core.o
 obj-$(CONFIG_USB_GR_UDC)	+= gr_udc.o
 obj-$(CONFIG_USB_GADGET_XILINX)	+= udc-xilinx.o
 obj-$(CONFIG_USB_SNP_UDC_PLAT) += snps_udc_plat.o
-obj-$(CONFIG_USB_NPCMX50_USB2)	+= npcmX50_usb2_udc.o
+obj-$(CONFIG_USB_NPCM_UDC)	+= npcm_udc.o
 obj-$(CONFIG_USB_ASPEED_VHUB)	+= aspeed-vhub/
 obj-$(CONFIG_USB_BDC_UDC)	+= bdc/

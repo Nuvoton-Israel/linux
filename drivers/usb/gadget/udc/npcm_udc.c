@@ -1,22 +1,6 @@
-/*
- * Copyright (C) 2004-2007,2011 Freescale Semiconductor, Inc.
- * All rights reserved.
- *
- * Author: Li Yang <leoli@freescale.com>
- *         Jiang Bo <tanya.jiang@freescale.com>
- *
- * Description:
- * Freescale high-speed USB SOC DR module device controller driver.
- * This can be found on MPC8349E/MPC8313E/MPC5121E cpus.
- * The driver is previously named as mpc_udc.  Based on bare board
- * code from Dave Liu and Shlomi Gridish.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- */
-
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2018 Nuvoton Technology corporation.
+// Copyright (C) 2004-2007,2011 Freescale Semiconductor, Inc.
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -76,9 +60,9 @@ static struct regmap *rst_regmap;
 //#include <mach/regs_npcm750_gcr.h>
 //#include <mach/regs_npcm750_clk.h>
 
-#include "npcmX50_usb2_udc.h"
+#include "npcm_udc.h"
 
-#define MINIMUM_NPCMX50_UDC_EPQ_DTD_SIZE                0x800
+#define MINIMUM_NPCM_UDC_EPQ_DTD_SIZE                0x800
 
 #undef VERBOSE
 
@@ -89,14 +73,14 @@ static struct regmap *rst_regmap;
 
 #define	DMA_ADDR_INVALID	(~(dma_addr_t)0)
 
-static const char drv_20_name[] = "npcmX50-usb20-udc";
+static const char drv_20_name[] = "npcm-udc";
 #ifndef CONFIG_OF
 static const char driver_desc[] = DRIVER_DESC;
 #endif
 
-struct npcmX50_usb2_platform_data usb_data = {
-        .operating_mode = NPCMX50_USB2_DR_DEVICE,
-        .phy_mode = /*NPCMX50_USB2_PHY_SERIAL*/NPCMX50_USB2_PHY_UTMI_WIDE,
+struct npcm_usb2_platform_data usb_data = {
+        .operating_mode = NPCM_USB2_DR_DEVICE,
+        .phy_mode = /*NPCM_USB2_PHY_SERIAL*/NPCM_USB2_PHY_UTMI_WIDE,
 };
 
 #if 0
@@ -106,7 +90,7 @@ static struct usb_sys_interface *usb_sys_regs;
 #endif
 
 static const struct usb_endpoint_descriptor
-npcmX50_ep0_desc = {
+npcm_ep0_desc = {
 	.bLength =		USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =	USB_DT_ENDPOINT,
 	.bEndpointAddress =	0,
@@ -114,16 +98,16 @@ npcmX50_ep0_desc = {
 	.wMaxPacketSize =	USB_MAX_CTRL_PAYLOAD,
 };
 
-static void npcmX50_ep_fifo_flush(struct usb_ep *_ep);
-static void npcmX50_udc_release(struct device *dev);
+static void npcm_ep_fifo_flush(struct usb_ep *_ep);
+static void npcm_udc_release(struct device *dev);
 
 #ifdef CONFIG_PPC32
 /*
  * On some SoCs, the USB controller registers can be big or little endian,
  * depending on the version of the chip. In order to be able to run the
  * same kernel binary on 2 different versions of an SoC, the BE/LE decision
- * must be made at run time. _npcmX50_readl and npcmX50_writel are pointers to the
- * BE or LE readl() and writel() functions, and npcmX50_readl() and npcmX50_writel()
+ * must be made at run time. _npcm_readl and npcm_writel are pointers to the
+ * BE or LE readl() and writel() functions, and npcm_readl() and npcm_writel()
  * call through those pointers. Platform code for SoCs that have BE USB
  * registers should set pdata->big_endian_mmio flag.
  *
@@ -131,40 +115,40 @@ static void npcmX50_udc_release(struct device *dev);
  * since their endianness is also SoC dependant. Platform code for SoCs that
  * have BE USB descriptors should set pdata->big_endian_desc flag.
  */
-static u32 _npcmX50_readl_be(const unsigned __iomem *p)
+static u32 _npcm_readl_be(const unsigned __iomem *p)
 {
 	return in_be32(p);
 }
 
-static u32 _npcmX50_readl_le(const unsigned __iomem *p)
+static u32 _npcm_readl_le(const unsigned __iomem *p)
 {
 	return in_le32(p);
 }
 
-static void _npcmX50_writel_be(u32 v, unsigned __iomem *p)
+static void _npcm_writel_be(u32 v, unsigned __iomem *p)
 {
 	out_be32(p, v);
 }
 
-static void _npcmX50_writel_le(u32 v, unsigned __iomem *p)
+static void _npcm_writel_le(u32 v, unsigned __iomem *p)
 {
 	out_le32(p, v);
 }
 
-static u32 (*_npcmX50_readl)(const unsigned __iomem *p);
-static void (*_npcmX50_writel)(u32 v, unsigned __iomem *p);
+static u32 (*_npcm_readl)(const unsigned __iomem *p);
+static void (*_npcm_writel)(u32 v, unsigned __iomem *p);
 
-#define npcmX50_readl(p)		(*_npcmX50_readl)((p))
-#define npcmX50_writel(v, p)	(*_npcmX50_writel)((v), (p))
+#define npcm_readl(p)		(*_npcm_readl)((p))
+#define npcm_writel(v, p)	(*_npcm_writel)((v), (p))
 
-static inline void npcmX50_set_accessors(struct npcmX50_usb2_platform_data *pdata)
+static inline void npcm_set_accessors(struct npcm_usb2_platform_data *pdata)
 {
 	if (pdata->big_endian_mmio) {
-		_npcmX50_readl = _npcmX50_readl_be;
-		_npcmX50_writel = _npcmX50_writel_be;
+		_npcm_readl = _npcm_readl_be;
+		_npcm_writel = _npcm_writel_be;
 	} else {
-		_npcmX50_readl = _npcmX50_readl_le;
-		_npcmX50_writel = _npcmX50_writel_le;
+		_npcm_readl = _npcm_readl_le;
+		_npcm_writel = _npcm_writel_le;
 	}
 }
 
@@ -182,10 +166,10 @@ static inline u32 hc32_to_cpu(const u32 x)
 		: le32_to_cpu((__force __le32)x);
 }
 #else /* !CONFIG_PPC32 */
-static inline void npcmX50_set_accessors(struct npcmX50_usb2_platform_data *pdata) {}
+static inline void npcm_set_accessors(struct npcm_usb2_platform_data *pdata) {}
 
-#define npcmX50_readl(addr)		readl(addr)
-#define npcmX50_writel(val32, addr) writel(val32, addr)
+#define npcm_readl(addr)		readl(addr)
+#define npcm_writel(val32, addr) writel(val32, addr)
 #define cpu_to_hc32(x)		cpu_to_le32(x)
 #define hc32_to_cpu(x)		le32_to_cpu(x)
 #endif /* CONFIG_PPC32 */
@@ -198,7 +182,7 @@ static inline void npcmX50_set_accessors(struct npcmX50_usb2_platform_data *pdat
  * @status : request status to be set, only works when
  *	request is still in progress.
  *--------------------------------------------------------------*/
-static void done(struct npcmX50_ep *ep, struct npcmX50_req *req, int status)
+static void done(struct npcm_ep *ep, struct npcm_req *req, int status)
 __releases(ep->udc->lock)
 __acquires(ep->udc->lock)
 {
@@ -206,7 +190,7 @@ __acquires(ep->udc->lock)
 	struct ep_td_struct *curr_td, *next_td;
 	int j;
 
-	/* Removed the req from npcmX50_ep->queue */
+	/* Removed the req from npcm_ep->queue */
 	list_del_init(&req->queue);
 
 	/* req.status should be set as -EINPROGRESS in ep_queue() */
@@ -222,7 +206,7 @@ __acquires(ep->udc->lock)
 		if (j != req->dtd_count - 1) {
 			next_td = curr_td->next_td_virt;
 		}
-#ifdef NPCMX50_USB_DESC_PHYS_BASE_ADDR
+#ifdef NPCM_USB_DESC_PHYS_BASE_ADDR
 		curr_td->res = DTD_IS_FREE; // curr_td is free
 #else
 		dma_pool_free(ep->udc->td_pool, curr_td, curr_td->td_dma);
@@ -251,18 +235,18 @@ __acquires(ep->udc->lock)
  * nuke(): delete all requests related to this ep
  * called with spinlock held
  *--------------------------------------------------------------*/
-static void nuke(struct npcmX50_ep *ep, int status)
+static void nuke(struct npcm_ep *ep, int status)
 {
 	ep->stopped = 1;
 
 	/* Flush fifo */
-	npcmX50_ep_fifo_flush(&ep->ep);
+	npcm_ep_fifo_flush(&ep->ep);
 
 	/* Whether this eq has request linked */
 	while (!list_empty(&ep->queue)) {
-		struct npcmX50_req *req = NULL;
+		struct npcm_req *req = NULL;
 
-		req = list_entry(ep->queue.next, struct npcmX50_req, queue);
+		req = list_entry(ep->queue.next, struct npcm_req, queue);
 		done(ep, req, status);
 	}
 }
@@ -270,10 +254,10 @@ static void nuke(struct npcmX50_ep *ep, int status)
 /*------------------------------------------------------------------
 	Internal Hardware related function
  ------------------------------------------------------------------*/
-static void dr_controller_stop(struct npcmX50_udc *udc);
+static void dr_controller_stop(struct npcm_udc *udc);
 
 
-static int dr_controller_setup(struct npcmX50_udc *udc)
+static int dr_controller_setup(struct npcm_udc *udc)
 {
 	unsigned int tmp, portctrl, ep_num;
 	unsigned int max_no_of_ep;
@@ -281,13 +265,13 @@ static int dr_controller_setup(struct npcmX50_udc *udc)
 	unsigned long timeout;
 	struct usb_dr_device *dr_regs = udc->dr_regs;
 
-#define NPCMX50_UDC_RESET_TIMEOUT 1000
+#define NPCM_UDC_RESET_TIMEOUT 1000
 
 	/* Config PHY interface */
-	portctrl = npcmX50_readl(&dr_regs->portsc1);
+	portctrl = npcm_readl(&dr_regs->portsc1);
 	portctrl &= ~(PORTSCX_PHY_TYPE_SEL | PORTSCX_PORT_WIDTH);
 	switch (udc->phy_mode) {
-	case NPCMX50_USB2_PHY_ULPI:
+	case NPCM_USB2_PHY_ULPI:
 		if (udc->pdata->have_sysif_regs) {
 			if (udc->pdata->controller_ver) {
 				/* controller version 1.6 or above */
@@ -295,15 +279,16 @@ static int dr_controller_setup(struct npcmX50_udc *udc)
 				ctrl &= ~USB_CTRL_UTMI_PHY_EN;
 				ctrl |= USB_CTRL_USB_EN;
 				__raw_writel(ctrl, &usb_sys_regs->control);*/
-				printk(KERN_INFO "udc debug: NPCMX50_USB2_PHY_ULPI\n");
+				printk(KERN_INFO "udc debug: NPCM_USB2_PHY_ULPI\n");
 			}
 		}
 		portctrl |= PORTSCX_PTS_ULPI;
 		break;
-	case NPCMX50_USB2_PHY_UTMI_WIDE:
+	case NPCM_USB2_PHY_UTMI_WIDE:
 		portctrl |= PORTSCX_PTW_16BIT;
 		/* fall through */
-	case NPCMX50_USB2_PHY_UTMI:
+	case NPCM_USB2_PHY_UTMI:
+	case NPCM_USB2_PHY_UTMI_DUAL:
 		if (udc->pdata->have_sysif_regs) {
 			if (udc->pdata->controller_ver) {
 				/* controller version 1.6 or above */
@@ -311,40 +296,40 @@ static int dr_controller_setup(struct npcmX50_udc *udc)
 				ctrl |= (USB_CTRL_UTMI_PHY_EN |
 					USB_CTRL_USB_EN);
 				__raw_writel(ctrl, &usb_sys_regs->control);*/
-				/*mdelay(NPCMX50_UTMI_PHY_DLY);*/ /* Delay for UTMI
+				/*mdelay(npcm_UTMI_PHY_DLY);*/ /* Delay for UTMI
 					PHY CLK to become stable - 10ms*/
-				printk(KERN_INFO "udc debug: NPCMX50_USB2_PHY_UTMI\n");
+				printk(KERN_INFO "udc debug: NPCM_USB2_PHY_UTMI\n");
 			}
 		}
 		portctrl |= PORTSCX_PTS_UTMI;
 		break;
-	case NPCMX50_USB2_PHY_SERIAL:
+	case NPCM_USB2_PHY_SERIAL:
 		portctrl |= PORTSCX_PTS_FSLS;
 		break;
 	default:
 		return -EINVAL;
 	}
-	npcmX50_writel(portctrl, &dr_regs->portsc1);
+	npcm_writel(portctrl, &dr_regs->portsc1);
 
 	/* Stop and reset the usb controller */
     dr_controller_stop(udc);
 
-	tmp = npcmX50_readl(&dr_regs->usbcmd);
+	tmp = npcm_readl(&dr_regs->usbcmd);
 	tmp |= USB_CMD_CTRL_RESET;
-	npcmX50_writel(tmp, &dr_regs->usbcmd);
+	npcm_writel(tmp, &dr_regs->usbcmd);
 
 	/* Wait for reset to complete */
-	timeout = jiffies + NPCMX50_UDC_RESET_TIMEOUT;
-	while (npcmX50_readl(&dr_regs->usbcmd) & USB_CMD_CTRL_RESET) {
+	timeout = jiffies + NPCM_UDC_RESET_TIMEOUT;
+	while (npcm_readl(&dr_regs->usbcmd) & USB_CMD_CTRL_RESET) {
 		if (time_after(jiffies, timeout)) {
-			NPCMX50_USB_ERR("udc reset timeout!\n");
+			NPCM_USB_ERR("udc reset timeout!\n");
 			return -ETIMEDOUT;
 		}
 		cpu_relax();
 	}
 
 	/* Set the controller as device mode */
-	tmp = npcmX50_readl(&dr_regs->usbmode);
+	tmp = npcm_readl(&dr_regs->usbmode);
 	tmp &= ~USB_MODE_RESERVED_BITS_MASK;	/* Must clear reserved bits */
 	tmp &= ~USB_MODE_CTRL_MODE_MASK;	/* clear mode bits */
 	tmp |= USB_MODE_CTRL_MODE_DEVICE;
@@ -352,33 +337,33 @@ static int dr_controller_setup(struct npcmX50_udc *udc)
 	tmp |= USB_MODE_SETUP_LOCK_OFF;
 	if (udc->pdata->es)
 		tmp |= USB_MODE_ES;
-	npcmX50_writel(tmp, &dr_regs->usbmode);
+	npcm_writel(tmp, &dr_regs->usbmode);
 
 	/* Clear the setup status */
-	npcmX50_writel(0, &dr_regs->usbsts);
+	npcm_writel(0, &dr_regs->usbsts);
 
 	tmp = udc->ep_qh_dma;
 	tmp &= USB_EP_LIST_ADDRESS_MASK;
-	npcmX50_writel(tmp, &dr_regs->endpointlistaddr);
+	npcm_writel(tmp, &dr_regs->endpointlistaddr);
 
 	VDBG("vir[qh_base] is %p phy[qh_base] is 0x%8x reg is 0x%8x",
 		udc->ep_qh, (int)tmp,
-		npcmX50_readl(&dr_regs->endpointlistaddr));
+		npcm_readl(&dr_regs->endpointlistaddr));
 
-	max_no_of_ep = (0x0000001F & npcmX50_readl(&dr_regs->dccparams));
+	max_no_of_ep = (0x0000001F & npcm_readl(&dr_regs->dccparams));
 	for (ep_num = 1; ep_num < max_no_of_ep; ep_num++) {
-		tmp = npcmX50_readl(&dr_regs->endptctrl[ep_num]);
+		tmp = npcm_readl(&dr_regs->endptctrl[ep_num]);
 		tmp &= ~(EPCTRL_TX_TYPE | EPCTRL_RX_TYPE);
 		tmp |= (EPCTRL_EP_TYPE_BULK << EPCTRL_TX_EP_TYPE_SHIFT)
 		| (EPCTRL_EP_TYPE_BULK << EPCTRL_RX_EP_TYPE_SHIFT);
-		npcmX50_writel(tmp, &dr_regs->endptctrl[ep_num]);
+		npcm_writel(tmp, &dr_regs->endptctrl[ep_num]);
 	}
 	
 	return 0;
 }
 
 /* Enable DR irq and set controller to run state */
-static void dr_controller_run(struct npcmX50_udc *udc)
+static void dr_controller_run(struct npcm_udc *udc)
 {
     u32 temp;
     struct usb_dr_device *dr_regs;
@@ -394,26 +379,26 @@ static void dr_controller_run(struct npcmX50_udc *udc)
         | USB_INTR_PTC_DETECT_EN | USB_INTR_RESET_EN
         | USB_INTR_DEVICE_SUSPEND | USB_INTR_SYS_ERR_EN;
 
-    npcmX50_writel(temp, &dr_regs->usbintr);
+    npcm_writel(temp, &dr_regs->usbintr);
 
     /* Clear stopped bit */
     udc->stopped = 0;
 
     /* Set the controller as device mode */
-    temp = npcmX50_readl(&dr_regs->usbmode);
+    temp = npcm_readl(&dr_regs->usbmode);
     temp |= USB_MODE_CTRL_MODE_DEVICE;
     //temp |= USB_MODE_STREAM_DISABLE;
-    npcmX50_writel(temp, &dr_regs->usbmode);
+    npcm_writel(temp, &dr_regs->usbmode);
 
     /* Set controller to Run */
-    temp = npcmX50_readl(&dr_regs->usbcmd);
+    temp = npcm_readl(&dr_regs->usbcmd);
     temp |= USB_CMD_RUN_STOP;
-    npcmX50_writel(temp, &dr_regs->usbcmd);
+    npcm_writel(temp, &dr_regs->usbcmd);
 
     return;
 }
 
-static void dr_controller_stop(struct npcmX50_udc *udc)
+static void dr_controller_stop(struct npcm_udc *udc)
 {
     unsigned int tmp;
     struct usb_dr_device *dr_regs;
@@ -425,7 +410,7 @@ static void dr_controller_stop(struct npcmX50_udc *udc)
     dr_regs = udc->dr_regs;
 
     /* disable all INTR */
-    npcmX50_writel(0, &dr_regs->usbintr);
+    npcm_writel(0, &dr_regs->usbintr);
 
     /* Set stopped bit for isr */
     udc->stopped = 1;
@@ -434,14 +419,14 @@ static void dr_controller_stop(struct npcmX50_udc *udc)
 /*  usb_sys_regs->control = 0; */
 
     /* set controller to Stop */
-    tmp = npcmX50_readl(&dr_regs->usbcmd);
+    tmp = npcm_readl(&dr_regs->usbcmd);
     tmp &= ~USB_CMD_RUN_STOP;
-    npcmX50_writel(tmp, &dr_regs->usbcmd);
+    npcm_writel(tmp, &dr_regs->usbcmd);
 
     return;
 }
 
-static void dr_ep_setup(struct npcmX50_udc *udc, unsigned char ep_num, unsigned char dir, unsigned char ep_type)
+static void dr_ep_setup(struct npcm_udc *udc, unsigned char ep_num, unsigned char dir, unsigned char ep_type)
 {
     unsigned int tmp_epctrl = 0;
     struct usb_dr_device *dr_regs;
@@ -452,7 +437,7 @@ static void dr_ep_setup(struct npcmX50_udc *udc, unsigned char ep_num, unsigned 
 
     dr_regs = udc->dr_regs;
 
-    tmp_epctrl = npcmX50_readl(&dr_regs->endptctrl[ep_num]);
+    tmp_epctrl = npcm_readl(&dr_regs->endptctrl[ep_num]);
 	if (dir) {
 		if (ep_num)
 			tmp_epctrl |= EPCTRL_TX_DATA_TOGGLE_RST;
@@ -469,11 +454,11 @@ static void dr_ep_setup(struct npcmX50_udc *udc, unsigned char ep_num, unsigned 
 				<< EPCTRL_RX_EP_TYPE_SHIFT);
 	}
 
-    npcmX50_writel(tmp_epctrl, &dr_regs->endptctrl[ep_num]);
+    npcm_writel(tmp_epctrl, &dr_regs->endptctrl[ep_num]);
 }
 
 static void
-dr_ep_change_stall(struct npcmX50_udc *udc, unsigned char ep_num, unsigned char dir, int value)
+dr_ep_change_stall(struct npcm_udc *udc, unsigned char ep_num, unsigned char dir, int value)
 {
 	u32 tmp_epctrl = 0;
     struct usb_dr_device *dr_regs;
@@ -484,7 +469,7 @@ dr_ep_change_stall(struct npcmX50_udc *udc, unsigned char ep_num, unsigned char 
     
     dr_regs = udc->dr_regs;
 
-	tmp_epctrl = npcmX50_readl(&dr_regs->endptctrl[ep_num]);
+	tmp_epctrl = npcm_readl(&dr_regs->endptctrl[ep_num]);
 
 	if (value) {
 		/* set the stall bit */
@@ -502,12 +487,12 @@ dr_ep_change_stall(struct npcmX50_udc *udc, unsigned char ep_num, unsigned char 
 			tmp_epctrl |= EPCTRL_RX_DATA_TOGGLE_RST;
 		}
 	}
-	npcmX50_writel(tmp_epctrl, &dr_regs->endptctrl[ep_num]);
+	npcm_writel(tmp_epctrl, &dr_regs->endptctrl[ep_num]);
 }
 
 /* Get stall status of a specific ep
    Return: 0: not stalled; 1:stalled */
-static int dr_ep_get_stall(struct npcmX50_udc *udc, unsigned char ep_num, unsigned char dir)
+static int dr_ep_get_stall(struct npcm_udc *udc, unsigned char ep_num, unsigned char dir)
 {
 	u32 epctrl;
     struct usb_dr_device *dr_regs;
@@ -518,7 +503,7 @@ static int dr_ep_get_stall(struct npcmX50_udc *udc, unsigned char ep_num, unsign
 
     dr_regs = udc->dr_regs;
 
-	epctrl = npcmX50_readl(&dr_regs->endptctrl[ep_num]);
+	epctrl = npcm_readl(&dr_regs->endptctrl[ep_num]);
 	if (dir)
 		return (epctrl & EPCTRL_TX_EP_STALL) ? 1 : 0;
 	else
@@ -534,7 +519,7 @@ static int dr_ep_get_stall(struct npcmX50_udc *udc, unsigned char ep_num, unsign
  * @zlt: Zero Length Termination Select (1: disable; 0: enable)
  * @mult: Mult field
  ------------------------------------------------------------------*/
-static void struct_ep_qh_setup(struct npcmX50_udc *udc, unsigned char ep_num,
+static void struct_ep_qh_setup(struct npcm_udc *udc, unsigned char ep_num,
 		unsigned char dir, unsigned char ep_type,
 		unsigned int max_pkt_len,
 		unsigned int zlt, unsigned char mult)
@@ -570,10 +555,10 @@ static void struct_ep_qh_setup(struct npcmX50_udc *udc, unsigned char ep_num,
 }
 
 /* Setup qh structure and ep register for ep0. */
-static void ep0_setup(struct npcmX50_udc *udc)
+static void ep0_setup(struct npcm_udc *udc)
 {
-	/* the intialization of an ep includes: fields in QH, Regs,
-	 * npcmX50_ep struct */
+	/* the initialization of an ep includes: fields in QH, Regs,
+	 * npcm_ep struct */
 	struct_ep_qh_setup(udc, 0, USB_RECV, USB_ENDPOINT_XFER_CONTROL,
 			USB_MAX_CTRL_PAYLOAD, 0, 0);
 	struct_ep_qh_setup(udc, 0, USB_SEND, USB_ENDPOINT_XFER_CONTROL,
@@ -595,17 +580,17 @@ static void ep0_setup(struct npcmX50_udc *udc)
  * the driver will enable or disable the relevant endpoints
  * ep0 doesn't use this routine. It is always enabled.
 -------------------------------------------------------------------------*/
-static int npcmX50_ep_enable(struct usb_ep *_ep,
+static int npcm_ep_enable(struct usb_ep *_ep,
 		const struct usb_endpoint_descriptor *desc)
 {
-	struct npcmX50_udc *udc = NULL;
-	struct npcmX50_ep *ep = NULL;
+	struct npcm_udc *udc = NULL;
+	struct npcm_ep *ep = NULL;
 	unsigned short max = 0;
 	unsigned char mult = 0, zlt;
 	int retval = -EINVAL;
 	unsigned long flags = 0;
 
-	ep = container_of(_ep, struct npcmX50_ep, ep);
+	ep = container_of(_ep, struct npcm_ep, ep);
 
 	/* catch various bogus parameters */
 	if (!_ep || !desc
@@ -681,22 +666,22 @@ en_done:
  * @ep : the ep being unconfigured. May not be ep0
  * Any pending and uncomplete req will complete with status (-ESHUTDOWN)
 *---------------------------------------------------------------------*/
-static int npcmX50_ep_disable(struct usb_ep *_ep)
+static int npcm_ep_disable(struct usb_ep *_ep)
 {
-	struct npcmX50_udc *udc = NULL;
-	struct npcmX50_ep *ep = NULL;
+	struct npcm_udc *udc = NULL;
+	struct npcm_ep *ep = NULL;
 	unsigned long flags = 0;
 	u32 epctrl;
 	int ep_num;
     struct usb_dr_device *dr_regs;
 
-	ep = container_of(_ep, struct npcmX50_ep, ep);
+	ep = container_of(_ep, struct npcm_ep, ep);
 	if (!_ep || !ep->ep.desc) {
 		VDBG("%s not enabled", _ep ? ep->ep.name : NULL);
 		return -EINVAL;
 	}
 
-    udc = (struct npcmX50_udc *)ep->udc;
+    udc = (struct npcm_udc *)ep->udc;
 
    /* before here, make sure dr_regs has been initialized */
     if (!udc)
@@ -706,7 +691,7 @@ static int npcmX50_ep_disable(struct usb_ep *_ep)
 
 	/* disable ep on controller */
 	ep_num = ep_index(ep);
-	epctrl = npcmX50_readl(&dr_regs->endptctrl[ep_num]);
+	epctrl = npcm_readl(&dr_regs->endptctrl[ep_num]);
 	if (ep_is_in(ep)) {
 		epctrl &= ~(EPCTRL_TX_ENABLE | EPCTRL_TX_TYPE);
 		epctrl |= EPCTRL_EP_TYPE_BULK << EPCTRL_TX_EP_TYPE_SHIFT;
@@ -714,9 +699,9 @@ static int npcmX50_ep_disable(struct usb_ep *_ep)
 		epctrl &= ~(EPCTRL_RX_ENABLE | EPCTRL_TX_TYPE);
 		epctrl |= EPCTRL_EP_TYPE_BULK << EPCTRL_RX_EP_TYPE_SHIFT;
 	}
-	npcmX50_writel(epctrl, &dr_regs->endptctrl[ep_num]);
+	npcm_writel(epctrl, &dr_regs->endptctrl[ep_num]);
 
-	udc = (struct npcmX50_udc *)ep->udc;
+	udc = (struct npcm_udc *)ep->udc;
 	spin_lock_irqsave(&udc->lock, flags);
 
 	/* nuke all pending requests (does flush) */
@@ -737,11 +722,11 @@ static int npcmX50_ep_disable(struct usb_ep *_ep)
  * Returns the request, or null if one could not be allocated
 *---------------------------------------------------------------------*/
 static struct usb_request *
-npcmX50_alloc_request(struct usb_ep *_ep, gfp_t gfp_flags)
+npcm_alloc_request(struct usb_ep *_ep, gfp_t gfp_flags)
 {
-	struct npcmX50_req *req = NULL;
+	struct npcm_req *req = NULL;
 
-	req = kzalloc(sizeof(struct npcmX50_req), gfp_flags);
+	req = kzalloc(sizeof(struct npcm_req), gfp_flags);
 	if (!req)
 		return NULL;
 
@@ -751,18 +736,18 @@ npcmX50_alloc_request(struct usb_ep *_ep, gfp_t gfp_flags)
 	return &req->req;
 }
 
-static void npcmX50_free_request(struct usb_ep *_ep, struct usb_request *_req)
+static void npcm_free_request(struct usb_ep *_ep, struct usb_request *_req)
 {
-	struct npcmX50_req *req = NULL;
+	struct npcm_req *req = NULL;
 
-	req = container_of(_req, struct npcmX50_req, req);
+	req = container_of(_req, struct npcm_req, req);
 
 	if (_req)
 		kfree(req);
 }
 
 /* Actually add a dTD chain to an empty dQH and let go */
-static void npcmX50_prime_ep(struct npcmX50_ep *ep, struct ep_td_struct *td)
+static void npcm_prime_ep(struct npcm_ep *ep, struct ep_td_struct *td)
 {
 	struct ep_queue_head *qh = get_qh_by_ep(ep);
     struct usb_dr_device *dr_regs;
@@ -787,15 +772,15 @@ static void npcmX50_prime_ep(struct npcmX50_ep *ep, struct ep_td_struct *td)
 	   write to it indeed got into the mamory so when we prime the DMA
 	   will read the updated data */
 	if (qh->size_ioc_int_sts & 0x80000000)
-		NPCMX50_USB_ERR("%s(): qh->size_ioc_int_sts=%08x\n", __func__, qh->size_ioc_int_sts);
+		NPCM_USB_ERR("%s(): qh->size_ioc_int_sts=%08x\n", __func__, qh->size_ioc_int_sts);
 
 	/* Prime endpoint by writing correct bit to ENDPTPRIME */
-	npcmX50_writel(ep_is_in(ep) ? (1 << (ep_index(ep) + 16))
+	npcm_writel(ep_is_in(ep) ? (1 << (ep_index(ep) + 16))
 			: (1 << (ep_index(ep))), &dr_regs->endpointprime);
 }
 
 /* Add dTD chain to the dQH of an EP */
-static int npcmX50_queue_td(struct npcmX50_ep *ep, struct npcmX50_req *req)
+static int npcm_queue_td(struct npcm_ep *ep, struct npcm_req *req)
 {
 	u32 temp, bitmask, tmp_stat;
     struct usb_dr_device *dr_regs;
@@ -820,24 +805,24 @@ static int npcmX50_queue_td(struct npcmX50_ep *ep, struct npcmX50_req *req)
 	/* check if the pipe is empty */
 	if (!(list_empty(&ep->queue)) && !(ep_index(ep) == 0)) {
 		/* Add td to the end */
-		struct npcmX50_req *lastreq;
-		lastreq = list_entry(ep->queue.prev, struct npcmX50_req, queue);
+		struct npcm_req *lastreq;
+		lastreq = list_entry(ep->queue.prev, struct npcm_req, queue);
 		lastreq->tail->next_td_ptr =
 			cpu_to_hc32(req->head->td_dma & DTD_ADDR_MASK);
 		/* Ensure dTD's next dtd pointer to be updated */
 		wmb();
 		/* Read prime bit, if 1 goto done */
-		if (npcmX50_readl(&dr_regs->endpointprime) & bitmask)
+		if (npcm_readl(&dr_regs->endpointprime) & bitmask)
 			goto done;
 
 		loops = 1000;
 		while (1) {
 			/* Set ATDTW bit in USBCMD */
-			temp = npcmX50_readl(&dr_regs->usbcmd);
-			npcmX50_writel(temp | USB_CMD_ATDTW, &dr_regs->usbcmd);
+			temp = npcm_readl(&dr_regs->usbcmd);
+			npcm_writel(temp | USB_CMD_ATDTW, &dr_regs->usbcmd);
 
 			/* Read correct status bit */
-			tmp_stat = npcmX50_readl(&dr_regs->endptstatus) & bitmask;
+			tmp_stat = npcm_readl(&dr_regs->endptstatus) & bitmask;
 
 			/*
 			 * Reread the ATDTW semaphore bit to check if it is
@@ -846,12 +831,12 @@ static int npcmX50_queue_td(struct npcmX50_ep *ep, struct npcmX50_req *req)
 			 * proceed with priming of endpoint if not already
 			 * primed.
 			 */
-			if (npcmX50_readl(&dr_regs->usbcmd) & USB_CMD_ATDTW)
+			if (npcm_readl(&dr_regs->usbcmd) & USB_CMD_ATDTW)
 				break;
 
 			loops--;
 			if (loops == 0) {
-				NPCMX50_USB_ERR("Timeout for ATDTW_TRIPWIRE...\n");
+				NPCM_USB_ERR("Timeout for ATDTW_TRIPWIRE...\n");
 				retval = -ETIME;
 				goto done;
 			}
@@ -859,14 +844,14 @@ static int npcmX50_queue_td(struct npcmX50_ep *ep, struct npcmX50_req *req)
 		}
 
 		/* Write ATDTW bit to 0 */
-		temp = npcmX50_readl(&dr_regs->usbcmd);
-		npcmX50_writel(temp & ~USB_CMD_ATDTW, &dr_regs->usbcmd);
+		temp = npcm_readl(&dr_regs->usbcmd);
+		npcm_writel(temp & ~USB_CMD_ATDTW, &dr_regs->usbcmd);
 
 		if (tmp_stat)
 			goto done;
 	}
 
-	npcmX50_prime_ep(ep, req->head);
+	npcm_prime_ep(ep, req->head);
 
 done:
 	return retval;
@@ -878,18 +863,18 @@ done:
  * @dma: return dma address of the dTD
  * @is_last: return flag if it is the last dTD of the request
  * return: pointer to the built dTD */
-static struct ep_td_struct *npcmX50_build_dtd(struct npcmX50_req *req, unsigned *length,
+static struct ep_td_struct *npcm_build_dtd(struct npcm_req *req, unsigned *length,
 		dma_addr_t *dma, int *is_last, gfp_t gfp_flags)
 {
 	u32 swap_temp;
 	struct ep_td_struct *dtd;
-    struct npcmX50_udc *udc = req->ep->udc;
+    struct npcm_udc *udc = req->ep->udc;
 
 	/* how big will this transfer be? */
 	*length = min(req->req.length - req->req.actual,
 			(unsigned)EP_MAX_LENGTH_TRANSFER);
 
-#ifdef NPCMX50_USB_DESC_PHYS_BASE_ADDR
+#ifdef NPCM_USB_DESC_PHYS_BASE_ADDR
     {
         int td_count;
         
@@ -959,7 +944,7 @@ static struct ep_td_struct *npcmX50_build_dtd(struct npcmX50_req *req, unsigned 
 }
 
 /* Generate dtd chain for a request */
-static int npcmX50_req_to_dtd(struct npcmX50_req *req, gfp_t gfp_flags)
+static int npcm_req_to_dtd(struct npcm_req *req, gfp_t gfp_flags)
 {
 	unsigned	count;
 	int		is_last;
@@ -968,7 +953,7 @@ static int npcmX50_req_to_dtd(struct npcmX50_req *req, gfp_t gfp_flags)
 	dma_addr_t dma;
 
 	do {
-		dtd = npcmX50_build_dtd(req, &count, &dma, &is_last, gfp_flags);
+		dtd = npcm_build_dtd(req, &count, &dma, &is_last, gfp_flags);
 		if (dtd == NULL)
 			return -ENOMEM;
 
@@ -993,11 +978,11 @@ static int npcmX50_req_to_dtd(struct npcmX50_req *req, gfp_t gfp_flags)
 
 /* queues (submits) an I/O request to an endpoint */
 static int
-npcmX50_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
+npcm_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 {
-	struct npcmX50_ep *ep;
-	struct npcmX50_req *req;
-	struct npcmX50_udc *udc;
+	struct npcm_ep *ep;
+	struct npcm_req *req;
+	struct npcm_udc *udc;
 	unsigned long flags;
 	int ret;
 
@@ -1007,8 +992,8 @@ npcmX50_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 		return -EINVAL;
 	}
 
-	ep = container_of(_ep, struct npcmX50_ep, ep);
-	req = container_of(_req, struct npcmX50_req, req);
+	ep = container_of(_ep, struct npcm_ep, ep);
+	req = container_of(_req, struct npcm_req, req);
 	
  	/* catch various bogus parameters */
 	if (!req->req.complete || !req->req.buf
@@ -1042,16 +1027,16 @@ npcmX50_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 	spin_lock_irqsave(&udc->lock, flags);
 
 	/* build dtds and push them to device queue */
-	if (!npcmX50_req_to_dtd(req, gfp_flags)) {
-		ret = npcmX50_queue_td(ep, req);
+	if (!npcm_req_to_dtd(req, gfp_flags)) {
+		ret = npcm_queue_td(ep, req);
 		if (ret) {
 			spin_unlock_irqrestore(&udc->lock, flags);
-			NPCMX50_USB_ERR("%s(): Failed to queue dtd\n", __func__);
+			NPCM_USB_ERR("%s(): Failed to queue dtd\n", __func__);
 			goto err_unmap_dma;
 		}
 	} else {
 		spin_unlock_irqrestore(&udc->lock, flags);
-		NPCMX50_USB_ERR("%s(): Failed to dma_pool_alloc\n", __func__);
+		NPCM_USB_ERR("%s(): Failed to dma_pool_alloc\n", __func__);
 		ret = -ENOMEM;
 		goto err_unmap_dma;
 	}
@@ -1069,10 +1054,10 @@ err_unmap_dma:
 }
 
 /* dequeues (cancels, unlinks) an I/O request from an endpoint */
-static int npcmX50_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
+static int npcm_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 {
-	struct npcmX50_ep *ep;
-	struct npcmX50_req *req;
+	struct npcm_ep *ep;
+	struct npcm_req *req;
 	unsigned long flags;
 	int ep_num, stopped, ret = 0;
 	u32 epctrl;
@@ -1081,7 +1066,7 @@ static int npcmX50_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
     if (!_ep || !_req)
         return -EINVAL;
 
-	ep = container_of(_ep, struct npcmX50_ep, ep);
+	ep = container_of(_ep, struct npcm_ep, ep);
 
     if (!ep->ep.desc)
         return -EINVAL;
@@ -1099,12 +1084,12 @@ static int npcmX50_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	/* Stop the ep before we deal with the queue */
 	ep->stopped = 1;
 	ep_num = ep_index(ep);
-	epctrl = npcmX50_readl(&dr_regs->endptctrl[ep_num]);
+	epctrl = npcm_readl(&dr_regs->endptctrl[ep_num]);
 	if (ep_is_in(ep))
 		epctrl &= ~EPCTRL_TX_ENABLE;
 	else
 		epctrl &= ~EPCTRL_RX_ENABLE;
-	npcmX50_writel(epctrl, &dr_regs->endptctrl[ep_num]);
+	npcm_writel(epctrl, &dr_regs->endptctrl[ep_num]);
 
 	/* make sure it's actually queued on this endpoint */
 	list_for_each_entry(req, &ep->queue, queue) {
@@ -1119,35 +1104,35 @@ static int npcmX50_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	/* The request is in progress, or completed but not dequeued */
 	if (ep->queue.next == &req->queue) {
 		_req->status = -ECONNRESET;
-		npcmX50_ep_fifo_flush(_ep);	/* flush current transfer */
+		npcm_ep_fifo_flush(_ep);	/* flush current transfer */
 
 		/* The request isn't the last request in this ep queue */
 		if (req->queue.next != &ep->queue) {
-			struct npcmX50_req *next_req;
+			struct npcm_req *next_req;
 
-			next_req = list_entry(req->queue.next, struct npcmX50_req,
+			next_req = list_entry(req->queue.next, struct npcm_req,
 					queue);
 
 			/* prime with dTD of next request */
-			npcmX50_prime_ep(ep, next_req->head);
+			npcm_prime_ep(ep, next_req->head);
 		}
 	/* The request hasn't been processed, patch up the TD chain */
 	} else {
-		struct npcmX50_req *prev_req;
+		struct npcm_req *prev_req;
 
-		prev_req = list_entry(req->queue.prev, struct npcmX50_req, queue);
+		prev_req = list_entry(req->queue.prev, struct npcm_req, queue);
 		prev_req->tail->next_td_ptr = req->tail->next_td_ptr;
 	}
 
 	done(ep, req, -ECONNRESET);
 
 	/* Enable EP */
-out:	epctrl = npcmX50_readl(&dr_regs->endptctrl[ep_num]);
+out:	epctrl = npcm_readl(&dr_regs->endptctrl[ep_num]);
 	if (ep_is_in(ep))
 		epctrl |= EPCTRL_TX_ENABLE;
 	else
 		epctrl |= EPCTRL_RX_ENABLE;
-	npcmX50_writel(epctrl, &dr_regs->endptctrl[ep_num]);
+	npcm_writel(epctrl, &dr_regs->endptctrl[ep_num]);
 	ep->stopped = stopped;
 
 	spin_unlock_irqrestore(&ep->udc->lock, flags);
@@ -1162,15 +1147,15 @@ out:	epctrl = npcmX50_readl(&dr_regs->endptctrl[ep_num]);
  * @value: 1--set halt  0--clear halt
  * Returns zero, or a negative error code.
 *----------------------------------------------------------------*/
-static int npcmX50_ep_set_halt(struct usb_ep *_ep, int value)
+static int npcm_ep_set_halt(struct usb_ep *_ep, int value)
 {
-	struct npcmX50_ep *ep = NULL;
+	struct npcm_ep *ep = NULL;
 	unsigned long flags = 0;
 	int status = -EOPNOTSUPP;	/* operation not supported */
 	unsigned char ep_dir = 0, ep_num = 0;
-	struct npcmX50_udc *udc = NULL;
+	struct npcm_udc *udc = NULL;
 
-	ep = container_of(_ep, struct npcmX50_ep, ep);
+	ep = container_of(_ep, struct npcm_ep, ep);
 	udc = ep->udc;
 	if (!_ep || !ep->ep.desc) {
 		status = -EINVAL;
@@ -1208,10 +1193,10 @@ out:
 	return status;
 }
 
-static int npcmX50_ep_fifo_status(struct usb_ep *_ep)
+static int npcm_ep_fifo_status(struct usb_ep *_ep)
 {
-	struct npcmX50_ep *ep;
-    struct npcmX50_udc *udc = NULL;
+	struct npcm_ep *ep;
+    struct npcm_udc *udc = NULL;
 	int size = 0;
 	u32 bitmask;
 	struct ep_queue_head *qh;
@@ -1220,7 +1205,7 @@ static int npcmX50_ep_fifo_status(struct usb_ep *_ep)
 	if (!_ep)
 		return -ENODEV;		
 
-	ep = container_of(_ep, struct npcmX50_ep, ep);
+	ep = container_of(_ep, struct npcm_ep, ep);
 
 	if (!ep->ep.desc && ep_index(ep) != 0)
 		return -ENODEV;
@@ -1231,7 +1216,7 @@ static int npcmX50_ep_fifo_status(struct usb_ep *_ep)
 
     dr_regs = ep->udc->dr_regs;
 
-	udc = (struct npcmX50_udc *)ep->udc;
+	udc = (struct npcm_udc *)ep->udc;
 
 	if (!udc->driver || udc->gadget.speed == USB_SPEED_UNKNOWN)
 		return -ESHUTDOWN;
@@ -1241,7 +1226,7 @@ static int npcmX50_ep_fifo_status(struct usb_ep *_ep)
 	bitmask = (ep_is_in(ep)) ? (1 << (ep_index(ep) + 16)) :
 	    (1 << (ep_index(ep)));
 
-	if (npcmX50_readl(&dr_regs->endptstatus) & bitmask)
+	if (npcm_readl(&dr_regs->endptstatus) & bitmask)
 		size = (qh->size_ioc_int_sts & DTD_PACKET_SIZE)
 		    >> DTD_LENGTH_BIT_POS;
 
@@ -1249,24 +1234,24 @@ static int npcmX50_ep_fifo_status(struct usb_ep *_ep)
 	return size;
 }
 
-static void npcmX50_ep_fifo_flush(struct usb_ep *_ep)
+static void npcm_ep_fifo_flush(struct usb_ep *_ep)
 {
-	struct npcmX50_ep *ep;
+	struct npcm_ep *ep;
 	int ep_num, ep_dir;
 	u32 bits;
 	unsigned long timeout;
 	struct usb_dr_device *dr_regs;
-    struct npcmX50_udc *udc = NULL;
+    struct npcm_udc *udc = NULL;
 
-#define NPCMX50_UDC_FLUSH_TIMEOUT 1000
+#define NPCM_UDC_FLUSH_TIMEOUT 1000
 
 	if ((!_ep)||(!_ep->desc)) {
 		return;
 	} else {
-		ep = container_of(_ep, struct npcmX50_ep, ep);
+		ep = container_of(_ep, struct npcm_ep, ep);
 	}
 	
-	udc = (struct npcmX50_udc *)ep->udc;
+	udc = (struct npcm_udc *)ep->udc;
 
    /* before here, make sure dr_regs has been initialized */
     if (!udc)
@@ -1284,35 +1269,35 @@ static void npcmX50_ep_fifo_flush(struct usb_ep *_ep)
 	else
 		bits = 1 << ep_num;
 
-	timeout = jiffies + NPCMX50_UDC_FLUSH_TIMEOUT;
+	timeout = jiffies + NPCM_UDC_FLUSH_TIMEOUT;
 	do {
-		npcmX50_writel(bits, &dr_regs->endptflush);
+		npcm_writel(bits, &dr_regs->endptflush);
 
 		/* Wait until flush complete */
-		while (npcmX50_readl(&dr_regs->endptflush)) {
+		while (npcm_readl(&dr_regs->endptflush)) {
 			if (time_after(jiffies, timeout)) {
-				NPCMX50_USB_ERR("ep flush timeout\n");
+				NPCM_USB_ERR("ep flush timeout\n");
 				return;
 			}
 			cpu_relax();
 		}
 		/* See if we need to flush again */
-	} while (npcmX50_readl(&dr_regs->endptstatus) & bits);
+	} while (npcm_readl(&dr_regs->endptstatus) & bits);
 }
 
-static struct usb_ep_ops npcmX50_ep_ops = {
-	.enable = npcmX50_ep_enable,
-	.disable = npcmX50_ep_disable,
+static const struct usb_ep_ops npcm_ep_ops = {
+	.enable = npcm_ep_enable,
+	.disable = npcm_ep_disable,
 
-	.alloc_request = npcmX50_alloc_request,
-	.free_request = npcmX50_free_request,
+	.alloc_request = npcm_alloc_request,
+	.free_request = npcm_free_request,
 
-	.queue = npcmX50_ep_queue,
-	.dequeue = npcmX50_ep_dequeue,
+	.queue = npcm_ep_queue,
+	.dequeue = npcm_ep_dequeue,
 
-	.set_halt = npcmX50_ep_set_halt,
-	.fifo_status = npcmX50_ep_fifo_status,
-	.fifo_flush = npcmX50_ep_fifo_flush,	/* flush fifo */
+	.set_halt = npcm_ep_set_halt,
+	.fifo_status = npcm_ep_fifo_status,
+	.fifo_flush = npcm_ep_fifo_flush,	/* flush fifo */
 };
 
 /*-------------------------------------------------------------------------
@@ -1322,20 +1307,20 @@ static struct usb_ep_ops npcmX50_ep_ops = {
 /*----------------------------------------------------------------------
  * Get the current frame number (from DR frame_index Reg )
  *----------------------------------------------------------------------*/
-static int npcmX50_get_frame(struct usb_gadget *gadget)
+static int npcm_get_frame(struct usb_gadget *gadget)
 {
-    struct npcmX50_udc *udc = container_of(gadget, struct npcmX50_udc, gadget);
+    struct npcm_udc *udc = container_of(gadget, struct npcm_udc, gadget);
     struct usb_dr_device *dr_regs = udc->dr_regs;
 
-	return (int)(npcmX50_readl(&dr_regs->frindex) & USB_FRINDEX_MASKS);
+	return (int)(npcm_readl(&dr_regs->frindex) & USB_FRINDEX_MASKS);
 }
 
 /*-----------------------------------------------------------------------
  * Tries to wake up the host connected to this gadget
  -----------------------------------------------------------------------*/
-static int npcmX50_wakeup(struct usb_gadget *gadget)
+static int npcm_wakeup(struct usb_gadget *gadget)
 {
-	struct npcmX50_udc *udc = container_of(gadget, struct npcmX50_udc, gadget);
+	struct npcm_udc *udc = container_of(gadget, struct npcm_udc, gadget);
 	u32 portsc;
     struct usb_dr_device *dr_regs;
 
@@ -1346,31 +1331,31 @@ static int npcmX50_wakeup(struct usb_gadget *gadget)
 	if (!udc->remote_wakeup)
 		return -ENOTSUPP;
 
-	portsc = npcmX50_readl(&dr_regs->portsc1);
+	portsc = npcm_readl(&dr_regs->portsc1);
 	/* not suspended? */
 	if (!(portsc & PORTSCX_PORT_SUSPEND))
 		return 0;
 
     /* trigger force resume */
     portsc |= PORTSCX_PORT_FORCE_RESUME;
-    npcmX50_writel(portsc, &dr_regs->portsc1);
+    npcm_writel(portsc, &dr_regs->portsc1);
     
 	return 0;
 }
 
-static int can_pullup(struct npcmX50_udc *udc)
+static int can_pullup(struct npcm_udc *udc)
 {
 	return udc->driver && udc->softconnect && udc->vbus_active;
 }
 
 /* Notify controller that VBUS is powered, Called by whatever
    detects VBUS sessions */
-static int npcmX50_vbus_session(struct usb_gadget *gadget, int is_active)
+static int npcm_vbus_session(struct usb_gadget *gadget, int is_active)
 {
-	struct npcmX50_udc	*udc;
+	struct npcm_udc	*udc;
 	unsigned long	flags;
 
-	udc = container_of(gadget, struct npcmX50_udc, gadget);
+	udc = container_of(gadget, struct npcm_udc, gadget);
 	spin_lock_irqsave(&udc->lock, flags);
 	VDBG("VBUS %s", is_active ? "on" : "off");
 	udc->vbus_active = (is_active != 0);
@@ -1389,11 +1374,11 @@ static int npcmX50_vbus_session(struct usb_gadget *gadget, int is_active)
  *
  * Returns zero on success, else negative errno.
  */
-static int npcmX50_vbus_draw(struct usb_gadget *gadget, unsigned mA)
+static int npcm_vbus_draw(struct usb_gadget *gadget, unsigned mA)
 {
-	struct npcmX50_udc *udc;
+	struct npcm_udc *udc;
 
-	udc = container_of(gadget, struct npcmX50_udc, gadget);
+	udc = container_of(gadget, struct npcm_udc, gadget);
 	if (!IS_ERR_OR_NULL(udc->transceiver))
 		return usb_phy_set_power(udc->transceiver, mA);
 	return -ENOTSUPP;
@@ -1402,11 +1387,11 @@ static int npcmX50_vbus_draw(struct usb_gadget *gadget, unsigned mA)
 /* Change Data+ pullup status
  * this func is used by usb_gadget_connect/disconnet
  */
-static int npcmX50_pullup(struct usb_gadget *gadget, int is_on)
+static int npcm_pullup(struct usb_gadget *gadget, int is_on)
 {
-    struct npcmX50_udc *udc  = container_of(gadget, struct npcmX50_udc, gadget);
+    struct npcm_udc *udc  = container_of(gadget, struct npcm_udc, gadget);
 
-	udc = container_of(gadget, struct npcmX50_udc, gadget);
+	udc = container_of(gadget, struct npcm_udc, gadget);
 
 	if (!udc->vbus_active)
 		return -EOPNOTSUPP;
@@ -1420,25 +1405,30 @@ static int npcmX50_pullup(struct usb_gadget *gadget, int is_on)
 	return 0;
 }
 
-static int npcmX50_udc_start(struct usb_gadget *gadget,
+static int npcm_udc_start(struct usb_gadget *gadget,
                         struct usb_gadget_driver *driver);
-static int npcmX50_udc_stop(struct usb_gadget *gadget);
+static int npcm_udc_stop(struct usb_gadget *gadget);
 /* defined in gadget.h */
-static struct usb_gadget_ops npcmX50_gadget_ops = {
-	.get_frame = npcmX50_get_frame,
-	.wakeup = npcmX50_wakeup,
-/*	.set_selfpowered = npcmX50_set_selfpowered,	*/ /* Always selfpowered */
-	.vbus_session = npcmX50_vbus_session,
-	.vbus_draw = npcmX50_vbus_draw,
-	.pullup = npcmX50_pullup,
-	.udc_start = npcmX50_udc_start,
-	.udc_stop = npcmX50_udc_stop,
+static struct usb_gadget_ops npcm_gadget_ops = {
+	.get_frame = npcm_get_frame,
+	.wakeup = npcm_wakeup,
+/*	.set_selfpowered = npcm_set_selfpowered,	*/ /* Always selfpowered */
+	.vbus_session = npcm_vbus_session,
+	.vbus_draw = npcm_vbus_draw,
+	.pullup = npcm_pullup,
+	.udc_start = npcm_udc_start,
+	.udc_stop = npcm_udc_stop,
 };
 
-static void fsl_noop_complete(struct usb_ep *ep, struct usb_request *req) { }
+/*
+ * Empty complete function used by this driver to fill in the req->complete
+ * field when creating a request since the complete field is mandatory.
+ */
+static void npcm_noop_complete(struct usb_ep *ep, struct usb_request *req) { }
+
 /* Set protocol stall on ep0, protocol stall will automatically be cleared
    on new transaction */
-static void ep0stall(struct npcmX50_udc *udc)
+static void ep0stall(struct npcm_udc *udc)
 {
 	u32 tmp;
     struct usb_dr_device *dr_regs;
@@ -1449,18 +1439,18 @@ static void ep0stall(struct npcmX50_udc *udc)
     dr_regs = udc->dr_regs;
 
 	/* must set tx and rx to stall at the same time */
-	tmp = npcmX50_readl(&dr_regs->endptctrl[0]);
+	tmp = npcm_readl(&dr_regs->endptctrl[0]);
 	tmp |= EPCTRL_TX_EP_STALL | EPCTRL_RX_EP_STALL;
-	npcmX50_writel(tmp, &dr_regs->endptctrl[0]);
+	npcm_writel(tmp, &dr_regs->endptctrl[0]);
 	udc->ep0_state = WAIT_FOR_SETUP;
 	udc->ep0_dir = 0;
 }
 
 /* Prime a status phase for ep0 */
-static int ep0_prime_status(struct npcmX50_udc *udc, int direction)
+static int ep0_prime_status(struct npcm_udc *udc, int direction)
 {
-	struct npcmX50_req *req = udc->status_req;
-	struct npcmX50_ep *ep;
+	struct npcm_req *req = udc->status_req;
+	struct npcm_ep *ep;
 	int ret;
 
 	if (direction == EP_DIR_IN)
@@ -1475,22 +1465,22 @@ static int ep0_prime_status(struct npcmX50_udc *udc, int direction)
 	req->req.length = 0;
 	req->req.status = -EINPROGRESS;
 	req->req.actual = 0;
-	req->req.complete = fsl_noop_complete;
+	req->req.complete = npcm_noop_complete;
 	req->dtd_count = 0;
 
 	ret = usb_gadget_map_request(&ep->udc->gadget, &req->req, ep_is_in(ep));
 	if (ret)
 		return ret;
 
-	if (npcmX50_req_to_dtd(req, GFP_ATOMIC) == 0) {
-		ret = npcmX50_queue_td(ep, req);
+	if (npcm_req_to_dtd(req, GFP_ATOMIC) == 0) {
+		ret = npcm_queue_td(ep, req);
 		if (ret) {
-			NPCMX50_USB_ERR("%s(): Failed to queue dtd when prime status\n", __func__);
+			NPCM_USB_ERR("%s(): Failed to queue dtd when prime status\n", __func__);
 			goto out;
 		}
 	} else{	/* no mem */
 		ret = -ENOMEM;
-		NPCMX50_USB_ERR("%s(): Failed to dma_pool_alloc when prime status\n", __func__);
+		NPCM_USB_ERR("%s(): Failed to dma_pool_alloc when prime status\n", __func__);
 		goto out;
 	}
 
@@ -1503,18 +1493,18 @@ out:
 	return ret;
 }
 
-static void udc_reset_ep_queue(struct npcmX50_udc *udc, u8 pipe)
+static void udc_reset_ep_queue(struct npcm_udc *udc, u8 pipe)
 {
-	struct npcmX50_ep *ep = get_ep_by_pipe(udc, pipe);
+	struct npcm_ep *ep = get_ep_by_pipe(udc, pipe);
 
-	if (ep->name[0]!='\0')
+	if (ep->ep.name)
 		nuke(ep, -ESHUTDOWN);
 }
 
 /*
  * ch9 Set address
  */
-static void ch9setaddress(struct npcmX50_udc *udc, u16 value, u16 index, u16 length)
+static void ch9setaddress(struct npcm_udc *udc, u16 value, u16 index, u16 length)
 {
 	/* Save the new address to device struct */
 	udc->device_address = (u8) value;
@@ -1528,12 +1518,12 @@ static void ch9setaddress(struct npcmX50_udc *udc, u16 value, u16 index, u16 len
 /*
  * ch9 Get status
  */
-static void ch9getstatus(struct npcmX50_udc *udc, u8 request_type, u16 value,
+static void ch9getstatus(struct npcm_udc *udc, u8 request_type, u16 value,
 		u16 index, u16 length)
 {
 	u16 tmp = 0;		/* Status, cpu endian */
-	struct npcmX50_req *req;
-	struct npcmX50_ep *ep;
+	struct npcm_req *req;
+	struct npcm_ep *ep;
 	int ret;
 
 	ep = &udc->eps[0];
@@ -1548,7 +1538,7 @@ static void ch9getstatus(struct npcmX50_udc *udc, u8 request_type, u16 value,
 		tmp = 0;
 	} else if ((request_type & USB_RECIP_MASK) == USB_RECIP_ENDPOINT) {
 		/* Get endpoint status */
-		struct npcmX50_ep *target_ep;
+		struct npcm_ep *target_ep;
 
 		target_ep = get_ep_by_pipe(udc, get_pipe_by_windex(index));
 
@@ -1569,7 +1559,7 @@ static void ch9getstatus(struct npcmX50_udc *udc, u8 request_type, u16 value,
 	req->req.length = 2;
 	req->req.status = -EINPROGRESS;
 	req->req.actual = 0;
-	req->req.complete = fsl_noop_complete;
+	req->req.complete = npcm_noop_complete;
 	req->dtd_count = 0;
 
 	ret = usb_gadget_map_request(&ep->udc->gadget, &req->req, ep_is_in(ep));
@@ -1577,14 +1567,14 @@ static void ch9getstatus(struct npcmX50_udc *udc, u8 request_type, u16 value,
 		goto stall;
 
 	/* prime the data phase */
-	if ((npcmX50_req_to_dtd(req, GFP_ATOMIC) == 0)) {
-		ret = npcmX50_queue_td(ep, req);
+	if ((npcm_req_to_dtd(req, GFP_ATOMIC) == 0)) {
+		ret = npcm_queue_td(ep, req);
 		if (ret) {
-			NPCMX50_USB_ERR("%s(): Failed to queue dtd\n", __func__);
+			NPCM_USB_ERR("%s(): Failed to queue dtd\n", __func__);
 			goto err_unmap_dma;
 		}
 	} else {
-		NPCMX50_USB_ERR("%s(): Failed to dma_pool_alloc\n", __func__);
+		NPCM_USB_ERR("%s(): Failed to dma_pool_alloc\n", __func__);
 		goto err_unmap_dma;
 	}
 
@@ -1600,7 +1590,7 @@ stall:
 	ep0stall(udc);
 }
 
-static void setup_received_irq(struct npcmX50_udc *udc,
+static void setup_received_irq(struct npcm_udc *udc,
 		struct usb_ctrlrequest *setup)
 __releases(udc->lock)
 __acquires(udc->lock)
@@ -1645,14 +1635,14 @@ __acquires(udc->lock)
 		if ((setup->bRequestType & (USB_RECIP_MASK | USB_TYPE_MASK))
 				== (USB_RECIP_ENDPOINT | USB_TYPE_STANDARD)) {
 			int pipe = get_pipe_by_windex(wIndex);
-			struct npcmX50_ep *ep;
+			struct npcm_ep *ep;
 
 			if (wValue != 0 || wLength != 0 || pipe >= udc->max_ep)
 				break;
 			ep = get_ep_by_pipe(udc, pipe);
 
 			spin_unlock(&udc->lock);
-			rc = npcmX50_ep_set_halt(&ep->ep,(setup->bRequest == USB_REQ_SET_FEATURE) ? 1 : 0);
+			rc = npcm_ep_set_halt(&ep->ep,(setup->bRequest == USB_REQ_SET_FEATURE) ? 1 : 0);
 			spin_lock(&udc->lock);
 
 		} else if ((setup->bRequestType & (USB_RECIP_MASK
@@ -1687,8 +1677,8 @@ __acquires(udc->lock)
 			u32 tmp;
 
 			mdelay(10);
-			tmp = npcmX50_readl(&dr_regs->portsc1) | (ptc << 16);
-			npcmX50_writel(tmp, &dr_regs->portsc1);
+			tmp = npcm_readl(&dr_regs->portsc1) | (ptc << 16);
+			npcm_writel(tmp, &dr_regs->portsc1);
 			printk(KERN_INFO "udc: switch to test mode %d.\n", ptc);
 		}
 
@@ -1725,8 +1715,8 @@ __acquires(udc->lock)
 
 /* Process request for Data or Status phase of ep0
  * prime status phase if needed */
-static void ep0_req_complete(struct npcmX50_udc *udc, struct npcmX50_ep *ep0,
-		struct npcmX50_req *req)
+static void ep0_req_complete(struct npcm_udc *udc, struct npcm_ep *ep0,
+		struct npcm_req *req)
 {
     struct usb_dr_device *dr_regs;
 
@@ -1738,7 +1728,7 @@ static void ep0_req_complete(struct npcmX50_udc *udc, struct npcmX50_ep *ep0,
 	if (udc->usb_state == USB_STATE_ADDRESS) {
 		/* Set the new address */
 		u32 new_address = (u32) udc->device_address;
-		npcmX50_writel(new_address << USB_DEVICE_ADDRESS_BIT_POS,
+		npcm_writel(new_address << USB_DEVICE_ADDRESS_BIT_POS,
 				&dr_regs->deviceaddr);
 	}
 
@@ -1760,7 +1750,7 @@ static void ep0_req_complete(struct npcmX50_udc *udc, struct npcmX50_ep *ep0,
 		udc->ep0_state = WAIT_FOR_SETUP;
 		break;
 	case WAIT_FOR_SETUP:
-		NPCMX50_USB_ERR("Unexpect ep0 packets\n");
+		NPCM_USB_ERR("Unexpected ep0 packets\n");
 		break;
 	default:
 		ep0stall(udc);
@@ -1770,24 +1760,24 @@ static void ep0_req_complete(struct npcmX50_udc *udc, struct npcmX50_ep *ep0,
 
 /* Tripwire mechanism to ensure a setup packet payload is extracted without
  * being corrupted by another incoming setup packet */
-static void tripwire_handler(struct npcmX50_udc *udc, u8 ep_num, u8 *buffer_ptr)
+static void tripwire_handler(struct npcm_udc *udc, u8 ep_num, u8 *buffer_ptr)
 {
 	u32 temp;
 	struct ep_queue_head *qh;
-	struct npcmX50_usb2_platform_data *pdata = udc->pdata;
+	struct npcm_usb2_platform_data *pdata = udc->pdata;
     struct usb_dr_device *dr_regs = udc->dr_regs;
 
 	qh = &udc->ep_qh[ep_num * 2 + EP_DIR_OUT];
 
 	/* Clear bit in ENDPTSETUPSTAT */
-	temp = npcmX50_readl(&dr_regs->endptsetupstat);
-	npcmX50_writel(temp | (1 << ep_num), &dr_regs->endptsetupstat);
+	temp = npcm_readl(&dr_regs->endptsetupstat);
+	npcm_writel(temp | (1 << ep_num), &dr_regs->endptsetupstat);
 
 	/* while a hazard exists when setup package arrives */
 	do {
 		/* Set Setup Tripwire */
-		temp = npcmX50_readl(&dr_regs->usbcmd);
-		npcmX50_writel(temp | USB_CMD_SUTW, &dr_regs->usbcmd);
+		temp = npcm_readl(&dr_regs->usbcmd);
+		npcm_writel(temp | USB_CMD_SUTW, &dr_regs->usbcmd);
 
 		/* Copy the setup packet to local buffer */
 		if (pdata->le_setup_buf) {
@@ -1800,16 +1790,16 @@ static void tripwire_handler(struct npcmX50_udc *udc, u8 ep_num, u8 *buffer_ptr)
 		} else {
 			memcpy(buffer_ptr, (u8 *) qh->setup_buffer, 8);
 		}
-	} while (!(npcmX50_readl(&dr_regs->usbcmd) & USB_CMD_SUTW));
+	} while (!(npcm_readl(&dr_regs->usbcmd) & USB_CMD_SUTW));
 
 	/* Clear Setup Tripwire */
-	temp = npcmX50_readl(&dr_regs->usbcmd);
-	npcmX50_writel(temp & ~USB_CMD_SUTW, &dr_regs->usbcmd);
+	temp = npcm_readl(&dr_regs->usbcmd);
+	npcm_writel(temp & ~USB_CMD_SUTW, &dr_regs->usbcmd);
 }
 
 /* process-ep_req(): free the completed Tds for this req */
-static int process_ep_req(struct npcmX50_udc *udc, int pipe,
-		struct npcmX50_req *curr_req)
+static int process_ep_req(struct npcm_udc *udc, int pipe,
+		struct npcm_req *curr_req)
 {
 	struct ep_td_struct *curr_td;
 	int	td_complete, actual, remaining_length, j, tmp;
@@ -1831,7 +1821,7 @@ static int process_ep_req(struct npcmX50_udc *udc, int pipe,
 		errors = hc32_to_cpu(curr_td->size_ioc_sts);
 		if (errors & DTD_ERROR_MASK) {
 			if (errors & DTD_STATUS_HALTED) {
-				NPCMX50_USB_ERR("dTD error %08x QH=%d\n", errors, pipe);
+				NPCM_USB_ERR("dTD error %08x QH=%d\n", errors, pipe);
 				/* Clear the errors and Halt condition */
 				tmp = hc32_to_cpu(curr_qh->size_ioc_int_sts);
 				tmp &= ~errors;
@@ -1850,7 +1840,7 @@ static int process_ep_req(struct npcmX50_udc *udc, int pipe,
 				status = -EILSEQ;
 				break;
 			} else
-				NPCMX50_USB_ERR("Unknown error has occurred (0x%x)!\n",
+				NPCM_USB_ERR("Unknown error has occurred (0x%x)!\n",
 					errors);
 
 		} else if (hc32_to_cpu(curr_td->size_ioc_sts)
@@ -1885,12 +1875,12 @@ static int process_ep_req(struct npcmX50_udc *udc, int pipe,
 }
 
 /* Process a DTD completion interrupt */
-static void dtd_complete_irq(struct npcmX50_udc *udc)
+static void dtd_complete_irq(struct npcm_udc *udc)
 {
 	u32 bit_pos;
 	int i, ep_num, direction, bit_mask, status;
-	struct npcmX50_ep *curr_ep;
-	struct npcmX50_req *curr_req, *temp_req;
+	struct npcm_ep *curr_ep;
+	struct npcm_req *curr_req, *temp_req;
     struct usb_dr_device *dr_regs;
 
     if(!udc)
@@ -1900,8 +1890,8 @@ static void dtd_complete_irq(struct npcmX50_udc *udc)
 
 
 	/* Clear the bits in the register */
-	bit_pos = npcmX50_readl(&dr_regs->endptcomplete);
-	npcmX50_writel(bit_pos, &dr_regs->endptcomplete);
+	bit_pos = npcm_readl(&dr_regs->endptcomplete);
+	npcm_writel(bit_pos, &dr_regs->endptcomplete);
 
 	if (!bit_pos)
 		return;
@@ -1918,8 +1908,8 @@ static void dtd_complete_irq(struct npcmX50_udc *udc)
 		curr_ep = get_ep_by_pipe(udc, i);
 
 		/* If the ep is configured */
-		if (curr_ep->name[0] == '\0') {
-			NPCMX50_USB_WARN("Invalid EP?");
+		if (!curr_ep->ep.name) {
+			NPCM_USB_WARN("Invalid EP?");
 			continue;
 		}
 
@@ -1959,7 +1949,7 @@ static inline enum usb_device_speed portscx_device_speed(u32 reg)
 }
 
 /* Process a port change interrupt */
-static void port_change_irq(struct npcmX50_udc *udc)
+static void port_change_irq(struct npcm_udc *udc)
 {
     struct usb_dr_device *dr_regs = udc->dr_regs;
 
@@ -1967,10 +1957,10 @@ static void port_change_irq(struct npcmX50_udc *udc)
 		udc->bus_reset = 0;
 
 	/* Bus resetting is finished */
-	if (!(npcmX50_readl(&dr_regs->portsc1) & PORTSCX_PORT_RESET))
+	if (!(npcm_readl(&dr_regs->portsc1) & PORTSCX_PORT_RESET))
 		/* Get the speed */
 		udc->gadget.speed =
-			portscx_device_speed(npcmX50_readl(&dr_regs->portsc1));
+			portscx_device_speed(npcm_readl(&dr_regs->portsc1));
 
 	/* Update USB state */
 	if (!udc->resume_state)
@@ -1978,7 +1968,7 @@ static void port_change_irq(struct npcmX50_udc *udc)
 }
 
 /* Process suspend interrupt */
-static void suspend_irq(struct npcmX50_udc *udc)
+static void suspend_irq(struct npcm_udc *udc)
 {
 	udc->resume_state = udc->usb_state;
 	udc->usb_state = USB_STATE_SUSPENDED;
@@ -1988,7 +1978,7 @@ static void suspend_irq(struct npcmX50_udc *udc)
 		udc->driver->suspend(&udc->gadget);
 }
 
-static void bus_resume(struct npcmX50_udc *udc)
+static void bus_resume(struct npcm_udc *udc)
 {
 	udc->usb_state = udc->resume_state;
 	udc->resume_state = 0;
@@ -1999,7 +1989,7 @@ static void bus_resume(struct npcmX50_udc *udc)
 }
 
 /* Clear up all ep queues */
-static int reset_queues(struct npcmX50_udc *udc, bool bus_reset)
+static int reset_queues(struct npcm_udc *udc, bool bus_reset)
 {
 	u8 pipe;
 
@@ -2018,7 +2008,7 @@ static int reset_queues(struct npcmX50_udc *udc, bool bus_reset)
 }
 
 /* Process reset interrupt */
-static void reset_irq(struct npcmX50_udc *udc)
+static void reset_irq(struct npcm_udc *udc)
 {
 	u32 temp;
 	unsigned long timeout;
@@ -2031,8 +2021,8 @@ static void reset_irq(struct npcmX50_udc *udc)
 
 
 	/* Clear the device address */
-	temp = npcmX50_readl(&dr_regs->deviceaddr);
-	npcmX50_writel(temp & ~USB_DEVICE_ADDRESS_MASK, &dr_regs->deviceaddr);
+	temp = npcm_readl(&dr_regs->deviceaddr);
+	npcm_writel(temp & ~USB_DEVICE_ADDRESS_MASK, &dr_regs->deviceaddr);
 
 	udc->device_address = 0;
 
@@ -2046,27 +2036,27 @@ static void reset_irq(struct npcmX50_udc *udc)
 	udc->gadget.a_alt_hnp_support = 0;
 
 	/* Clear all the setup token semaphores */
-	temp = npcmX50_readl(&dr_regs->endptsetupstat);
-	npcmX50_writel(temp, &dr_regs->endptsetupstat);
+	temp = npcm_readl(&dr_regs->endptsetupstat);
+	npcm_writel(temp, &dr_regs->endptsetupstat);
 
 	/* Clear all the endpoint complete status bits */
-	temp = npcmX50_readl(&dr_regs->endptcomplete);
-	npcmX50_writel(temp, &dr_regs->endptcomplete);
+	temp = npcm_readl(&dr_regs->endptcomplete);
+	npcm_writel(temp, &dr_regs->endptcomplete);
 
 	timeout = jiffies + 100;
-	while (npcmX50_readl(&dr_regs->endpointprime)) {
+	while (npcm_readl(&dr_regs->endpointprime)) {
 		/* Wait until all endptprime bits cleared */
 		if (time_after(jiffies, timeout)) {
-			NPCMX50_USB_ERR("Timeout for reset\n");
+			NPCM_USB_ERR("Timeout for reset\n");
 			break;
 		}
 		cpu_relax();
 	}
 
 	/* Write 1s to the flush register */
-	npcmX50_writel(0xffffffff, &dr_regs->endptflush);
+	npcm_writel(0xffffffff, &dr_regs->endptflush);
 
-	if (npcmX50_readl(&dr_regs->portsc1) & PORTSCX_PORT_RESET) {
+	if (npcm_readl(&dr_regs->portsc1) & PORTSCX_PORT_RESET) {
 		VDBG("Bus reset %d", udc->id);
 		/* Bus is reseting */
 		udc->bus_reset = 1;
@@ -2094,9 +2084,9 @@ static void reset_irq(struct npcmX50_udc *udc)
 /*
  * USB device controller interrupt handler
  */
-static irqreturn_t npcmX50_udc_irq(int irq, void *_udc)
+static irqreturn_t npcm_udc_irq(int irq, void *_udc)
 {
-	struct npcmX50_udc *udc = _udc;
+	struct npcm_udc *udc = _udc;
 	u32 irq_src;
 	irqreturn_t status = IRQ_NONE;
 	unsigned long flags;
@@ -2112,22 +2102,22 @@ static irqreturn_t npcmX50_udc_irq(int irq, void *_udc)
 	if (udc->stopped)
 		return IRQ_NONE;
 	spin_lock_irqsave(&udc->lock, flags);
-	irq_src = npcmX50_readl(&dr_regs->usbsts) & npcmX50_readl(&dr_regs->usbintr);
+	irq_src = npcm_readl(&dr_regs->usbsts) & npcm_readl(&dr_regs->usbintr);
 	/* Clear notification bits */
-	npcmX50_writel(irq_src, &dr_regs->usbsts);
+	npcm_writel(irq_src, &dr_regs->usbsts);
 
 	/* VDBG("irq_src [0x%8x]", irq_src); */
 
 	/* Need to resume? */
 	if (udc->usb_state == USB_STATE_SUSPENDED)
-		if ((npcmX50_readl(&dr_regs->portsc1) & PORTSCX_PORT_SUSPEND) == 0)
+		if ((npcm_readl(&dr_regs->portsc1) & PORTSCX_PORT_SUSPEND) == 0)
 			bus_resume(udc);
 
 	/* USB Interrupt */
 	if (irq_src & USB_STS_INT) {
 		VDBG("Packet int");
 		/* Setup package, we only support ep0 as control ep */
-		if (npcmX50_readl(&dr_regs->endptsetupstat) & EP_SETUP_STATUS_EP0) {
+		if (npcm_readl(&dr_regs->endptsetupstat) & EP_SETUP_STATUS_EP0) {
 			tripwire_handler(udc, 0,
 					(u8 *) (&udc->local_setup_buff));
 			setup_received_irq(udc, &udc->local_setup_buff);
@@ -2135,7 +2125,7 @@ static irqreturn_t npcmX50_udc_irq(int irq, void *_udc)
 		}
 
 		/* completion of dtd */
-		if (npcmX50_readl(&dr_regs->endptcomplete)) {
+		if (npcm_readl(&dr_regs->endptcomplete)) {
 			dtd_complete_irq(udc);
 			status = IRQ_HANDLED;
 		}
@@ -2179,12 +2169,12 @@ static irqreturn_t npcmX50_udc_irq(int irq, void *_udc)
  * Hook to gadget drivers
  * Called by initialization code of gadget drivers
 *----------------------------------------------------------------*/
-static int npcmX50_udc_start(struct usb_gadget *gadget,
+static int npcm_udc_start(struct usb_gadget *gadget,
                         struct usb_gadget_driver *driver)
 {
 	int retval = 0;
 	unsigned long flags = 0;
-	struct npcmX50_udc *udc_controller = gadget_to_npcmX50(gadget);
+	struct npcm_udc *udc_controller = gadget_to_npcm(gadget);
 
 	/* lock is needed but whether should use this lock or another */
 	spin_lock_irqsave(&udc_controller->lock, flags);
@@ -2206,14 +2196,14 @@ static int npcmX50_udc_start(struct usb_gadget *gadget,
 					udc_controller->transceiver->otg,
 						    &udc_controller->gadget);
 			if (retval < 0) {
-				NPCMX50_USB_ERR("can't bind to transceiver\n");
+				NPCM_USB_ERR("can't bind to transceiver\n");
 				udc_controller->driver = NULL;
 				return retval;
 			}
 		}
 	}
 #if 0
-    // npcmX50_pullup starts the controller
+    // npcm_pullup starts the controller
     else {
 		/* Enable DR IRQ reg and set USBCMD reg Run bit */
 		dr_controller_run(udc_controller);
@@ -2233,11 +2223,11 @@ static int npcmX50_udc_start(struct usb_gadget *gadget,
 }
 
 /* Disconnect from gadget driver */
-static int npcmX50_udc_stop(struct usb_gadget *gadget)
+static int npcm_udc_stop(struct usb_gadget *gadget)
 {
-	struct npcmX50_ep *loop_ep;
+	struct npcm_ep *loop_ep;
 	unsigned long flags;
-    struct npcmX50_udc *udc_controller = gadget_to_npcmX50(gadget);
+    struct npcm_udc *udc_controller = gadget_to_npcm(gadget);
 
 if (!IS_ERR_OR_NULL(udc_controller->transceiver))
 		otg_set_peripheral(udc_controller->transceiver->otg, NULL);
@@ -2275,19 +2265,19 @@ if (!IS_ERR_OR_NULL(udc_controller->transceiver))
 
 #include <linux/seq_file.h>
 
-//static const char proc_filename[] = "driver/npcmX50_usb2_udc";
-#define PROC_FILENAME "driver/npcmX50_usb2_udc"
+//static const char proc_filename[] = "driver/npcm_usb2_udc";
+#define PROC_FILENAME "driver/npcm_udc"
 char proc_filename[32];
 
-static int npcmX50_proc_read(struct seq_file *m, void *v)
+static int npcm_proc_read(struct seq_file *m, void *v)
 {
 	unsigned long flags;
 	int i;
 	u32 tmp_reg;
-	struct npcmX50_ep *ep = NULL;
-	struct npcmX50_req *req;
+	struct npcm_ep *ep = NULL;
+	struct npcm_req *req;
     struct usb_dr_device *dr_regs;
-    struct npcmX50_udc *udc = m->private;
+    struct npcm_udc *udc = m->private;
 
 
 	spin_lock_irqsave(&udc->lock, flags);
@@ -2302,13 +2292,13 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 			udc->driver ? udc->driver->driver.name : "(none)");
 
 	/* ------ DR Registers ----- */
-    tmp_reg = npcmX50_readl(&dr_regs->sbscfg);
+    tmp_reg = npcm_readl(&dr_regs->sbscfg);
     seq_printf(m,
             "SBSCFG reg:\n"
             "AHBBRST: %d\n\n",
             tmp_reg);
 
-	tmp_reg = npcmX50_readl(&dr_regs->usbcmd);
+	tmp_reg = npcm_readl(&dr_regs->usbcmd);
 	seq_printf(m,
 			"USBCMD reg:\n"
 			"SetupTW: %d\n"
@@ -2316,7 +2306,7 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 			(tmp_reg & USB_CMD_SUTW) ? 1 : 0,
 			(tmp_reg & USB_CMD_RUN_STOP) ? "Run" : "Stop");
 
-	tmp_reg = npcmX50_readl(&dr_regs->usbsts);
+	tmp_reg = npcm_readl(&dr_regs->usbsts);
 	seq_printf(m,
 			"USB Status Reg:\n"
 			"Dr Suspend: %d\n"
@@ -2328,7 +2318,7 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 			(tmp_reg & USB_STS_SYS_ERR) ? "Err" : "Normal",
 			(tmp_reg & USB_STS_ERR) ? "Err detected" : "No err");
 
-	tmp_reg = npcmX50_readl(&dr_regs->usbintr);
+	tmp_reg = npcm_readl(&dr_regs->usbintr);
 	seq_printf(m,
 			"USB Intrrupt Enable Reg:\n"
 			"Sleep Enable: %d\n"
@@ -2346,23 +2336,23 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 			(tmp_reg & USB_INTR_ERR_INT_EN) ? 1 : 0,
 			(tmp_reg & USB_INTR_INT_EN) ? 1 : 0);
 
-	tmp_reg = npcmX50_readl(&dr_regs->frindex);
+	tmp_reg = npcm_readl(&dr_regs->frindex);
 	seq_printf(m,
 			"USB Frame Index Reg: Frame Number is 0x%x\n\n",
 			(tmp_reg & USB_FRINDEX_MASKS));
 
-	tmp_reg = npcmX50_readl(&dr_regs->deviceaddr);
+	tmp_reg = npcm_readl(&dr_regs->deviceaddr);
 	seq_printf(m,
 			"USB Device Address Reg: Device Addr is 0x%x\n\n",
 			(tmp_reg & USB_DEVICE_ADDRESS_MASK));
 
-	tmp_reg = npcmX50_readl(&dr_regs->endpointlistaddr);
+	tmp_reg = npcm_readl(&dr_regs->endpointlistaddr);
 	seq_printf(m,
 			"USB Endpoint List Address Reg: "
 			"Device Addr is 0x%x\n\n",
 			(tmp_reg & USB_EP_LIST_ADDRESS_MASK));
 
-	tmp_reg = npcmX50_readl(&dr_regs->portsc1);
+	tmp_reg = npcm_readl(&dr_regs->portsc1);
 	seq_printf(m,
 		"USB Port Status&Control Reg:\n"
 		"Port Transceiver Type : %s\n"
@@ -2401,7 +2391,7 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 		(tmp_reg & PORTSCX_CURRENT_CONNECT_STATUS) ?
 		"Attached" : "Not-Att");
 
-	tmp_reg = npcmX50_readl(&dr_regs->usbmode);
+	tmp_reg = npcm_readl(&dr_regs->usbmode);
 	seq_printf(m,
 			"USB Mode Reg = 0x%08X: Controller Mode is: %s\n\n", tmp_reg, ( {
 				const char *s;
@@ -2418,17 +2408,17 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 				s;
 			} ));
 
-	tmp_reg = npcmX50_readl(&dr_regs->endptsetupstat);
+	tmp_reg = npcm_readl(&dr_regs->endptsetupstat);
 	seq_printf(m,
 			"Endpoint Setup Status Reg: SETUP on ep 0x%x\n\n",
 			(tmp_reg & EP_SETUP_STATUS_MASK));
 
 	for (i = 0; i < udc->max_ep / 2; i++) {
-		tmp_reg = npcmX50_readl(&dr_regs->endptctrl[i]);
+		tmp_reg = npcm_readl(&dr_regs->endptctrl[i]);
 		seq_printf(m, "EP Ctrl Reg [0x%x]: = [0x%x]\n",
 				i, tmp_reg);
 	}
-	tmp_reg = npcmX50_readl(&dr_regs->endpointprime);
+	tmp_reg = npcm_readl(&dr_regs->endpointprime);
 	seq_printf(m, "EP Prime Reg = [0x%x]\n\n", tmp_reg);
 
 #if 0
@@ -2444,7 +2434,7 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 #endif
 #endif
 
-	/* ------npcmX50_udc, npcmX50_ep, npcmX50_request structure information ----- */
+	/* ------npcm_udc, npcm_ep, npcm_request structure information ----- */
 	ep = &udc->eps[0];
 	seq_printf(m, "For %s Maxpkt is 0x%x index is 0x%x\n",
 			ep->ep.name, ep_maxpacket(ep), ep_index(ep));
@@ -2490,22 +2480,13 @@ static int npcmX50_proc_read(struct seq_file *m, void *v)
 /*
  * seq_file wrappers for procfile show routines.
  */
-static int npcmX50_proc_open(struct inode *inode, struct file *file)
+static int npcm_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, npcmX50_proc_read, PDE_DATA(file_inode(file)));
+	return single_open(file, npcm_proc_read, PDE_DATA(file_inode(file)));
 }
 
-static const struct file_operations npcmX50_proc_fops = {
-	.open		= npcmX50_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-
-#define create_proc_file(udc)	proc_create_data(proc_filename, \
-				0, NULL, &npcmX50_proc_fops, udc)
-
+#define create_proc_file() \
+	proc_create_single(proc_filename, 0, NULL, npcm_proc_read)
 #define remove_proc_file()	remove_proc_entry(proc_filename, NULL)
 
 #else				/* !CONFIG_USB_GADGET_DEBUG_FILES */
@@ -2518,15 +2499,15 @@ static const struct file_operations npcmX50_proc_fops = {
 /*-------------------------------------------------------------------------*/
 
 /* Release udc structures */
-static void npcmX50_udc_release(struct device *dev)
+static void npcm_udc_release(struct device *dev)
 {
-    struct npcmX50_udc *udc_controller = dev_get_drvdata(dev->parent);
+    struct npcm_udc *udc_controller = dev_get_drvdata(dev->parent);
 
     if(!udc_controller)
         return;
 
     complete(udc_controller->done);
-#ifndef NPCMX50_USB_DESC_PHYS_BASE_ADDR
+#ifndef NPCM_USB_DESC_PHYS_BASE_ADDR
     dma_free_coherent(dev->parent, udc_controller->ep_qh_size,
             udc_controller->ep_qh, udc_controller->ep_qh_dma);
 #endif
@@ -2542,18 +2523,18 @@ static void npcmX50_udc_release(struct device *dev)
  * init resource for globle controller
  * Return the udc handle on success or NULL on failure
  ------------------------------------------------------------------*/
-static int struct_udc_setup(struct npcmX50_udc *udc,
+static int struct_udc_setup(struct npcm_udc *udc,
 		struct platform_device *pdev)
 {
-	struct npcmX50_usb2_platform_data *pdata;
+	struct npcm_usb2_platform_data *pdata;
 	size_t size;
 
 	pdata = dev_get_platdata(&pdev->dev);
 	udc->phy_mode = pdata->phy_mode;
 
-	udc->eps = kzalloc(sizeof(struct npcmX50_ep) * udc->max_ep, GFP_KERNEL);
+	udc->eps = kcalloc(udc->max_ep, sizeof(struct npcm_ep), GFP_KERNEL);
 	if (!udc->eps) {
-		NPCMX50_USB_ERR("malloc npcmX50_ep failed\n");
+		NPCM_USB_ERR("malloc npcm_ep failed\n");
 		return -1;
 	}
 
@@ -2565,7 +2546,7 @@ static int struct_udc_setup(struct npcmX50_udc *udc,
 		size += QH_ALIGNMENT + 1;
 		size &= ~(QH_ALIGNMENT - 1);
 	}
-#ifdef NPCMX50_USB_DESC_PHYS_BASE_ADDR
+#ifdef NPCM_USB_DESC_PHYS_BASE_ADDR
 	{
 		void __iomem *addr = NULL;
 		struct resource *res = NULL;
@@ -2575,7 +2556,7 @@ static int struct_udc_setup(struct npcmX50_udc *udc,
 			return -ENODEV;
 	  	}
 
-		if (MINIMUM_NPCMX50_UDC_EPQ_DTD_SIZE > resource_size(res)) {
+		if (MINIMUM_NPCM_UDC_EPQ_DTD_SIZE > resource_size(res)) {
 			pr_err("Minimum UDC epq dtd size below 0x800\n");
 			return -ENODEV;
 		}
@@ -2585,14 +2566,14 @@ static int struct_udc_setup(struct npcmX50_udc *udc,
 		udc->ep_qh_dma = (dma_addr_t)res->start;
 		udc->ep_qh = (void *)addr;
 		udc->dtd_size = resource_size(res);
-		VDBG("NPCMX50 USB DESC phy 0x%x virt 0x%x size 0x%x\n",(int)res->start,(int)addr,(int)resource_size(res));
+		VDBG("NPCM USB DESC phy 0x%x virt 0x%x size 0x%x\n",(int)res->start,(int)addr,(int)resource_size(res));
 	}
 #else
 	udc->ep_qh = dma_alloc_coherent(&pdev->dev, size,
 					&udc->ep_qh_dma, GFP_KERNEL);
 	VDBG("size=%d udc->ep_qh = %p %08x udc->ep_qh_dma = %08x\n", size, udc->ep_qh, (u32)udc->ep_qh, (u32)udc->ep_qh_dma);
 	if (!udc->ep_qh) {
-		NPCMX50_USB_ERR("malloc QHs for udc failed\n");
+		NPCM_USB_ERR("malloc QHs for udc failed\n");
 		kfree(udc->eps);
 		return -1;
 	}
@@ -2601,9 +2582,9 @@ static int struct_udc_setup(struct npcmX50_udc *udc,
 	udc->ep_qh_size = size;
 
 	/* Initialize ep0 status request structure */
-	/* FIXME: npcmX50_alloc_request() ignores ep argument */
-	udc->status_req = container_of(npcmX50_alloc_request(NULL, GFP_KERNEL),
-			struct npcmX50_req, req);
+	/* FIXME: npcm_alloc_request() ignores ep argument */
+	udc->status_req = container_of(npcm_alloc_request(NULL, GFP_KERNEL),
+			struct npcm_req, req);
 	/* allocate a small amount of memory to get valid address */
 	udc->status_req->req.buf = kmalloc(8, GFP_KERNEL);
 
@@ -2616,15 +2597,15 @@ static int struct_udc_setup(struct npcmX50_udc *udc,
 }
 
 /*----------------------------------------------------------------
- * Setup the npcmX50_ep struct for eps
- * Link npcmX50_ep->ep to gadget->ep_list
+ * Setup the npcm_ep struct for eps
+ * Link npcm_ep->ep to gadget->ep_list
  * ep0out is not used so do nothing here
  * ep0in should be taken care
  *--------------------------------------------------------------*/
-static int struct_ep_setup(struct npcmX50_udc *udc, unsigned char index,
+static int struct_ep_setup(struct npcm_udc *udc, unsigned char index,
 		char *name, int link)
 {
-	struct npcmX50_ep *ep = &udc->eps[index];
+	struct npcm_ep *ep = &udc->eps[index];
 
 	ep->udc = udc;
 	
@@ -2633,7 +2614,7 @@ static int struct_ep_setup(struct npcmX50_udc *udc, unsigned char index,
 	
 	ep->ep.name = ep->name;
 
-	ep->ep.ops = &npcmX50_ep_ops;
+	ep->ep.ops = &npcm_ep_ops;
 	ep->stopped = 0;
 
 	if (index == 0) {
@@ -2643,10 +2624,12 @@ static int struct_ep_setup(struct npcmX50_udc *udc, unsigned char index,
 		ep->ep.caps.type_bulk = true;
 		ep->ep.caps.type_int = true;
 	}
+
 	if (index & 1)
 		ep->ep.caps.dir_in = true;
 	else
 		ep->ep.caps.dir_out = true;
+
 	/* for ep0: maxP defined in desc
 	 * for other eps, maxP is set by epautoconfig() called by gadget layer
 	 */
@@ -2665,19 +2648,19 @@ static int struct_ep_setup(struct npcmX50_udc *udc, unsigned char index,
 }
 
 /* Driver probe function
- * all intialization operations implemented here except enabling usb_intr reg
+ * all initialization operations implemented here except enabling usb_intr reg
  * board setup should have been done in the platform code
  */
-static int npcmX50_udc_probe(struct platform_device *pdev)
+static int npcm_udc_probe(struct platform_device *pdev)
 {
-	struct npcmX50_usb2_platform_data *pdata = NULL;
+	struct npcm_usb2_platform_data *pdata = NULL;
 	struct device *dev = &pdev->dev;
 	void __iomem *addr = NULL;
 	struct device_node *np = pdev->dev.of_node;
 	int ret = -ENODEV;
 	unsigned int i;
 	u32 dccparams;
-    struct npcmX50_udc *udc_controller;
+    struct npcm_udc *udc_controller;
     struct usb_dr_device *dr_regs;
 	struct resource *res = NULL;
 	static int first_init = 1;
@@ -2692,17 +2675,17 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
     if (pdev->id == 0)
     {
         DBG("Replace with USB9");
-		npcmx50_udc_replace_usb9();
+		npcm_udc_replace_usb9();
         pdev->id = 9;
     }
     else if (pdev->id == 9)
         pdev->id = 0;
 #endif
-    printk(KERN_DEBUG "npcmX50_udc_probe start, device = %d\n", pdev->id);
+    printk(KERN_DEBUG "npcm_udc_probe start, device = %d\n", pdev->id);
 
- 	udc_controller = kzalloc(sizeof(struct npcmX50_udc), GFP_KERNEL);
+ 	udc_controller = kzalloc(sizeof(struct npcm_udc), GFP_KERNEL);
 	if (udc_controller == NULL) {
-		NPCMX50_USB_ERR("malloc udc failed\n");
+		NPCM_USB_ERR("malloc udc failed\n");
 		return -ENOMEM;
 	}
 
@@ -2787,7 +2770,7 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
 		 break;
 	 default :
 		 ret = -ENODEV;
-		 pr_err("npcmx50_udc_enable_devices failed\n");
+		 pr_err("npcm_udc_enable_devices failed\n");
 		 goto err_iounmap;
 	}
 
@@ -2829,7 +2812,7 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
     udc_controller->gadget.name = drv_20_name;
 
 #ifdef CONFIG_USB_OTG
-	if (pdata->operating_mode == NPCMX50_USB2_DR_OTG) {
+	if (pdata->operating_mode == NPCM_USB2_DR_OTG) {
 		udc_controller->transceiver = usb_get_phy(USB_PHY_TYPE_USB2);
 		if (IS_ERR_OR_NULL(udc_controller->transceiver)) {
 			ERR("Can't find OTG driver!\n");
@@ -2839,17 +2822,17 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
 	}
 #endif
 	/* Set accessors only after pdata->init() ! */
-	npcmX50_set_accessors(pdata);
+	npcm_set_accessors(pdata);
 
 	/* Initialize USB clocks */
-	ret = npcmX50_udc_clk_init(pdev);
+	ret = npcm_udc_clk_init(pdev);
 	if (ret < 0)
 		goto err_iounmap_noclk;
 
 	/* Read Device Controller Capability Parameters register */
-	dccparams = npcmX50_readl(&dr_regs->dccparams);
+	dccparams = npcm_readl(&dr_regs->dccparams);
 	if (!(dccparams & DCCPARAMS_DC)) {
-		NPCMX50_USB_ERR("This SOC doesn't support device role\n");
+		NPCM_USB_ERR("This SOC doesn't support device role\n");
 		ret = -ENODEV;
 		goto err_iounmap;
 	}
@@ -2867,17 +2850,17 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
   	udc_controller->irq = USB_INTERRUPT(udc_controller->id);
 #endif
 
-	ret = request_irq(udc_controller->irq, npcmX50_udc_irq, IRQF_SHARED,
+	ret = request_irq(udc_controller->irq, npcm_udc_irq, IRQF_SHARED,
 			udc_controller->gadget.name, udc_controller);
 	if (ret != 0) {
-		NPCMX50_USB_ERR("cannot request irq %d err %d\n",
+		NPCM_USB_ERR("cannot request irq %d err %d\n",
 				udc_controller->irq, ret);
 		goto err_iounmap;
 	}
 
 	/* Initialize the udc structure including QH member and other member */
 	if (struct_udc_setup(udc_controller, pdev)) {
-		NPCMX50_USB_ERR("Can't initialize udc data structure\n");
+		NPCM_USB_ERR("Can't initialize udc data structure\n");
 		ret = -ENOMEM;
 		goto err_free_irq;
 	}
@@ -2888,14 +2871,14 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
 		dr_controller_setup(udc_controller);
 	}
 
-	npcmX50_udc_clk_finalize(pdev);
+	npcm_udc_clk_finalize(pdev);
 	
-	/*ret = npcmX50_udc_clk_finalize(pdev);
+	/*ret = npcm_udc_clk_finalize(pdev);
 	if (ret)
 		goto err_free_irq;*/
 
 	/* Setup gadget structure */
-	udc_controller->gadget.ops = &npcmX50_gadget_ops;
+	udc_controller->gadget.ops = &npcm_gadget_ops;
 	udc_controller->gadget.max_speed = USB_SPEED_HIGH;
 	udc_controller->gadget.ep0 = &udc_controller->eps[0].ep;
 	INIT_LIST_HEAD(&udc_controller->gadget.ep_list);
@@ -2920,7 +2903,7 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
 	/* for ep0: the desc defined here;
 	 * for other eps, gadget layer called ep_enable with defined desc
 	 */
-	udc_controller->eps[0].ep.desc = &npcmX50_ep0_desc;
+	udc_controller->eps[0].ep.desc = &npcm_ep0_desc;
 	usb_ep_set_maxpacket_limit(&udc_controller->eps[0].ep,
 				   USB_MAX_CTRL_PAYLOAD);
 
@@ -2936,7 +2919,7 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
 	}
 
 	/* use dma_pool for TD management */
-#ifdef NPCMX50_USB_DESC_PHYS_BASE_ADDR
+#ifdef NPCM_USB_DESC_PHYS_BASE_ADDR
     {
         int size_of_queue_heads;
         int td_count;
@@ -2969,18 +2952,18 @@ static int npcmX50_udc_probe(struct platform_device *pdev)
 #endif    
 
 	ret = usb_add_gadget_udc_release(&pdev->dev, &udc_controller->gadget,
-			npcmX50_udc_release);	
+			npcm_udc_release);	
 if (ret)
 		goto err_del_udc;
 #ifdef CONFIG_USB_GADGET_DEBUG_FILES
     snprintf(proc_filename, sizeof(proc_filename), "%s.%d", PROC_FILENAME, udc_controller->id );
 #endif
     create_proc_file(udc_controller);
-    printk(KERN_DEBUG "npcmX50_udc_probe end\n");
+    printk(KERN_DEBUG "npcm_udc_probe end\n");
 	return 0;
 
 err_del_udc:
-#ifndef NPCMX50_USB_DESC_PHYS_BASE_ADDR
+#ifndef NPCM_USB_DESC_PHYS_BASE_ADDR
 	dma_pool_destroy(udc_controller->td_pool);
 #endif
 err_free_irq:
@@ -2988,7 +2971,7 @@ err_free_irq:
 err_iounmap:
 	if (pdata && pdata->exit)
 		pdata->exit(pdev);
-	npcmX50_udc_clk_release();
+	npcm_udc_clk_release();
 err_iounmap_noclk:
 	//iounmap(dr_regs);
 
@@ -2999,10 +2982,10 @@ err_iounmap_noclk:
 /* Driver removal function
  * Free resources and finish pending transactions
  */
-static int npcmX50_udc_remove(struct platform_device *pdev)
+static int npcm_udc_remove(struct platform_device *pdev)
 {
-    struct npcmX50_udc *udc_controller = dev_get_drvdata(&pdev->dev);
-	struct npcmX50_usb2_platform_data *pdata = dev_get_platdata(&pdev->dev);
+    struct npcm_udc *udc_controller = dev_get_drvdata(&pdev->dev);
+	struct npcm_usb2_platform_data *pdata = dev_get_platdata(&pdev->dev);
 
 	DECLARE_COMPLETION_ONSTACK(done);
 
@@ -3015,7 +2998,7 @@ static int npcmX50_udc_remove(struct platform_device *pdev)
 	usb_del_gadget_udc(&udc_controller->gadget);
 
 
-	npcmX50_udc_clk_release();
+	npcm_udc_clk_release();
 
 	/* DR has been stopped in usb_gadget_unregister_driver() */
 #ifdef CONFIG_USB_GADGET_DEBUG_FILES
@@ -3028,7 +3011,7 @@ static int npcmX50_udc_remove(struct platform_device *pdev)
 	kfree(udc_controller->status_req);
 	kfree(udc_controller->eps);
 
-#ifdef NPCMX50_USB_DESC_PHYS_BASE_ADDR
+#ifdef NPCM_USB_DESC_PHYS_BASE_ADDR
     {
         int td_count;
         struct ep_td_struct *dtd;
@@ -3063,9 +3046,9 @@ static int npcmX50_udc_remove(struct platform_device *pdev)
  * Modify Power management attributes
  * Used by OTG statemachine to disable gadget temporarily
  -----------------------------------------------------------------*/
-static int npcmX50_udc_suspend(struct platform_device *pdev, pm_message_t state)
+static int npcm_udc_suspend(struct platform_device *pdev, pm_message_t state)
 {
-    struct npcmX50_udc *udc_controller = dev_get_drvdata(&pdev->dev);
+    struct npcm_udc *udc_controller = dev_get_drvdata(&pdev->dev);
 
     if (!udc_controller)
        return -ENODEV;
@@ -3078,9 +3061,9 @@ static int npcmX50_udc_suspend(struct platform_device *pdev, pm_message_t state)
  * Invoked on USB resume. May be called in_interrupt.
  * Here we start the DR controller and enable the irq
  *-----------------------------------------------------------------*/
-static int npcmX50_udc_resume(struct platform_device *pdev)
+static int npcm_udc_resume(struct platform_device *pdev)
 {
-    struct npcmX50_udc *udc_controller = dev_get_drvdata(&pdev->dev);
+    struct npcm_udc *udc_controller = dev_get_drvdata(&pdev->dev);
 
     if (!udc_controller)
        return -ENODEV;
@@ -3096,10 +3079,10 @@ static int npcmX50_udc_resume(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcmX50_udc_otg_suspend(struct device *dev, pm_message_t state)
+static int npcm_udc_otg_suspend(struct device *dev, pm_message_t state)
 {
-    struct npcmX50_udc *udc_controller = dev_get_drvdata(dev);
-	struct npcmX50_udc *udc;
+    struct npcm_udc *udc_controller = dev_get_drvdata(dev);
+	struct npcm_udc *udc;
 	u32 mode, usbcmd;
     struct usb_dr_device *dr_regs;
 
@@ -3110,7 +3093,7 @@ static int npcmX50_udc_otg_suspend(struct device *dev, pm_message_t state)
 	
     dr_regs = udc->dr_regs;
 
-	mode = npcmX50_readl(&dr_regs->usbmode) & USB_MODE_CTRL_MODE_MASK;
+	mode = npcm_readl(&dr_regs->usbmode) & USB_MODE_CTRL_MODE_MASK;
 
 	pr_debug("%s(): mode 0x%x stopped %d\n", __func__, mode, udc->stopped);
 
@@ -3131,8 +3114,8 @@ static int npcmX50_udc_otg_suspend(struct device *dev, pm_message_t state)
 	}
 
 	/* stop the controller */
-	usbcmd = npcmX50_readl(&dr_regs->usbcmd) & ~USB_CMD_RUN_STOP;
-	npcmX50_writel(usbcmd, &dr_regs->usbcmd);
+	usbcmd = npcm_readl(&dr_regs->usbcmd) & ~USB_CMD_RUN_STOP;
+	npcm_writel(usbcmd, &dr_regs->usbcmd);
 
 	udc->stopped = 1;
 
@@ -3141,9 +3124,9 @@ static int npcmX50_udc_otg_suspend(struct device *dev, pm_message_t state)
 	return 0;
 }
 
-static int npcmX50_udc_otg_resume(struct device *dev)
+static int npcm_udc_otg_resume(struct device *dev)
 {
-    struct npcmX50_udc *udc_controller = dev_get_drvdata(dev);
+    struct npcm_udc *udc_controller = dev_get_drvdata(dev);
 
 	pr_debug("%s(): stopped %d  already_stopped %d\n", __func__,
 		 udc_controller->stopped, udc_controller->already_stopped);
@@ -3160,7 +3143,7 @@ static int npcmX50_udc_otg_resume(struct device *dev)
 
 	pr_info("USB Gadget resume\n");
 
-	return npcmX50_udc_resume(NULL);
+	return npcm_udc_resume(NULL);
 }
 
 /*-------------------------------------------------------------------------
@@ -3177,20 +3160,20 @@ static const struct of_device_id nuvoton_udc_of_match[] = {
 MODULE_DEVICE_TABLE(of, nuvoton_udc_of_match);
 
 static struct platform_driver udc_20_driver = {
-	.remove		= npcmX50_udc_remove,
-	/* Just for NPCMX50 i.mx SoC currently */
+	.remove		= npcm_udc_remove,
+	/* Just for npcm i.mx SoC currently */
 	/* these suspend and resume are not usb suspend and resume */
-	.suspend	= npcmX50_udc_suspend,
-	.resume		= npcmX50_udc_resume,
+	.suspend	= npcm_udc_suspend,
+	.resume		= npcm_udc_resume,
 	#ifdef CONFIG_OF
-	.probe      = npcmX50_udc_probe,
+	.probe      = npcm_udc_probe,
 	#endif
 	.driver		= {
 			.name = drv_20_name,
 			.owner = THIS_MODULE,
 			/* udc suspend/resume called from OTG driver */
-			.suspend = npcmX50_udc_otg_suspend,
-			.resume  = npcmX50_udc_otg_resume,
+			.suspend = npcm_udc_otg_suspend,
+			.resume  = npcm_udc_otg_resume,
 			.of_match_table = nuvoton_udc_of_match,
 	},
 };
@@ -3205,7 +3188,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[0].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3215,7 +3198,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[1].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3225,7 +3208,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[2].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3235,7 +3218,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[3].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3245,7 +3228,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[4].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3255,7 +3238,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[5].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3265,7 +3248,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[6].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3275,7 +3258,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[7].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3285,7 +3268,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[8].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
     {
@@ -3295,7 +3278,7 @@ struct platform_device usb_platform_device[] = {
                 .dma_mask              = &usb_platform_device[9].dev.coherent_dma_mask,
                 .coherent_dma_mask = 0xffffffffUL, 
                 .platform_data         = &usb_data,
-                .release               = npcmX50_udc_release,
+                .release               = npcm_udc_release,
         },
     },
 };
@@ -3308,7 +3291,7 @@ static int __init udc_init(void)
 	printk(KERN_INFO "%s (%s)\n", driver_desc, DRIVER_VERSION);
 
     // register platform devices
-    for (i = 0; i < NPCMX50_NUM_DEVICES; i++) {
+    for (i = 0; i < NPCM_NUM_DEVICES; i++) {
         platform_device_register(&usb_platform_device[i]);
 
     }
@@ -3318,7 +3301,7 @@ static int __init udc_init(void)
 
     udc_20_driver.driver.bus = &usb_udc_bus_type;
 
-    result =  platform_driver_probe(&udc_20_driver, npcmX50_udc_probe);
+    result =  platform_driver_probe(&udc_20_driver, npcm_udc_probe);
 
     return result;
 }
@@ -3330,7 +3313,7 @@ static void __exit udc_exit(void)
     int i;
 
     // unregister platform devices
-    for (i = 0; i < NPCMX50_NUM_DEVICES; i++) {
+    for (i = 0; i < NPCM_NUM_DEVICES; i++) {
         platform_device_unregister(&usb_platform_device[i]);
     }
 
@@ -3346,4 +3329,4 @@ module_platform_driver(udc_20_driver);
 
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:npcmX50-usb2-udc");
+MODULE_ALIAS("platform:npcm-udc");

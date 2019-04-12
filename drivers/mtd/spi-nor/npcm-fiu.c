@@ -857,6 +857,8 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct npcm_fiu_bus *host;
 	struct resource *res;
+	u32 max_speed_hz;
+	int ret;
 
 	host = devm_kzalloc(dev, sizeof(*host), GFP_KERNEL);
 	if (!host)
@@ -898,6 +900,14 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 	host->clk = devm_clk_get(dev, NULL);
 	if (IS_ERR(host->clk))
 		return PTR_ERR(host->clk);
+
+	if (!of_property_read_u32(dev->of_node, "spi-max-frequency",
+				  &max_speed_hz)) {
+		pr_info("spi-max-frequency %d\n",max_speed_hz);
+		ret = clk_set_rate(host->clk, max_speed_hz);
+		if (ret < 0)
+			dev_warn(dev, "Failed setting new FIU3 max frequancy, return to BB FIU3 frequancy\n");
+	}
 
 	host->spix_mode = of_property_read_bool(dev->of_node, "spix-mode");
 

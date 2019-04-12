@@ -439,8 +439,8 @@ config USB_GADGET_XILINX
 	  dynamically linked module called "udc-xilinx" and force all
 	  gadget drivers to also be dynamically linked.
 	  
-config USB_GADGET_NPCMX50_USB2
-	bool "NPCMX50 Highspeed USB DR Peripheral Controller"
+config USB_GADGET_NPCM_USB2
+	bool "NPCM Highspeed USB DR Peripheral Controller"
 	depends on ARCH_NPCM7XX
 	select USB_GADGET_DUALSPEED
 	help
@@ -454,9 +454,9 @@ config USB_GADGET_NPCMX50_USB2
 	   dynamically linked module called "npcmX50_usb2_udc" and force
 	   all gadget drivers to also be dynamically linked.
 
-config USB_NPCMX50_USB2
+config USB_NPCM_UDC
 	tristate
-	depends on USB_GADGET_NPCMX50_USB2
+	depends on USB_GADGET_NPCM_USB2
 	default USB_GADGET
 	select USB_GADGET_SELECTED
 

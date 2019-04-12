@@ -694,10 +694,19 @@ static int stmmac_ethtool_op_set_eee(struct net_device *dev,
 	struct stmmac_priv *priv = netdev_priv(dev);
 
 	priv->eee_enabled = edata->eee_enabled;
-
-	if (!priv->eee_enabled)
+	
+	if (!priv->eee_enabled){
 		stmmac_disable_eee_mode(priv);
-	else {
+		edata->advertised = 0;
+	} else {
+		int ret;
+
+		/* Advertise supported eee on PHY */
+		edata->advertised = edata->supported;
+		ret = phy_ethtool_set_eee(dev->phydev, edata);
+		if (ret < 0)
+			return ret;
+
 		/* We are asking for enabling the EEE but it is safe
 		 * to verify all by invoking the eee_init function.
 		 * In case of failure it will return an error.

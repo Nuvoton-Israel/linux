@@ -369,12 +369,9 @@ static void stmmac_enable_eee_mode(struct stmmac_priv *priv)
  */
 void stmmac_disable_eee_mode(struct stmmac_priv *priv)
 {
-	unsigned long flags;
 	stmmac_reset_eee_mode(priv, priv->hw);
 	del_timer_sync(&priv->eee_ctrl_timer);
-	spin_lock_irqsave(&priv->lpi_lock, flags);
 	priv->tx_path_in_lpi_mode = false;
-	spin_unlock_irqrestore(&priv->lpi_lock, flags);
 }
 
 /**
@@ -390,6 +387,30 @@ static void stmmac_eee_ctrl_timer(struct timer_list *t)
 
 	stmmac_enable_eee_mode(priv);
 	mod_timer(&priv->eee_ctrl_timer, STMMAC_LPI_T(eee_timer));
+}
+
+/**
+ * stmmac_fixup_eee_disable: Disable EEE if supported.
+ * @priv: driver private structure
+ * Description:
+ *  Disable EEE at phy level.
+ */
+int stmmac_fixup_eee_disable(struct stmmac_priv *priv)
+{
+	int ret = 0;
+	struct ethtool_eee edata;
+	struct net_device *ndev = priv->dev;
+
+	/* Check if the PHY supports EEE */
+	if (!phy_init_eee(ndev->phydev, 1)) {
+		ret = phy_ethtool_get_eee(ndev->phydev, &edata);
+		if (ret < 0)
+			return ret;
+		/* Disable eee advertise on PHY */
+		edata.advertised = 0;
+		ret = phy_ethtool_set_eee(ndev->phydev, &edata);
+	}
+	return ret;
 }
 
 /**
@@ -422,6 +443,10 @@ bool stmmac_eee_init(struct stmmac_priv *priv)
 	/* MAC core supports the EEE feature. */
 	if (priv->dma_cap.eee) {
 		int tx_lpi_timer = priv->tx_lpi_timer;
+
+		/* Disable EEE at phy level when fixup is active */
+		if (priv->plat->eee_force_disable)
+			stmmac_fixup_eee_disable(priv);
 
 		/* Check if the PHY supports EEE */
 		if (phy_init_eee(ndev->phydev, 1)) {
@@ -1942,17 +1967,9 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue)
 		netif_tx_wake_queue(netdev_get_tx_queue(priv->dev, queue));
 	}
 
-	if (priv->eee_enabled) {
-		unsigned long flags;
-
-		spin_lock_irqsave(&priv->lpi_lock, flags);
-		if (!priv->tx_path_in_lpi_mode) {
-		    stmmac_enable_eee_mode(priv);
-			mod_timer(&priv->eee_ctrl_timer,
-				  STMMAC_LPI_T(eee_timer));
-		}
-
-		spin_unlock_irqrestore(&priv->lpi_lock, flags);
+	if ((priv->eee_enabled) && (!priv->tx_path_in_lpi_mode)) {
+		stmmac_enable_eee_mode(priv);
+		mod_timer(&priv->eee_ctrl_timer, STMMAC_LPI_T(eee_timer));
 	}
 
 	__netif_tx_unlock_bh(netdev_get_tx_queue(priv->dev, queue));
@@ -3709,13 +3726,11 @@ static irqreturn_t stmmac_interrupt(int irq, void *dev_id)
 		int mtl_status;
 
 		if (unlikely(status)) {
-			spin_lock(&priv->lpi_lock);
 			/* For LPI we need to save the tx status */
 			if (status & CORE_IRQ_TX_PATH_IN_LPI_MODE)
 				priv->tx_path_in_lpi_mode = true;
 			if (status & CORE_IRQ_TX_PATH_EXIT_LPI_MODE)
 				priv->tx_path_in_lpi_mode = false;
-			spin_unlock(&priv->lpi_lock);
 		}
 
 		for (queue = 0; queue < queues_count; queue++) {
@@ -4367,7 +4382,6 @@ int stmmac_dvr_probe(struct device *device,
 	}
 
 	mutex_init(&priv->lock);
-	spin_lock_init(&priv->lpi_lock);
 
 	/* If a specific clk_csr value is passed from the platform
 	 * this means that the CSR Clock Range selection cannot be

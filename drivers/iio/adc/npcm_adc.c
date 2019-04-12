@@ -308,9 +308,9 @@ static int npcm_adc_remove(struct platform_device *pdev)
 	struct npcm_adc *info = iio_priv(indio_dev);
 	u32 regtemp;
 
-	regtemp = ioread32(info->regs + NPCM_ADCCON);
-
 	iio_device_unregister(indio_dev);
+
+	regtemp = ioread32(info->regs + NPCM_ADCCON);
 	iowrite32(regtemp & ~NPCM_ADCCON_ADC_EN, info->regs + NPCM_ADCCON);
 	if (!IS_ERR(info->vref))
 		regulator_disable(info->vref);

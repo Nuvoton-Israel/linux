@@ -86,11 +86,13 @@
 	ahb {
 		gmac0: eth@f0802000 {
 			phy-mode = "rgmii-id";
+			snps,eee-force-disable;
 			status = "okay";
 		};
 
 		gmac1: eth@f0804000 {
 			phy-mode = "rgmii-id";
+			snps,eee-force-disable;
 			status = "okay";
 		};
 
