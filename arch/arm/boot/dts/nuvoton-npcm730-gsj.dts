@@ -5,7 +5,7 @@
 #include "nuvoton-npcm730.dtsi"
 #include "nuvoton-npcm730-gsj-gpio.dtsi"
 / {
-	model = "Quanta GSJ Board (Device Tree v8)";
+	model = "Quanta GSJ Board (Device Tree v9)";
 	compatible = "nuvoton,npcm750";
 
 	aliases {
@@ -88,36 +88,7 @@
 				#size-cells = <1>;
 				reg = <0>;
 				spi-rx-bus-width = <2>;
-				partitions@80000000 {
-						compatible = "fixed-partitions";
-						#address-cells = <1>;
-						#size-cells = <1>;
-						u-boot@0 {
-							label = "u-boot";
-							reg = <0x0000000 0x80000>;
-							read-only;
-						};
-						u-boot-env@100000{
-							label = "u-boot-env";
-							reg = <0x00100000 0x40000>;
-						};
-						kernel@200000 {
-							label = "kernel";
-							reg = <0x0200000 0x600000>;
-						};
-						rofs@800000 {
-							label = "rofs";
-							reg = <0x800000 0x1400000>;
-						};
-						rwfs@1c00000 {
-							label = "rwfs";
-							reg = <0x1c00000 0x300000>;
-						};
-						reserved@1f00000 {
-							label = "reserved";
-							reg = <0x1f00000 0x100000>;
-						};
-				};
+#include "nuvoton-npcm730-gsj-flash-layout.dtsi"
 			};
 		};
 
@@ -292,9 +263,9 @@
 				bus-frequency = <100000>;
 				status = "okay";
 
-				ipmb@10 {
+				ipmb@40000010 {
 					compatible = "slave-mqueue";
-					reg = <0x10>;
+					reg = <0x40000010>;
 					status = "okay";
 				};
 			};
@@ -305,9 +276,9 @@
 				bus-frequency = <100000>;
 				status = "okay";
 
-				ipmb@12 {
+				ipmb@40000012 {
 					compatible = "slave-mqueue";
-					reg = <0x12>;
+					reg = <0x40000012>;
 					status = "okay";
 				};
 			};
