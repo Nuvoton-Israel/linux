@@ -1,0 +1,32 @@
+Nuvoton NPCM7xx PCIe Root Complex
+
+Required properties:
+ - compatible : "nuvoton,npcm750-pcirc" for NPCM7XX BMC
+ - reg : specifies physical base address and size of the register.
+ - #address-cells : should be 3. see pci.txt
+ - #size-cells : should be 2. see pci.txt
+ - #interrupt-cells: should be 1. see pci.txt
+ - device_type:	must be "pci"
+ - interrupts : contain PCIe interrupt.
+ - rst-rc-pci: specifies the gpio pins to be used for reset root complex.
+ - rst-ep-pci: specifies the gpio pins to be used for reset end point.
+ - bus-range: PCI bus numbers covered.
+ - ranges: describes the translation of addresses for root ports and
+			standard PCIe regions.
+
+Example
+	pci_rc: axi-pcie@e1000000 {
+		#address-cells = <3>;
+		#size-cells = <2>;
+		#interrupt-cells = <1>;
+		compatible = "nuvoton,npcm750-pcirc";
+		reg = <0xe1000000 0x1000>;
+		device_type = "pci";
+		interrupts = <GIC_SPI 127 IRQ_TYPE_LEVEL_HIGH>;
+		bus-range = <0x00 0xff>;
+		rst-rc-pci = <&gpio0 29 1>;
+		rst-ep-pci = <&gpio0 29 1>;
+		ranges = <0x02000000 0 0xea000000
+			0xea000000 0 0x02000000>;
+	};
+
