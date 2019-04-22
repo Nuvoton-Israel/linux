@@ -216,6 +216,9 @@ static int npcm7xx_edac_register_irq(struct mem_ctl_info *mci,
 	int mc_irq;
 	struct npcm7xx_edac_priv *priv = mci->pvt_info;
 
+	/* Only enable MC interrupts with ECC - clear int_mask[6:3] */
+	writel(ECC_EN_INT_MASK, priv->baseaddr + 4*INT_MASK_ADDR);
+
 	mc_irq = platform_get_irq(pdev, 0);
 
 	if (!mc_irq) {
@@ -234,9 +237,6 @@ static int npcm7xx_edac_register_irq(struct mem_ctl_info *mci,
 		status = -ENODEV;
 		goto fail;
 	}
-
-	/* Only enable MC interrupts with ECC - clear int_mask[6:3] */
-	writel(ECC_EN_INT_MASK, priv->baseaddr + 4*INT_MASK_ADDR);
 
 	return 0;
 
