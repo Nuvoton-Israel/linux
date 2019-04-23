@@ -5,7 +5,7 @@
 #include "nuvoton-npcm730.dtsi"
 #include "nuvoton-npcm730-gsj-gpio.dtsi"
 / {
-	model = "Quanta GSJ Board (Device Tree v9)";
+	model = "Quanta GSJ Board (Device Tree v10)";
 	compatible = "nuvoton,npcm750";
 
 	aliases {
@@ -255,6 +255,10 @@
 				#size-cells = <0>;
 				bus-frequency = <100000>;
 				status = "okay";
+				ucd90160@6b {
+					compatible = "ti,ucd90160";
+					reg = <0x6b>;
+				};
 			};
 
 			i2c13: i2c@8d000 {
