@@ -1037,7 +1037,6 @@ static int peci_cmd_wr_end_pt_cfg(struct peci_adapter *adapter, void *vmsg)
 				       >> 24); /* MSB - DWORD Register Offset */
 		if (umsg->params.mmio.addr_type ==
 		    PECI_ENDPTCFG_ADDR_TYPE_MMIO_Q) {
-			msg->tx_len = PECI_WRENDPTCFG_MMIO_Q_WRITE_LEN_BASE;
 			msg->tx_buf[14] = (u8)(umsg->params.mmio.offset
 					       >> 32); /* Register Offset */
 			msg->tx_buf[15] = (u8)(umsg->params.mmio.offset
