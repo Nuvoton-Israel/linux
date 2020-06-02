@@ -378,7 +378,6 @@
 					reg = <0x71>;
 					#address-cells = <1>;
 					#size-cells = <0>;
-					i2c-mux-idle-disconnect;
 
 					i2c_m2_s1: i2c-bus@0 {
 						#address-cells = <1>;
@@ -402,6 +401,11 @@
 						#size-cells = <0>;
 						reg = <3>;
 					};
+				};
+
+				slave_mqueue: i2c-slave-mqueue@40000018 {
+					compatible = "i2c-slave-mqueue";
+					reg = <0x40000018>;
 				};
 			};
 
