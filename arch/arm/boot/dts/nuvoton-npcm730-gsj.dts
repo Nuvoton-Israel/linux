@@ -78,6 +78,7 @@
 			status = "okay";
 			spi-nor@0 {
 				compatible = "jedec,spi-nor";
+				spi-max-frequency = <5000000>;
 				#address-cells = <1>;
 				#size-cells = <1>;
 				reg = <0>;
