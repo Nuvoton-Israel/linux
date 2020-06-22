@@ -230,4 +230,19 @@ config SENSORS_ZL6100
 	  This driver can also be built as a module. If so, the module will
 	  be called zl6100.
 
+config SENSORS_PM6764TR
+	tristate "PM6764TR"
+	help
+	  If you say yes here you get hardware monitoring support for PM6764TR.
+
+	  This driver can also be built as a module. If so, the module will
+	  be called pm6764tr.
+
+config SENSORS_MAX16600
+	tristate "MAX16600"
+	help
+	  If you say yes here you get hardware monitoring support for MAX16600.
+
+	  This driver can also be built as a module. If so, the module will
+	  be called max16600
 endif # PMBUS

@@ -17,33 +17,44 @@
 #include <linux/delay.h>
 #include "pmbus.h"
 
-enum chips { zl2004, zl2005, zl2006, zl2008, zl2105, zl2106, zl6100, zl6105,
-	     zl9101, zl9117 };
+enum chips {
+	zl2004,
+	zl2005,
+	zl2006,
+	zl2008,
+	zl2105,
+	zl2106,
+	zl6100,
+	zl6105,
+	zl9101,
+	zl9117,
+	zl8802
+};
 
 struct zl6100_data {
 	int id;
-	ktime_t access;		/* chip access time */
-	int delay;		/* Delay between chip accesses in uS */
+	ktime_t access; /* chip access time */
+	int delay; /* Delay between chip accesses in uS */
 	struct pmbus_driver_info info;
 };
 
-#define to_zl6100_data(x)  container_of(x, struct zl6100_data, info)
+#define to_zl6100_data(x) container_of(x, struct zl6100_data, info)
 
-#define ZL6100_MFR_CONFIG		0xd0
-#define ZL6100_DEVICE_ID		0xe4
+#define ZL6100_MFR_CONFIG 0xd0
+#define ZL6100_DEVICE_ID 0xe4
 
-#define ZL6100_MFR_XTEMP_ENABLE		BIT(7)
+#define ZL6100_MFR_XTEMP_ENABLE BIT(7)
 
-#define MFR_VMON_OV_FAULT_LIMIT		0xf5
-#define MFR_VMON_UV_FAULT_LIMIT		0xf6
-#define MFR_READ_VMON			0xf7
+#define MFR_VMON_OV_FAULT_LIMIT 0xf5
+#define MFR_VMON_UV_FAULT_LIMIT 0xf6
+#define MFR_READ_VMON 0xf7
 
-#define VMON_UV_WARNING			BIT(5)
-#define VMON_OV_WARNING			BIT(4)
-#define VMON_UV_FAULT			BIT(1)
-#define VMON_OV_FAULT			BIT(0)
+#define VMON_UV_WARNING BIT(5)
+#define VMON_OV_WARNING BIT(4)
+#define VMON_UV_FAULT BIT(1)
+#define VMON_OV_FAULT BIT(0)
 
-#define ZL6100_WAIT_TIME		1000	/* uS	*/
+#define ZL6100_WAIT_TIME 1000 /* uS	*/
 
 static ushort delay = ZL6100_WAIT_TIME;
 module_param(delay, ushort, 0644);
@@ -72,8 +83,8 @@ static long zl6100_l2d(s16 l)
 	return val;
 }
 
-#define MAX_MANTISSA	(1023 * 1000)
-#define MIN_MANTISSA	(511 * 1000)
+#define MAX_MANTISSA (1023 * 1000)
+#define MIN_MANTISSA (511 * 1000)
 
 static u16 zl6100_d2l(long val)
 {
@@ -280,24 +291,23 @@ static int zl6100_write_byte(struct i2c_client *client, int page, u8 value)
 	return ret;
 }
 
-static const struct i2c_device_id zl6100_id[] = {
-	{"bmr450", zl2005},
-	{"bmr451", zl2005},
-	{"bmr462", zl2008},
-	{"bmr463", zl2008},
-	{"bmr464", zl2008},
-	{"zl2004", zl2004},
-	{"zl2005", zl2005},
-	{"zl2006", zl2006},
-	{"zl2008", zl2008},
-	{"zl2105", zl2105},
-	{"zl2106", zl2106},
-	{"zl6100", zl6100},
-	{"zl6105", zl6105},
-	{"zl9101", zl9101},
-	{"zl9117", zl9117},
-	{ }
-};
+static const struct i2c_device_id zl6100_id[] = { { "bmr450", zl2005 },
+						  { "bmr451", zl2005 },
+						  { "bmr462", zl2008 },
+						  { "bmr463", zl2008 },
+						  { "bmr464", zl2008 },
+						  { "zl2004", zl2004 },
+						  { "zl2005", zl2005 },
+						  { "zl2006", zl2006 },
+						  { "zl2008", zl2008 },
+						  { "zl2105", zl2105 },
+						  { "zl2106", zl2106 },
+						  { "zl6100", zl6100 },
+						  { "zl6105", zl6105 },
+						  { "zl9101", zl9101 },
+						  { "zl9117", zl9117 },
+						  { "zl8802", zl8802 },
+						  {} };
 MODULE_DEVICE_TABLE(i2c, zl6100_id);
 
 static int zl6100_probe(struct i2c_client *client,
@@ -310,12 +320,11 @@ static int zl6100_probe(struct i2c_client *client,
 	const struct i2c_device_id *mid;
 
 	if (!i2c_check_functionality(client->adapter,
-				     I2C_FUNC_SMBUS_READ_WORD_DATA
-				     | I2C_FUNC_SMBUS_READ_BLOCK_DATA))
+				     I2C_FUNC_SMBUS_READ_WORD_DATA |
+					     I2C_FUNC_SMBUS_READ_BLOCK_DATA))
 		return -ENODEV;
 
-	ret = i2c_smbus_read_block_data(client, ZL6100_DEVICE_ID,
-					device_id);
+	ret = i2c_smbus_read_block_data(client, ZL6100_DEVICE_ID, device_id);
 	if (ret < 0) {
 		dev_err(&client->dev, "Failed to read device ID\n");
 		return ret;
@@ -361,16 +370,17 @@ static int zl6100_probe(struct i2c_client *client,
 	info = &data->info;
 
 	info->pages = 1;
-	info->func[0] = PMBUS_HAVE_VIN | PMBUS_HAVE_STATUS_INPUT
-	  | PMBUS_HAVE_VOUT | PMBUS_HAVE_STATUS_VOUT
-	  | PMBUS_HAVE_IOUT | PMBUS_HAVE_STATUS_IOUT
-	  | PMBUS_HAVE_TEMP | PMBUS_HAVE_STATUS_TEMP;
+	info->func[0] = PMBUS_HAVE_VIN | PMBUS_HAVE_STATUS_INPUT |
+			PMBUS_HAVE_VOUT | PMBUS_HAVE_STATUS_VOUT |
+			PMBUS_HAVE_IOUT | PMBUS_HAVE_STATUS_IOUT |
+			PMBUS_HAVE_TEMP | PMBUS_HAVE_STATUS_TEMP;
 
 	/*
 	 * ZL2004, ZL9101M, and ZL9117M support monitoring an extra voltage
 	 * (VMON for ZL2004, VDRV for ZL9101M and ZL9117M). Report it as vmon.
 	 */
-	if (data->id == zl2004 || data->id == zl9101 || data->id == zl9117)
+	if (data->id == zl2004 || data->id == zl9101 || data->id == zl9117 ||
+	    data->id == zl8802)
 		info->func[0] |= PMBUS_HAVE_VMON | PMBUS_HAVE_STATUS_VMON;
 
 	ret = i2c_smbus_read_word_data(client, ZL6100_MFR_CONFIG);
