@@ -104,13 +104,13 @@
 						label = "kernel";
 						reg = <0x0200000 0x600000>;
 					};
-					rofs@800000 {
+					rofs@780000 {
 						label = "rofs";
-						reg = <0x800000 0x1400000>;
+						reg = <0x780000 0x1680000>;
 					};
-					rwfs@1c00000 {
+					rwfs@1e00000 {
 						label = "rwfs";
-						reg = <0x1c00000 0x300000>;
+						reg = <0x1e00000 0x100000>;
 					};
 					reserved@1f00000 {
 						label = "reserved";
