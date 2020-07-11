@@ -17,6 +17,7 @@
 #include <linux/gfp.h>
 #include <linux/kthread.h>
 #include <linux/interrupt.h>
+#include <linux/iopoll.h>
 #include <linux/spinlock.h>
 #include <linux/ctype.h>
 #include <linux/debugfs.h>
@@ -908,11 +909,12 @@ static void npcm7xx_set_fifo_threshold(struct net_device *netdev)
 	writel(val, (ether->reg + REG_FFTCR));
 }
 
-static void npcm7xx_return_default_idle(struct net_device *netdev)
+static int npcm7xx_return_default_idle(struct net_device *netdev)
 {
 	struct npcm7xx_ether *ether = netdev_priv(netdev);
 	u32 val;
 	u32 saved_bits;
+	int ret;
 
 	val = readl((ether->reg + REG_MCMDR));
 	saved_bits = val & (MCMDR_FDUP | MCMDR_OPMOD);
@@ -925,19 +927,29 @@ static void npcm7xx_return_default_idle(struct net_device *netdev)
 	 * register that its reset value is not 0,
 	 * we choose (ether->reg + REG_FFTCR).
 	 */
-	do {
-		val = readl((ether->reg + REG_FFTCR));
-	} while (val == 0);
+	ret = readl_poll_timeout_atomic(ether->reg + REG_FFTCR, val, val != 0,
+				 0, 10);
+	if (ret < 0) {
+		dev_err(&ether->pdev->dev,
+			"Timed out waiting for FFTCR to become nonzero.\n");
+		return ret;
+	}
 
 	/* Now we can verify if (ether->reg + REG_MCMDR).SWR became
 	 * 0 (probably it will be 0 on the first read).
 	 */
-	do {
-		val = readl((ether->reg + REG_MCMDR));
-	} while (val & SWR);
+	ret = readl_poll_timeout_atomic(ether->reg + REG_MCMDR, val,
+					!(val & SWR), 0, 10);
+	if (ret < 0) {
+		dev_err(&ether->pdev->dev,
+			"Timed out waiting for SWR bit to clear.\n");
+		return ret;
+	}
 
 	/* restore values */
 	writel(saved_bits, (ether->reg + REG_MCMDR));
+
+	return 0;
 }
 
 static void npcm7xx_enable_mac_interrupt(struct net_device *netdev)
@@ -1046,9 +1058,10 @@ static void npcm7xx_rx_enable(struct net_device *netdev)
 	       (ether->reg + REG_MCMDR));
 }
 
-static void npcm7xx_reset_mac(struct net_device *netdev, int need_free)
+static int npcm7xx_reset_mac(struct net_device *netdev, int need_free)
 {
 	struct npcm7xx_ether *ether = netdev_priv(netdev);
+	int ret;
 
 	netif_tx_lock(netdev);
 
@@ -1056,7 +1069,10 @@ static void npcm7xx_reset_mac(struct net_device *netdev, int need_free)
 	writel(readl((ether->reg + REG_MCMDR)) & ~(MCMDR_TXON | MCMDR_RXON),
 	       (ether->reg + REG_MCMDR));
 
-	npcm7xx_return_default_idle(netdev);
+	ret = npcm7xx_return_default_idle(netdev);
+	if (ret < 0)
+		goto out;
+
 	npcm7xx_set_fifo_threshold(netdev);
 
 	if (need_free)
@@ -1085,7 +1101,12 @@ static void npcm7xx_reset_mac(struct net_device *netdev, int need_free)
 	ether->need_reset = 0;
 
 	netif_wake_queue(netdev);
+	ret = 0;
+
+out:
 	netif_tx_unlock(netdev);
+
+	return ret;
 }
 
 static int npcm7xx_mdio_write(struct mii_bus *bus, int phy_id, int regnum,
@@ -1157,6 +1178,7 @@ static int npcm7xx_set_mac_address(struct net_device *netdev, void *addr)
 static int npcm7xx_ether_close(struct net_device *netdev)
 {
 	struct npcm7xx_ether *ether = netdev_priv(netdev);
+	int ret;
 
 	if (ether->phy_dev)
 		phy_stop(ether->phy_dev);
@@ -1166,7 +1188,7 @@ static int npcm7xx_ether_close(struct net_device *netdev)
 	napi_disable(&ether->napi);
 	netif_stop_queue(netdev);
 
-	npcm7xx_return_default_idle(netdev);
+	ret = npcm7xx_return_default_idle(netdev);
 
 	msleep(20);
 
@@ -1180,7 +1202,7 @@ static int npcm7xx_ether_close(struct net_device *netdev)
 		ether->dump_buf = NULL;
 	}
 
-	return 0;
+	return ret;
 }
 
 static struct net_device_stats *npcm7xx_ether_stats(struct net_device *netdev)
@@ -1656,6 +1678,7 @@ static int npcm7xx_ether_open(struct net_device *netdev)
 {
 	struct npcm7xx_ether *ether;
 	struct platform_device *pdev;
+	int ret;
 
 	ether = netdev_priv(netdev);
 	pdev = ether->pdev;
@@ -1665,7 +1688,9 @@ static int npcm7xx_ether_open(struct net_device *netdev)
 		ether->duplex = DUPLEX_FULL;
 		npcm7xx_opmode(netdev, 100, DUPLEX_FULL);
 	}
-	npcm7xx_reset_mac(netdev, 0);
+	ret = npcm7xx_reset_mac(netdev, 0);
+	if (ret < 0)
+		return ret;
 
 	if (request_irq(ether->txirq, npcm7xx_tx_interrupt, 0x0, pdev->name,
 			netdev)) {
