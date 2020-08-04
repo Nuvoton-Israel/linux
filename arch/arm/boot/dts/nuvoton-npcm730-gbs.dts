@@ -4,7 +4,6 @@
 
 /dts-v1/;
 #include "nuvoton-npcm730.dtsi"
-#include "nuvoton-npcm730-gbs-pincfg.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 
 / {
