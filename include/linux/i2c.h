@@ -42,6 +42,10 @@ typedef int (*i2c_slave_cb_t)(struct i2c_client *client,
 struct module;
 struct property_entry;
 
+#define I2C_MAX_STANDARD_MODE_FREQ  100000
+#define I2C_MAX_FAST_MODE_FREQ      400000
+#define I2C_MAX_FAST_MODE_PLUS_FREQ 1000000
+
 #if IS_ENABLED(CONFIG_I2C)
 /*
  * The master routines are the ones normally used to transmit data to devices
