@@ -422,6 +422,11 @@
 					compatible = "pmbus";
 					reg = <0x58>;
 				};
+
+				slave_mqueue2: i2c-slave-mqueue@40000010 {
+					compatible = "i2c-slave-mqueue";
+					reg = <0x40000010>;
+				};
 			};
 
 			i2c3: i2c@83000 {
