@@ -1,0 +1,46 @@
+Nuvoton NPCM7XX I2C bus mux switch
+
+Required properties:
+- compatible      	 : must be "nuvoton,i2c-mux-npcm"
+- i2c-parent	  	 : phandle of the I2C bus that this multiplexer's master-side
+					   port is connected to.
+- syscon		  	 : phandle of the syscon node to access GCR register.
+- nuvoton,i2c-number : I2C parent number.
+- i2c_segment_number : List of I2C segment number that aligned with used I2C
+					   bus mux pins.
+
+* Standard pinctrl properties that specify the pin mux state for each child
+  bus. See ../pinctrl/pinctrl-bindings.txt.
+
+* Standard I2C mux properties. See i2c-mux.txt in this directory.
+
+* I2C child bus nodes. See i2c-mux.txt in this directory.
+
+Example:
+		i2cmux0 {
+			compatible = "i2c-mux-npcm";
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			i2c-parent = <&i2c1>;
+			syscon = <&gcr>;
+			nuvoton,i2c-number = <1>;
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&smb1_pins &smb1b_pins &smb1d_pins>;
+			i2c_segment_number = <0>, <1>, <3>;
+			status = "okay";
+
+			i2c@2 {
+				reg = <2>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				status = "okay";
+
+				eeprom {
+					compatible = "atmel,24c04";
+					reg = <0x50>;
+					status = "okay";
+				};
+			};
+		};
