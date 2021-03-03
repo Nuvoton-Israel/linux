@@ -476,6 +476,9 @@ bool stmmac_eee_init(struct stmmac_priv *priv)
 	if (!priv->dma_cap.eee)
 		return false;
 
+	if (priv->plat->eee_force_disable)
+		return false;
+
 	mutex_lock(&priv->lock);
 
 	/* Check if it needs to be deactivated */
@@ -1173,7 +1176,7 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 	writel(ctrl, priv->ioaddr + MAC_CTRL_REG);
 
 	stmmac_mac_set(priv, priv->ioaddr, true);
-	if (phy && priv->dma_cap.eee) {
+	if (phy && priv->dma_cap.eee && !priv->plat->eee_force_disable) {
 		priv->eee_active = phy_init_eee(phy, 1) >= 0;
 		priv->eee_enabled = stmmac_eee_init(priv);
 		priv->tx_lpi_enabled = priv->eee_enabled;
