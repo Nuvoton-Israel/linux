@@ -38,9 +38,9 @@
 #define DELAY			20
 #define MCU_SIGNATURE	0x0012941E
 
-u8 flash_data_0[16*1024];	__attribute__((aligned (4)));
-u8 flash_data_1[16*1024];	__attribute__((aligned (4)));
-u8 eeprom_data[256];		__attribute__((aligned (4)));
+u8 flash_data_0[16 * 1024];	__aligned(4);
+u8 flash_data_1[16 * 1024];	__aligned(4);
+u8 eeprom_data[256];		__aligned(4);
 
 enum MCU_PIN {
 	PIN_CLK,
@@ -74,8 +74,7 @@ static u8 spi_send_receive_byte(struct npcm7xx_mcu *mcu, u8 data_to_send)
 	u8 spi_mosi, spi_miso;
 	u8 data_received = 0;
 
-	for (bit_count = 0; bit_count < 8; bit_count++)
-	{
+	for (bit_count = 0; bit_count < 8; bit_count++) {
 		/* New SPI MOSI */
 		spi_mosi = (data_to_send >> (7 - bit_count)) & 0x01;
 		if (spi_mosi == 0)
@@ -120,10 +119,10 @@ static bool npcm7xx_mcu_ready(struct npcm7xx_mcu *mcu)
 {
 	u8 data;
 
-	spi_send_receive_byte(mcu,0xF0);
-	spi_send_receive_byte(mcu,0x00);
-	spi_send_receive_byte(mcu,0x00);
-	data = spi_send_receive_byte(mcu,0x00);
+	spi_send_receive_byte(mcu, 0xF0);
+	spi_send_receive_byte(mcu, 0x00);
+	spi_send_receive_byte(mcu, 0x00);
+	data = spi_send_receive_byte(mcu, 0x00);
 
 	if ((data & 0x01) == 0x01)
 		return false;
@@ -144,11 +143,10 @@ static u8 read_flash_memory_byte(struct npcm7xx_mcu *mcu, u16 addr)
 {
 	u8 data;
 
-	if ((addr&0x01) == 0x00) {
+	if ((addr & 0x01) == 0x00) {
 		/* Read Program Memory, Low byte */
 		spi_send_receive_byte(mcu, 0x20);
-	}
-	else {
+	} else {
 		/* Read Program Memory, High byte */
 		spi_send_receive_byte(mcu, 0x28);
 	}
@@ -156,10 +154,11 @@ static u8 read_flash_memory_byte(struct npcm7xx_mcu *mcu, u16 addr)
 	spi_send_receive_byte(mcu, addr >> 9);
 	spi_send_receive_byte(mcu, addr >> 1);
 	data = spi_send_receive_byte(mcu, 0x00);
-	return (data);
+	return data;
 }
 
-static void read_flash_memory_block (struct npcm7xx_mcu *mcu, u16 addr, u16 length_in_byte, u8 *pdata)
+static void read_flash_memory_block(struct npcm7xx_mcu *mcu, u16 addr,
+				    u16 length_in_byte, u8 *pdata)
 {
 	while (length_in_byte != 0) {
 		*pdata = read_flash_memory_byte(mcu, addr);
@@ -169,12 +168,12 @@ static void read_flash_memory_block (struct npcm7xx_mcu *mcu, u16 addr, u16 leng
 	}
 }
 
-static int write_flash_memory_page (struct npcm7xx_mcu *mcu, u16 addr, u8 *pdata)
+static int write_flash_memory_page(struct npcm7xx_mcu *mcu, u16 addr, u8 *pdata)
 {
 	int i;
 
 	/* Address must be aline to word */
-	if ((addr&0x01) != 0)
+	if ((addr & 0x01) != 0)
 		return -1;
 
 	addr &= 0xFFFE;
@@ -201,19 +200,23 @@ static int write_flash_memory_page (struct npcm7xx_mcu *mcu, u16 addr, u8 *pdata
 	spi_send_receive_byte(mcu, addr >> 9);
 	spi_send_receive_byte(mcu, addr >> 1);
 	spi_send_receive_byte(mcu, 0x00);
-	while (npcm7xx_mcu_ready(mcu) == false);
+	while (npcm7xx_mcu_ready(mcu) == false)
+		;
 
 	return 0;
 }
 
-static int write_flash_memory_block(struct npcm7xx_mcu *mcu, u16 addr, u16 length_in_byte, u8 *pdata)
+static int write_flash_memory_block(struct npcm7xx_mcu *mcu,
+				    u16 addr,
+				    u16 length_in_byte,
+				    u8 *pdata)
 {
 	/* Address must be aline to word */
-	if ((addr&0x01) != 0)
+	if ((addr & 0x01) != 0)
 		return -1;
 
 	/* length_in_byte must be aline to Page size 16 words / 32 bytes */
-	if ((length_in_byte&0x1F) != 0)
+	if ((length_in_byte & 0x1F) != 0)
 		return -1;
 
 	addr &= 0xFFFE;
@@ -234,11 +237,11 @@ static int memory_compare(const void *ptr1, const void *ptr2, u32 size_in_byte)
 	u32 offset = 0;
 
 	while (size_in_byte != 0) {
-		if (*((u8*)ptr1) != *((u8*)ptr2))
+		if (*((u8 *)ptr1) != *((u8 *)ptr2))
 			return (offset);
 
-		ptr1 = (u8*)ptr1 + 1;
-		ptr2 = (u8*)ptr2 + 1;
+		ptr1 = (u8 *)ptr1 + 1;
+		ptr2 = (u8 *)ptr2 + 1;
 		offset++;
 		size_in_byte--;
 	}
@@ -248,7 +251,7 @@ static int memory_compare(const void *ptr1, const void *ptr2, u32 size_in_byte)
 static void memory_dump_byte(u32 addr, u32 display_address, u16 num_of_lines)
 {
 	u16 line;
-	u8 *pdata8 = (u8*)addr;
+	u8 *pdata8 = (u8 *)addr;
 	u8 i, data8;
 
 	for (line = 0; line < num_of_lines; line++) {
@@ -262,11 +265,10 @@ static u8 read_rom_table(struct npcm7xx_mcu *mcu, u8 addr)
 {
 	u8 data;
 
-	if ((addr&0x01) == 0x00) {
+	if ((addr & 0x01) == 0x00) {
 		/* Read Signature Byte a.k.a. ROM Table, Low byte */
 		spi_send_receive_byte(mcu, 0x30);
-	}
-	else {
+	} else {
 		/* Read Calibration Byte a.k.a. ROM Table, High byte */
 		spi_send_receive_byte(mcu, 0x38);
 	}
@@ -274,12 +276,13 @@ static u8 read_rom_table(struct npcm7xx_mcu *mcu, u8 addr)
 	spi_send_receive_byte(mcu, 0x00);
 	spi_send_receive_byte(mcu, addr >> 1);
 	data = spi_send_receive_byte(mcu, 0x00);
-	return (data);
+	return data;
 }
 
-static bool npcm7xx_mcu_signature (struct npcm7xx_mcu *mcu)
+static bool npcm7xx_mcu_signature(struct npcm7xx_mcu *mcu)
 {
 	u32 device_signature = 0;
+
 	device_signature |= (u32)read_rom_table(mcu, 0) << 0;
 	device_signature |= (u32)read_rom_table(mcu, 2) << 8;
 	device_signature |= (u32)read_rom_table(mcu, 4) << 16;
@@ -290,14 +293,15 @@ static bool npcm7xx_mcu_signature (struct npcm7xx_mcu *mcu)
 }
 
 /* Configure mcu pins as GPIO function */
-static void npcm7xx_mcu_config_gpio (struct npcm7xx_mcu *mcu)
+static void npcm7xx_mcu_config_gpio(struct npcm7xx_mcu *mcu)
 {
 	int val;
 
 	val = SMBSEL_GPIO;
-	regmap_update_bits(mcu->gcr_regmap, MFSEL3_OFFSET,
-		(SMBSEL_MASK << mcu->smb_offset),
-		(val << mcu->smb_offset));
+	regmap_update_bits(mcu->gcr_regmap,
+			   MFSEL3_OFFSET,
+			   (SMBSEL_MASK << mcu->smb_offset),
+			   (val << mcu->smb_offset));
 }
 
 /* Configure mcu pins as SMB function */
@@ -306,12 +310,13 @@ static inline void npcm7xx_mcu_config_smb(struct npcm7xx_mcu *mcu)
 	int val;
 
 	val = SMBSEL_SMB;
-	regmap_update_bits(mcu->gcr_regmap, MFSEL3_OFFSET,
-		(SMBSEL_MASK << mcu->smb_offset),
-		(val << mcu->smb_offset));
+	regmap_update_bits(mcu->gcr_regmap,
+			   MFSEL3_OFFSET,
+			   (SMBSEL_MASK << mcu->smb_offset),
+			   (val << mcu->smb_offset));
 }
 
-static int npcm7xx_mcu_init (struct npcm7xx_mcu *mcu)
+static int npcm7xx_mcu_init(struct npcm7xx_mcu *mcu)
 {
 	int i = 0;
 
@@ -333,10 +338,10 @@ static int npcm7xx_mcu_init (struct npcm7xx_mcu *mcu)
 	gpiod_direction_output(mcu->pins[PIN_RESET].gpiod, 0);
 	mdelay(20);
 
-	if (npcm7xx_mcu_sync(mcu))
-		pr_cont("MCU F/W Check Sync ............... DONE\n");
-	else {
-		pr_cont("MCU F/W Check Sync ............... FAIL\n");
+	if (npcm7xx_mcu_sync(mcu)) {
+		dev_info(mcu->dev, "MCU F/W Check Sync ............... DONE\n");
+	} else {
+		dev_info(mcu->dev, "MCU F/W Check Sync ............... FAIL\n");
 		return -1;
 	}
 
@@ -344,22 +349,25 @@ static int npcm7xx_mcu_init (struct npcm7xx_mcu *mcu)
 		eeprom_data[i] = read_rom_table(mcu, i);
 	//memory_dump_byte((u32)eeprom_data, 0, 128/16);
 
-	if (npcm7xx_mcu_signature(mcu) == true)
-		pr_cont("MCU F/W Check Device Signature ... DONE\n");
-	else {
-		pr_cont("MCU F/W Check Device Signature ... FAIL\n");
+	if (npcm7xx_mcu_signature(mcu) == true) {
+		dev_info(mcu->dev, "MCU F/W Check Device Signature ... DONE\n");
+	} else {
+		dev_info(mcu->dev, "MCU F/W Check Device Signature ... FAIL\n");
 		return -1;
 	}
 
-	pr_cont("MCU F/W Chip Erase ..");
+	dev_info(mcu->dev, "MCU F/W Chip Erase ..");
 	npcm7xx_mcu_erase(mcu);
 	while (npcm7xx_mcu_ready(mcu) == false)
-		pr_cont(".");
-	pr_cont(" DONE\n");
+		dev_info(mcu->dev, ".");
+	dev_info(mcu->dev, "DONE\n");
 	return 0;
 }
 
-static ssize_t npcm7xx_mcu_write (struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+static ssize_t npcm7xx_mcu_write(struct file *file,
+				 const char __user *buf,
+				 size_t count,
+				 loff_t *ppos)
 {
 	u16 offset = 0;
 
@@ -367,28 +375,28 @@ static ssize_t npcm7xx_mcu_write (struct file *file, const char __user *buf, siz
 	void __user *argp = (void __user *)buf;
 
 	if (copy_from_user(flash_data_1, argp, count)) {
-		dev_info(mcu->dev, "%s copy_from_user FAIL", __func__);
+		dev_info(mcu->dev, "copy_from_user FAIL");
 		return -EFAULT;
 	}
 
 	if (npcm7xx_mcu_init(mcu) != 0)
 		return -EFAULT;
 
-	pr_cont("MCU F/W Program Flash Memory ..... ");
+	dev_info(mcu->dev, "MCU F/W Program Flash Memory ..... ");
 	if (write_flash_memory_block(mcu, offset, count, flash_data_1) != 0)
 		return -EFAULT;
-	pr_cont("DONE\n");
+	dev_info(mcu->dev, "DONE\n");
 
-	pr_cont("MCU F/W Read Flash Memory ........ ");
+	dev_info(mcu->dev, "MCU F/W Read Flash Memory ........ ");
 	read_flash_memory_block(mcu, offset, count, flash_data_0);
-	pr_cont("DONE\n");
+	dev_info(mcu->dev, "DONE\n");
 	//memory_dump_byte((u32)flash_data_0, offset, count/16);
 
-	pr_cont("MCU F/W Compare Flash Memory ..... ");
+	dev_info(mcu->dev, "MCU F/W Compare Flash Memory ..... ");
 	if (memory_compare(flash_data_1, flash_data_0, count) != 0)
-		pr_cont("FAIL\n");
+		dev_info(mcu->dev, "FAIL\n");
 	else
-		pr_cont("DONE\n");
+		dev_info(mcu->dev, "DONE\n");
 
 	npcm7xx_mcu_config_smb(mcu);
 
@@ -398,7 +406,7 @@ static ssize_t npcm7xx_mcu_write (struct file *file, const char __user *buf, siz
 	return count;
 }
 
-static int npcm7xx_mcu_open (struct inode *inode, struct file *file)
+static int npcm7xx_mcu_open(struct inode *inode, struct file *file)
 {
 	struct npcm7xx_mcu *mcu;
 
@@ -407,7 +415,7 @@ static int npcm7xx_mcu_open (struct inode *inode, struct file *file)
 	spin_lock(&mcu_file_lock);
 	if (mcu->is_open) {
 		spin_unlock(&mcu_file_lock);
-		dev_info(mcu->dev, "%s EBUSY", __func__);
+		dev_info(mcu->dev, "EBUSY");
 		return -EBUSY;
 	}
 
@@ -418,7 +426,7 @@ static int npcm7xx_mcu_open (struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int npcm7xx_mcu_release (struct inode *inode, struct file *file)
+static int npcm7xx_mcu_release(struct inode *inode, struct file *file)
 {
 	struct npcm7xx_mcu *mcu = file->private_data;
 
@@ -435,7 +443,7 @@ const struct file_operations npcm7xx_mcu_fops = {
 	.release           = npcm7xx_mcu_release,
 };
 
-static int npcm7xx_mcu_register_device (struct npcm7xx_mcu *mcu)
+static int npcm7xx_mcu_register_device(struct npcm7xx_mcu *mcu)
 {
 	struct device *dev = mcu->dev;
 	int err;
@@ -462,7 +470,7 @@ static int npcm7xx_mcu_register_device (struct npcm7xx_mcu *mcu)
 	return 0;
 }
 
-static int npcm7xx_mcu_probe (struct platform_device *pdev)
+static int npcm7xx_mcu_probe(struct platform_device *pdev)
 {
 	struct npcm7xx_mcu *mcu;
 	struct gpio_desc *gpiod;
@@ -476,7 +484,7 @@ static int npcm7xx_mcu_probe (struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "%s", __func__);
 
-	mcu = kzalloc(sizeof(struct npcm7xx_mcu), GFP_KERNEL);
+	mcu = kzalloc(sizeof(*mcu), GFP_KERNEL);
 	if (!mcu)
 		return -ENOMEM;
 	mcu->dev = &pdev->dev;
@@ -491,8 +499,7 @@ static int npcm7xx_mcu_probe (struct platform_device *pdev)
 
 	/* mcu pins */
 	for (i = 0; i < PIN_TOTAL; i++) {
-		gpiod = gpiod_get_index(&pdev->dev, "mcu",
-			i, pin_flags[i]);
+		gpiod = gpiod_get_index(&pdev->dev, "mcu", i, pin_flags[i]);
 		if (IS_ERR(gpiod)) {
 			dev_err(&pdev->dev, "No mcu pin: %d", i);
 			return PTR_ERR(gpiod);
@@ -504,20 +511,16 @@ static int npcm7xx_mcu_probe (struct platform_device *pdev)
 			- chip->base;
 	}
 
-	ret = of_property_read_u32(pdev->dev.of_node,
-			"dev-num", &value);
+	ret = of_property_read_u32(pdev->dev.of_node, "dev-num", &value);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-				"Could not read dev-num\n");
+		dev_err(&pdev->dev, "Could not read dev-num\n");
 		value = 0;
 	}
 	mcu->dev_num = value;
 
-	ret = of_property_read_u32(pdev->dev.of_node,
-			"smb-offset", &value);
+	ret = of_property_read_u32(pdev->dev.of_node, "smb-offset", &value);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-				"Could not read smb-offset\n");
+		dev_err(&pdev->dev, "Could not read smb-offset\n");
 		value = 0;
 	}
 	mcu->smb_offset = value;
@@ -536,7 +539,7 @@ err:
 	return ret;
 }
 
-static int npcm7xx_mcu_remove (struct platform_device *pdev)
+static int npcm7xx_mcu_remove(struct platform_device *pdev)
 {
 	struct npcm7xx_mcu *mcu = platform_get_drvdata(pdev);
 	int i;
