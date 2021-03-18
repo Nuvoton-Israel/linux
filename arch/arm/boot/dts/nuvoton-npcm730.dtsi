@@ -87,7 +87,7 @@
 		udc9:udc@f0839000 {
 			compatible = "nuvoton,npcm750-udc";
 			reg = <0xf0839000 0x1000
-			       0xfffd0000 0x800>;
+			       0xfffd4800 0x800>;
 			interrupts = <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
