@@ -78,33 +78,48 @@
 			bias-disable;
 			output-low;
 		};
+		gpio17_pins: gpio17-pins {
+			pins = "GPIO17/PSPI2DI/SMB4DEN";
+			bias-disable;
+			input-enable;
+		};
+		gpio18o_pins: gpio18o-pins {
+			pins = "GPIO18/PSPI2D0/SMB4BSDA";
+			bias-disable;
+			output-high;
+		};
+		gpio19ol_pins: gpio19ol-pins {
+			pins = "GPIO19/PSPI2CK/SMB4BSCL";
+			bias-disable;
+			output-low;
+		};
 		gpio20_pins: gpio20-pins {
-			pins = "GPIO20/SMB4CSDA/SMB15SDA";
+			pins = "GPIO20/HGPIO0/SMB4CSDA/SMB15SDA";
 			bias-disable;
 			input-enable;
 		};
 		gpio21_pins: gpio21-pins {
-			pins = "GPIO21/SMB4CSCL/SMB15SCL";
+			pins = "GPIO21/HGPIO1/SMB4CSCL/SMB15SCL";
 			bias-disable;
 			input-enable;
 		};
 		gpio22o_pins: gpio22o-pins {
-			pins = "GPIO22/SMB4DSDA/SMB14SDA";
+			pins = "GPIO22/HGPIO2/SMB4DSDA/SMB14SDA";
 			bias-disable;
 			output-high;
 		};
 		gpio23_pins: gpio23-pins {
-			pins = "GPIO23/SMB4DSCL/SMB14SCL";
+			pins = "GPIO23/HGPIO3/SMB4DSCL/SMB14SCL";
 			bias-disable;
 			input-enable;
 		};
 		gpio24_pins: gpio24-pins {
-			pins = "GPIO24/IOXHDO";
+			pins = "GPIO24/HGPIO4/IOXHDO";
 			bias-disable;
 			input-enable;
 		};
 		gpio25_pins: gpio25-pins {
-			pins = "GPIO25/IOXHDI";
+			pins = "GPIO25/HGPIO5/IOXHDI";
 			bias-disable;
 			input-enable;
 		};
@@ -139,7 +154,7 @@
 			output-high;
 		};
 		gpio59_pins: gpio59-pins {
-			pins = "GPIO59/SMB3DSDA";
+			pins = "GPIO59/HGPIO6/SMB3DSDA";
 			bias-disable;
 			input-enable;
 		};
@@ -387,6 +402,11 @@
 			pins = "GPIO189/SPI3D3/nSPI3CS3";
 			bias-disable;
 			input-enable;
+		};
+		gpio192o_pins: gpio192o-pins {
+			pins = "GPIO192";
+			bias-disable;
+			output-high;
 		};
 		gpio196_pins: gpio196-pins {
 			pins = "GPIO196/SMB0CSCL";
