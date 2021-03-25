@@ -81,6 +81,7 @@ static const struct of_device_id dwmac_generic_match[] = {
 	{ .compatible = "snps,dwmac"},
 	{ .compatible = "snps,dwxgmac-2.10"},
 	{ .compatible = "snps,dwxgmac"},
+	{ .compatible = "snps,npcm"},
 	{ }
 };
 MODULE_DEVICE_TABLE(of, dwmac_generic_match);
