@@ -368,7 +368,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		reg = <0>;
-		spi-max-frequency = <19000000>;
+		spi-max-frequency = <20000000>;
 		spi-rx-bus-width = <2>;
 		label = "bmc";
 		partitions@80000000 {
@@ -1077,12 +1077,12 @@
 		fan-tach-ch = /bits/ 8 <0x02>;
 	};
 	fan@3 {
-		reg = <0x03>;
-		fan-tach-ch = /bits/ 8 <0x03>;
-	};
-	fan@4 {
 		reg = <0x04>;
 		fan-tach-ch = /bits/ 8 <0x04>;
+	};
+	fan@4 {
+		reg = <0x03>;
+		fan-tach-ch = /bits/ 8 <0x03>;
 	};
 };
 
