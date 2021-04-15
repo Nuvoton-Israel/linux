@@ -141,6 +141,12 @@
 			gpios = <&gpio3 25 GPIO_ACTIVE_LOW>;
 			linux,code = <121>;
 		};
+
+		fans-efuse {
+			label = "fans-efuse";
+			gpios = <&gpio4 18 GPIO_ACTIVE_HIGH>;
+			linux,code = <146>;
+		};
 	};
 
 	iio-hwmon {
