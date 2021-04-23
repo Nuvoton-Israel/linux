@@ -551,6 +551,8 @@
 			i2c0: i2c@80000 {
 				reg = <0x80000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 128 IRQ_TYPE_LEVEL_HIGH>;
@@ -562,6 +564,8 @@
 			i2c1: i2c@81000 {
 				reg = <0x81000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 129 IRQ_TYPE_LEVEL_HIGH>;
@@ -573,6 +577,8 @@
 			i2c2: i2c@82000 {
 				reg = <0x82000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>;
@@ -584,6 +590,8 @@
 			i2c3: i2c@83000 {
 				reg = <0x83000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>;
@@ -595,6 +603,8 @@
 			i2c4: i2c@84000 {
 				reg = <0x84000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 132 IRQ_TYPE_LEVEL_HIGH>;
@@ -606,6 +616,8 @@
 			i2c5: i2c@85000 {
 				reg = <0x85000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH>;
@@ -617,6 +629,8 @@
 			i2c6: i2c@86000 {
 				reg = <0x86000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 134 IRQ_TYPE_LEVEL_HIGH>;
@@ -628,6 +642,8 @@
 			i2c7: i2c@87000 {
 				reg = <0x87000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 135 IRQ_TYPE_LEVEL_HIGH>;
@@ -639,6 +655,8 @@
 			i2c8: i2c@88000 {
 				reg = <0x88000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
@@ -650,6 +668,8 @@
 			i2c9: i2c@89000 {
 				reg = <0x89000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 137 IRQ_TYPE_LEVEL_HIGH>;
@@ -661,6 +681,8 @@
 			i2c10: i2c@8a000 {
 				reg = <0x8a000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 138 IRQ_TYPE_LEVEL_HIGH>;
@@ -672,6 +694,8 @@
 			i2c11: i2c@8b000 {
 				reg = <0x8b000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 139 IRQ_TYPE_LEVEL_HIGH>;
@@ -683,6 +707,8 @@
 			i2c12: i2c@8c000 {
 				reg = <0x8c000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>;
@@ -694,6 +720,8 @@
 			i2c13: i2c@8d000 {
 				reg = <0x8d000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>;
@@ -705,6 +733,8 @@
 			i2c14: i2c@8e000 {
 				reg = <0x8e000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>;
@@ -716,6 +746,8 @@
 			i2c15: i2c@8f000 {
 				reg = <0x8f000 0x1000>;
 				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
 				clocks = <&clk NPCM8XX_CLK_APB2>;
 				clock-frequency = <100000>;
 				interrupts = <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
