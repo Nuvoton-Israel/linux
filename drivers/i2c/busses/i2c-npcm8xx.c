@@ -1692,7 +1692,6 @@ static int npcm_i2c_recovery_tgclk(struct i2c_adapter *_adap)
 	struct npcm_i2c *bus = container_of(_adap, struct npcm_i2c, adap);
 	/* Allow 3 bytes (27 toggles) to be read from the slave: */
 	int              iter = 27;
-printk("recov :%d\r\n", __LINE__);
   if ((npcm_i2c_get_SDA(_adap) == 1) && (npcm_i2c_get_SCL(_adap) == 1)) {
   	dev_dbg(bus->dev, "bus%d-0x%x recovery skipped, bus not stuck",
   		bus->num, bus->dest_addr);
@@ -1700,7 +1699,6 @@ printk("recov :%d\r\n", __LINE__);
   	return 0;
   }
 
-printk("recov :%d\r\n", __LINE__);
 	npcm_i2c_int_enable(bus, false);
 	npcm_i2c_disable(bus);
 	npcm_i2c_enable(bus);
@@ -1711,7 +1709,6 @@ printk("recov :%d\r\n", __LINE__);
 	iowrite8(0, bus->reg + NPCM_I2CTXF_CTL);
 	npcm_i2c_stall_after_start(bus, false);
 
-printk("recov :%d\r\n", __LINE__);
 	/* select bank 1 for FIFO regs */
 	npcm_i2c_select_bank(bus, I2C_BANK_1);
 
@@ -1722,7 +1719,6 @@ printk("recov :%d\r\n", __LINE__);
 	iowrite8(fif_cts, bus->reg + NPCM_I2CFIF_CTS);
 	npcm_i2c_set_fifo(bus, -1, 0);
 
-printk("recov :%d\r\n", __LINE__);
 	/* Repeat the following sequence until SDA is released */
   do {
   	/* Issue a single SCL toggle */
@@ -1750,7 +1746,6 @@ printk("recov :%d\r\n", __LINE__);
 	npcm_i2c_reset(bus);
 	npcm_i2c_int_enable(bus, true);
 
-printk("recov :%d\r\n", __LINE__);
   if ((npcm_i2c_get_SDA(_adap) == 1) && (npcm_i2c_get_SCL(_adap) == 1))
   	status = 0;
   else
@@ -2361,7 +2356,6 @@ static int npcm_i2c_probe_bus(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, bus);
 	npcm_i2c_init_debugfs(pdev, bus);
-  printk("i2c init done\r\n");
 	return 0;
 }
 
