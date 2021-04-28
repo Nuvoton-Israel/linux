@@ -665,6 +665,7 @@
 				interrupts = <GIC_SPI 128 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb0_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -678,6 +679,7 @@
 				interrupts = <GIC_SPI 129 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb1_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -691,6 +693,7 @@
 				interrupts = <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb2_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -704,6 +707,7 @@
 				interrupts = <GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb3_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -717,6 +721,7 @@
 				interrupts = <GIC_SPI 132 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb4_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -730,6 +735,7 @@
 				interrupts = <GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb5_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -743,6 +749,7 @@
 				interrupts = <GIC_SPI 134 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb6_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -756,6 +763,7 @@
 				interrupts = <GIC_SPI 135 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb7_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -769,6 +777,7 @@
 				interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb8_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -782,6 +791,7 @@
 				interrupts = <GIC_SPI 137 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb9_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -795,6 +805,7 @@
 				interrupts = <GIC_SPI 138 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb10_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -808,6 +819,7 @@
 				interrupts = <GIC_SPI 139 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb11_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -821,6 +833,7 @@
 				interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb12_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -834,6 +847,7 @@
 				interrupts = <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb13_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -847,6 +861,7 @@
 				interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb14_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -860,6 +875,35 @@
 				interrupts = <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb15_pins>;
+				syscon = <&gcr>;
+				status = "disabled";
+			};
+
+			i2c16: i2c@fff00000 {
+				reg = <0xfff00000 0x1000>;
+				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
+				clocks = <&clk NPCM8XX_CLK_APB2>;
+				clock-frequency = <100000>;
+				interrupts = <GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&smb16_pins>;
+				syscon = <&gcr>;
+				status = "disabled";
+			};
+
+			i2c17: i2c@fff01000 {
+				reg = <0xfff01000 0x1000>;
+				compatible = "nuvoton,npcm845-i2c";
+        #address-cells = <1>;
+        #size-cells = <0>;
+				clocks = <&clk NPCM8XX_CLK_APB2>;
+				clock-frequency = <100000>;
+				interrupts = <GIC_SPI 145 IRQ_TYPE_LEVEL_HIGH>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&smb17_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -1032,6 +1076,14 @@
 		smb15_pins: smb15-pins {
 			groups = "smb15";
 			function = "smb15";
+		};
+		smb16_pins: smb16-pins {
+			groups = "smb16";
+			function = "smb16";
+		};
+		smb17_pins: smb17-pins {
+			groups = "smb17";
+			function = "smb17";
 		};
 		smb4d_pins: smb4d-pins {
 			groups = "smb4d";
