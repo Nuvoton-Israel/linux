@@ -254,28 +254,64 @@ static int stmmac_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 		}
 	}
 
-	if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
-			       100, 10000)) {
-		data = -EBUSY;
-		goto err_disable_clks;
-	}
+	if (!priv->plat->arbel_rev_a) {
+		if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
+				       100, 10000)) {
+			data = -EBUSY;
+			goto err_disable_clks;
+		}
 
-	writel(data, priv->ioaddr + mii_data);
-	writel(value, priv->ioaddr + mii_address);
+		writel(data, priv->ioaddr + mii_data);
+		writel(value, priv->ioaddr + mii_address);
 
-	if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
-			       100, 10000)) {
-		data = -EBUSY;
-		goto err_disable_clks;
-	}
+		if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
+				       100, 10000)) {
+			data = -EBUSY;
+			goto err_disable_clks;
+		}
 
-	/* Read the data from the MII data register */
-	data = (int)readl(priv->ioaddr + mii_data) & MII_DATA_MASK;
+		/* Read the data from the MII data register */
+		data = (int)readl(priv->ioaddr + mii_data) & MII_DATA_MASK;
 
 err_disable_clks:
-	pm_runtime_put(priv->device);
+		pm_runtime_put(priv->device);
 
-	return data;
+		return data;
+	} else {
+		int i, j, testdata[3];
+
+		for (j =0; j < 10; j++) {
+			for (i = 0; i < 3; i++) {
+				testdata[i] = 0;
+
+				if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
+						       100, 10000)) {
+					pm_runtime_put(priv->device);
+					return -EBUSY;
+				}
+
+				writel(testdata[i], priv->ioaddr + mii_data);
+				writel(value, priv->ioaddr + mii_address);
+
+				if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
+						       100, 10000)) {
+					pm_runtime_put(priv->device);
+					return -EBUSY;
+				}
+
+				testdata[i] = (int)readl(priv->ioaddr + mii_data) & MII_DATA_MASK;
+			}
+
+			if (testdata[0] == testdata[1])
+				if (testdata[1] == testdata[2]) {
+					pm_runtime_put(priv->device);
+					return testdata[0];
+			}
+		}
+	}
+
+	pm_runtime_put(priv->device);
+	return -EBUSY;
 }
 
 /**

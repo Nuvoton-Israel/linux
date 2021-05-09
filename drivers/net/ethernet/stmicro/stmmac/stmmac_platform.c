@@ -16,12 +16,14 @@
 #include <linux/of_net.h>
 #include <linux/of_device.h>
 #include <linux/of_mdio.h>
+#include <linux/gpio/consumer.h>
 
 #include "stmmac.h"
 #include "stmmac_platform.h"
 
 #define IND_AC_INDX	0x1FE
 #define SR_MII_CTRL	0x003E0000
+#define SR_MII_CTRL1	0x003F0000
 
 #ifdef CONFIG_OF
 
@@ -627,6 +629,9 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	}
 
 	if (of_device_is_compatible(np, "snps,npcm")) {
+		struct gpio_desc *gpio_evb_id[2];
+		u32 evb_id[2] = {0};
+
 		base = devm_platform_ioremap_resource(pdev, 1);
 		if (IS_ERR(base)) {
 			dev_warn(&pdev->dev, "devm_platform_ioremap_resource failed\n");
@@ -640,6 +645,21 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 			RegValue = ioread16(base + 0x0);
 		RegValue &= ~(BIT(12));
 		iowrite16(RegValue, base + 0x0);
+
+		gpio_evb_id[0] = devm_gpiod_get_index(&pdev->dev, NULL, 0, GPIOD_IN);
+		gpio_evb_id[1] = devm_gpiod_get_index(&pdev->dev, NULL, 1, GPIOD_IN);
+		if (IS_ERR(gpio_evb_id[0]) || IS_ERR(gpio_evb_id[1]))
+			return plat;
+
+		gpiod_direction_input(gpio_evb_id[0]);
+		gpiod_direction_input(gpio_evb_id[1]);
+		evb_id[0] = gpiod_get_value(gpio_evb_id[0]);
+		evb_id[1] = gpiod_get_value(gpio_evb_id[1]);
+		if (evb_id[0] & evb_id[1]) {
+			plat->arbel_rev_a = true;
+			iowrite16((u16)(SR_MII_CTRL1 >> 9), base + IND_AC_INDX);
+			iowrite16(BIT(0), base + 0x1c2);
+		}
 	}
 	return plat;
 
