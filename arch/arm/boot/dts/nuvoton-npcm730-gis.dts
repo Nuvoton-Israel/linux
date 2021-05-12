@@ -208,9 +208,7 @@
 };
 
 &mc {
-	compatible = "nuvoton,npcm7xx-sdram-edac";
-	reg = <0xf0824000 0x1000>;
-	interrupts = <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>;
+	status = "okay";
 };
 
 &ehci1 {
