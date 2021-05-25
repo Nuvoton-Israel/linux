@@ -533,6 +533,7 @@
 				interrupts = <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb0_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -545,6 +546,7 @@
 				interrupts = <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb1_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -557,6 +559,7 @@
 				interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb2_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -569,6 +572,7 @@
 				interrupts = <GIC_SPI 67 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb3_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -581,6 +585,7 @@
 				interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb4_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -593,6 +598,7 @@
 				interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb5_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -605,6 +611,7 @@
 				interrupts = <GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb6_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -617,6 +624,7 @@
 				interrupts = <GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb7_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -629,6 +637,7 @@
 				interrupts = <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb8_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -641,6 +650,7 @@
 				interrupts = <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb9_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -653,6 +663,7 @@
 				interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb10_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -665,6 +676,7 @@
 				interrupts = <GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb11_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -677,6 +689,7 @@
 				interrupts = <GIC_SPI 76 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb12_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -689,6 +702,7 @@
 				interrupts = <GIC_SPI 77 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb13_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -701,6 +715,7 @@
 				interrupts = <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb14_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
@@ -713,6 +728,7 @@
 				interrupts = <GIC_SPI 79 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&smb15_pins>;
+				syscon = <&gcr>;
 				status = "disabled";
 			};
 
