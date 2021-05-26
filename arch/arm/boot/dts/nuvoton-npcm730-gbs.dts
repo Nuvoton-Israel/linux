@@ -728,6 +728,7 @@
 	mb_fru@50 {
 		compatible = "atmel,24c64";
 		reg = <0x50>;
+		pagesize = <32>;
 	};
 
 	i2c-switch@71 {
@@ -771,6 +772,7 @@
 			fan_fru@51 {
 				compatible = "atmel,24c64";
 				reg = <0x51>;
+				pagesize = <32>;
 			};
 		};
 
@@ -781,6 +783,7 @@
 			hsbp_fru@52 {
 				compatible = "atmel,24c64";
 				reg = <0x52>;
+				pagesize = <32>;
 				status = "okay";
 			};
 		};
