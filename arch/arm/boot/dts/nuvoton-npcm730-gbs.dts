@@ -629,14 +629,14 @@
 	clock-frequency = <100000>;
 	status = "okay";
 
-	pca9535_ifdet: pca9535-ifdet@24 {
+	pca9535_ifdet: pca9535@24 {
 		compatible = "nxp,pca9535";
 		reg = <0x24>;
 		gpio-controller;
 		#gpio-cells = <2>;
 	};
 
-	pca9535_pwren: pca9535-pwren@20 {
+	pca9535_pwren: pca9535@20 {
 		compatible = "nxp,pca9535";
 		reg = <0x20>;
 		gpio-controller;
@@ -653,14 +653,14 @@
 			"pwr_u2_13_en","pwr_u2_12_en";
 	};
 
-	pca9535_pwrgd: pca9535-pwrgd@21 {
+	pca9535_pwrgd: pca9535@21 {
 		compatible = "nxp,pca9535";
 		reg = <0x21>;
 		gpio-controller;
 		#gpio-cells = <2>;
 	};
 
-	pca9535_ledlocate: pca9535-ledlocate@22 {
+	pca9535_ledlocate: pca9535@22 {
 		compatible = "nxp,pca9535";
 		reg = <0x22>;
 		gpio-controller;
@@ -668,7 +668,7 @@
 
 	};
 
-	pca9535_ledfault: pca9535-ledfault@23 {
+	pca9535_ledfault: pca9535@23 {
 		compatible = "nxp,pca9535";
 		reg = <0x23>;
 		gpio-controller;
@@ -676,7 +676,7 @@
 
 	};
 
-	pca9535_pwrdisable: pca9535-pwrdisable@25 {
+	pca9535_pwrdisable: pca9535@25 {
 		compatible = "nxp,pca9535";
 		reg = <0x25>;
 		gpio-controller;
@@ -693,7 +693,7 @@
 			"u2_13_pwr_dis","u2_12_pwr_dis";
 	};
 
-	pca9535_perst: pca9535-perst@26 {
+	pca9535_perst: pca9535@26 {
 		compatible = "nxp,pca9535";
 		reg = <0x26>;
 		gpio-controller;
@@ -728,6 +728,7 @@
 	mb_fru@50 {
 		compatible = "atmel,24c64";
 		reg = <0x50>;
+		pagesize = <32>;
 	};
 
 	i2c-switch@71 {
@@ -771,6 +772,7 @@
 			fan_fru@51 {
 				compatible = "atmel,24c64";
 				reg = <0x51>;
+				pagesize = <32>;
 			};
 		};
 
@@ -781,6 +783,7 @@
 			hsbp_fru@52 {
 				compatible = "atmel,24c64";
 				reg = <0x52>;
+				pagesize = <32>;
 				status = "okay";
 			};
 		};
@@ -1092,94 +1095,100 @@
 	};
 };
 
+&gpio0 {
+	/* POWER_OUT=gpio07, RESET_OUT=gpio06, PS_PWROK=gpio13 */
+	gpio-line-names =
+	/*0-31*/
+	"","","","","","","RESET_OUT","POWER_OUT",
+	"","","","","","PS_PWROK","","",
+	"","","","","","","","",
+	"","","","","","","","";
+};
+
+&gpio1 {
+	/* SIO_POWER_GOOD=gpio59 */
+	gpio-line-names =
+	/*32-63*/
+	"","","","","","","","",
+	"","","","","","","","",
+	"","","","","","","","",
+	"","","","SIO_POWER_GOOD","","","","";
+};
+
+&gpio2 {
+	bmc_usb_mux_oe_n {
+		gpio-hog;
+		gpios = <25 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "bmc-usb-mux-oe-n";
+	};
+	bmc_usb_mux_sel {
+		gpio-hog;
+		gpios = <26 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "bmc-usb-mux-sel";
+	};
+	bmc_usb2517_reset_n {
+		gpio-hog;
+		gpios = <27 GPIO_ACTIVE_LOW>;
+		output-low;
+		line-name = "bmc-usb2517-reset-n";
+	};
+};
+
+&gpio3 {
+	assert_cpu0_reset {
+		gpio-hog;
+		gpios = <14 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "assert-cpu0-reset";
+	};
+	assert_pwrok_cpu0_n {
+		gpio-hog;
+		gpios = <15 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "assert-pwrok-cpu0-n";
+	};
+	assert_cpu0_prochot {
+		gpio-hog;
+		gpios = <16 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "assert-cpu0-prochot";
+	};
+};
+
+&gpio4 {
+	/* POST_COMPLETE=gpio143 */
+	gpio-line-names =
+	/*128-159*/
+	"","","","","","","","",
+	"","","","","","","","POST_COMPLETE",
+	"","","","","","","","",
+	"","","","","","","","";
+};
+
+&gpio5 {
+	/* POWER_BUTTON=gpio177 */
+	gpio-line-names =
+	/*160-191*/
+	"","","","","","","","",
+	"","","","","","","","",
+	"","POWER_BUTTON","","","","","","",
+	"","","","","","","","";
+};
+
+&gpio6 {
+	/* SIO_S5=gpio199, RESET_BUTTON=gpio203 */
+	gpio-line-names =
+	/*192-223*/
+	"","","","","","","","SIO_S5",
+	"","","","RESET_BUTTON","","","","",
+	"","","","","","","","",
+	"","","","","","","","";
+};
+
 &pinctrl {
 	pinctrl-names = "default";
-
-	gpio0: gpio@f0010000 {
-		/* POWER_OUT=gpio07, RESET_OUT=gpio06, PS_PWROK=gpio13 */
-		gpio-line-names =
-		/*0-31*/
-		"","","","","","","RESET_OUT","POWER_OUT",
-		"","","","","","PS_PWROK","","",
-		"","","","","","","","",
-		"","","","","","","","";
-	};
-	gpio1: gpio@f0011000 {
-		/* SIO_POWER_GOOD=gpio59 */
-		gpio-line-names =
-		/*32-63*/
-		"","","","","","","","",
-		"","","","","","","","",
-		"","","","","","","","",
-		"","","","SIO_POWER_GOOD","","","","";
-	};
-	gpio2: gpio@f0012000 {
-		bmc_usb_mux_oe_n {
-			gpio-hog;
-			gpios = <25 GPIO_ACTIVE_HIGH>;
-			output-low;
-			line-name = "bmc-usb-mux-oe-n";
-		};
-		bmc_usb_mux_sel {
-			gpio-hog;
-			gpios = <26 GPIO_ACTIVE_HIGH>;
-			output-low;
-			line-name = "bmc-usb-mux-sel";
-		};
-		bmc_usb2517_reset_n {
-			gpio-hog;
-			gpios = <27 GPIO_ACTIVE_LOW>;
-			output-low;
-			line-name = "bmc-usb2517-reset-n";
-		};
-	};
-	gpio3: gpio@f0013000 {
-		assert_cpu0_reset {
-			gpio-hog;
-			gpios = <14 GPIO_ACTIVE_HIGH>;
-			output-low;
-			line-name = "assert-cpu0-reset";
-		};
-		assert_pwrok_cpu0_n {
-			gpio-hog;
-			gpios = <15 GPIO_ACTIVE_HIGH>;
-			output-low;
-			line-name = "assert-pwrok-cpu0-n";
-		};
-		assert_cpu0_prochot {
-			gpio-hog;
-			gpios = <16 GPIO_ACTIVE_HIGH>;
-			output-low;
-			line-name = "assert-cpu0-prochot";
-		};
-	};
-	gpio4: gpio@f0014000 {
-		/* POST_COMPLETE=gpio143 */
-		gpio-line-names =
-			/*128-159*/
-			"","","","","","","","",
-			"","","","","","","","POST_COMPLETE",
-			"","","","","","","","",
-			"","","","","","","","";
-	};
-	gpio5: gpio@f0015000 {
-		/* POWER_BUTTON=gpio177 */
-		gpio-line-names =
-			/*160-191*/
-			"","","","","","","","",
-			"","","","","","","","",
-			"","POWER_BUTTON","","","","","","",
-			"","","","","","","","";
-	};
-	gpio6: gpio@f0016000 {
-		/* SIO_S5=gpio199, RESET_BUTTON=gpio203 */
-		gpio-line-names =
-			/*192-223*/
-			"","","","","","","","SIO_S5",
-			"","","","RESET_BUTTON","","","","",
-			"","","","","","","","",
-			"","","","","","","","";
-	};
 
 	gpio224ol_pins: gpio224ol-pins {
 		pins = "GPIO224/SPIXCK";
