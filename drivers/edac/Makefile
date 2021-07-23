@@ -90,3 +90,4 @@ obj-$(CONFIG_EDAC_ASPEED)		+= aspeed_edac.o
 obj-$(CONFIG_EDAC_BLUEFIELD)		+= bluefield_edac.o
 obj-$(CONFIG_EDAC_DMC520)		+= dmc520_edac.o
 obj-$(CONFIG_EDAC_NPCM7XX)              += npcm7xx_edac.o
+obj-$(CONFIG_EDAC_NPCM8XX)		+= npcm8xx_edac.o

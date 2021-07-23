@@ -120,6 +120,13 @@
 			nuvoton,sw-reset-number = <2>;
 		};*/
 
+		mc: memory-controller@f0824000 {
+			compatible = "nuvoton,npcm8xx-sdram-edac";
+			reg = <0x0 0xf0824000 0x0 0x1000>;
+			interrupts = <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>;
+			status = "okay";
+		};
+
 		gmac0: eth@f0802000 {
 			phy-mode = "rgmii-id";
 			snps,eee-force-disable;
