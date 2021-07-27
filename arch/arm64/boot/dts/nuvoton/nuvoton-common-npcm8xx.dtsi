@@ -1753,6 +1753,7 @@
 		#size-cells = <0>;
 		interrupts = <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk NPCM8XX_CLK_APB3>;
+		syscon = <&gcr>;
 		status = "disabled";
 	};
 };

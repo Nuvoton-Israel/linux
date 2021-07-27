@@ -222,8 +222,7 @@ static int npcm_peci_init_ctrl(struct npcm_peci *priv)
 
 	if (of_device_is_compatible(priv->dev->of_node,
 				    "nuvoton,npcm750-peci")) {
-		priv->gcr_regmap = syscon_regmap_lookup_by_compatible
-			("nuvoton,npcm750-gcr");
+		priv->gcr_regmap = syscon_regmap_lookup_by_phandle(priv->dev->of_node, "syscon");
 		if (!IS_ERR(priv->gcr_regmap)) {
 			bool volt = of_property_read_bool(priv->dev->of_node,
 							  "high-volt-range");
