@@ -147,6 +147,12 @@
 			gpios = <&gpio4 18 GPIO_ACTIVE_HIGH>;
 			linux,code = <146>;
 		};
+
+		pwrgd_p12v_slots {
+			label = "pwrgd_p12v_slots";
+			gpios = <&gpio2 24 GPIO_ACTIVE_HIGH>;
+			linux,code = <88>;
+		};
 	};
 
 	iio-hwmon {
