@@ -41,6 +41,12 @@
 #define EDAC_MSG_SIZE                  256
 #define EDAC_MOD_NAME                  "npcm8xx-edac"
 
+static struct class *edac_class = NULL;
+static dev_t edac_devno;
+struct device *edac_dev = NULL;
+static unsigned int ecc_value=0;
+static int ecc_ue = 0;
+
 struct ecc_error_signature_info {
 	u64 ecc_addr;
 	u64 ecc_data;
@@ -320,6 +326,40 @@ static bool npcm8xx_edac_get_eccstate(void __iomem *base)
 	return state;
 }
 
+static ssize_t edac_read(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret = 0;
+	void __iomem *baseaddr = dev_get_drvdata(dev);
+
+	if( ecc_ue == 1 )
+	{
+		ecc_ue = 0;
+		ecc_value = 0x030100;
+		writel(ecc_value, baseaddr + 0x174);
+		sprintf(buf, "0x%X\n",ecc_value);
+		ret = strlen(buf) + 1;
+	}
+	else
+	{
+		ecc_ue = 1;
+		ecc_value = 0xF40100;
+		writel(ecc_value, baseaddr + 0x174);
+		sprintf(buf, "0x%X\n",ecc_value);
+		ret = strlen(buf) + 1;
+	}
+
+	return ret;
+}
+static ssize_t edac_write(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	void __iomem *baseaddr = dev_get_drvdata(dev);
+	ecc_value = simple_strtoul(buf, NULL, 0);
+	printk("syndrome:0x%x\n",ecc_value);
+	writel(ecc_value, baseaddr + 0x174);
+	return size;
+}
+static DEVICE_ATTR(edac, 0664 , edac_read, edac_write);
+
 /**
  * npcm8xx_edac_mc_probe - Check controller and bind driver
  * @pdev:	Pointer to the platform_device struct
@@ -396,6 +436,18 @@ static int npcm8xx_edac_mc_probe(struct platform_device *pdev)
 	if (rc)
 		goto free_edac_mc;
 
+	if( alloc_chrdev_region(&edac_devno, 0, 1,"edac") )
+	{
+		return -EAGAIN;
+	}
+	edac_class = class_create(THIS_MODULE, "edac");
+	edac_dev = device_create(edac_class, NULL, edac_devno, NULL, "edac_dev");
+	if(NULL == edac_dev)
+	{
+		return -EIO;
+	}
+	device_create_file(edac_dev, &dev_attr_edac);
+	dev_set_drvdata(edac_dev, baseaddr);
 	return 0;
 
 free_edac_mc:
