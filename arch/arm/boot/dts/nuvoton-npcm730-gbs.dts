@@ -468,8 +468,10 @@
 
 &emc0 {
 	status = "okay";
-	phy-mode = "rmii";
-	use-ncsi;
+	fixed-link {
+		speed = <100>;
+		full-duplex;
+	};
 };
 
 &mc {
