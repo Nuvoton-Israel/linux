@@ -302,7 +302,7 @@
 			status = "okay";
 		};
 
-		vdm: vdm@e0800000 {
+		vdma: vdma@e0800000 {
 			status = "okay";
 		};
 

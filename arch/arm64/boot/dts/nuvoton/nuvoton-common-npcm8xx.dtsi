@@ -297,7 +297,7 @@
 			status = "disabled";
 		};
 
-		vdm: vdm@e0800000 {
+		vdma: vdma@e0800000 {
 			compatible = "nuvoton,npcm845-vdm";
 			reg = <0x0 0xe0800000 0x0 0x1000
 				   0x0 0xf0822000 0x0 0x1000>;
