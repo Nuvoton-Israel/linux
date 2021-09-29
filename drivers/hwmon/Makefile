@@ -198,6 +198,7 @@ obj-$(CONFIG_SENSORS_XGENE)	+= xgene-hwmon.o
 
 obj-$(CONFIG_SENSORS_OCC)	+= occ/
 obj-$(CONFIG_PMBUS)		+= pmbus/
+obj-$(CONFIG_SENSORS_NPCM7XX_MCU_ADC)	+= npcm7xx-mcu-adc.o
 
 ccflags-$(CONFIG_HWMON_DEBUG_CHIP) := -DDEBUG
 

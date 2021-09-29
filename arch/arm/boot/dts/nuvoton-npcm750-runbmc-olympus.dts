@@ -847,6 +847,11 @@
 		pagesize = <64>;
 		status = "okay";
 	};
+	mcu_adc@71 {
+		compatible = "nuvoton,mcu71adc";
+		reg = <0x71>;
+		status = "okay";
+	};
 };
 
 &pwm_fan {
