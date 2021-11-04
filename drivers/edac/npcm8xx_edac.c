@@ -13,6 +13,7 @@
 #include "edac_module.h"
 #define PRIu64 "llu"
 
+#define ECC_EVENT_ADDR_MASK            0x3FFFFFFFFLL
 #define ECC_EN_INT_MASTER_MASK         0x7FFFFFFB //arbel ECC:bit1
 #define ECC_EN_INT_ECC_MASK            0x1F0 //arbel ECC:bit3-0
 
@@ -149,11 +150,11 @@ static void npcm8xx_edac_handle_error(struct mem_ctl_info *mci,
 	if (p->ce_cnt) {
 		snprintf(priv->message, EDAC_MSG_SIZE,
 			"DDR ECC: synd=%#08x addr=0x%" PRIu64 " data=0x%" PRIu64 " source_id=%#08x ",
-			p->ceinfo.ecc_synd, p->ceinfo.ecc_addr,
+			p->ceinfo.ecc_synd, p->ceinfo.ecc_addr&ECC_EVENT_ADDR_MASK,
 			p->ceinfo.ecc_data, p->ceinfo.ecc_id);
 
-		page = p->ceinfo.ecc_addr >> PAGE_SHIFT;
-		offset = p->ceinfo.ecc_addr & ~PAGE_MASK;
+		page = (p->ceinfo.ecc_addr&ECC_EVENT_ADDR_MASK) >> PAGE_SHIFT;
+		offset = (p->ceinfo.ecc_addr&ECC_EVENT_ADDR_MASK) & ~PAGE_MASK;
 		edac_mc_handle_error(HW_EVENT_ERR_CORRECTED, mci,
 				     p->ce_cnt, page, offset,
 				     p->ceinfo.ecc_synd,
@@ -164,11 +165,11 @@ static void npcm8xx_edac_handle_error(struct mem_ctl_info *mci,
 	if (p->ue_cnt) {
 		snprintf(priv->message, EDAC_MSG_SIZE,
 			"DDR ECC: synd=%#08x addr=0x%" PRIu64 " data=0x%" PRIu64 " source_id=%#08x ",
-			p->ueinfo.ecc_synd, p->ueinfo.ecc_addr,
+			p->ueinfo.ecc_synd, p->ueinfo.ecc_addr&ECC_EVENT_ADDR_MASK,
 			p->ueinfo.ecc_data, p->ueinfo.ecc_id);
 
-		page = p->ueinfo.ecc_addr >> PAGE_SHIFT;
-		offset = p->ueinfo.ecc_addr & ~PAGE_MASK;
+		page = (p->ueinfo.ecc_addr&ECC_EVENT_ADDR_MASK) >> PAGE_SHIFT;
+		offset = (p->ueinfo.ecc_addr&ECC_EVENT_ADDR_MASK) & ~PAGE_MASK;
 		edac_mc_handle_error(HW_EVENT_ERR_UNCORRECTED, mci,
 				     p->ue_cnt, page, offset,
 				     p->ueinfo.ecc_synd,
