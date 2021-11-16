@@ -1,0 +1,18 @@
+Nuvoton NPCM MCU I2C ADC Emulator device
+
+The Nuvoton Poleg BMC NPCM7XX MCU supports 8 channels ADC with internal analog MUX.
+
+Required properties:
+- compatible	: "nuvoton,mcu71adc" for Poleg NPCM7XX.
+- reg		: I2C 7-bit address 0x71.
+
+Example MCU I2C ADC node:
+
+&i2c13 {
+	mcu_adc@71 {
+		compatible = "nuvoton,mcu71adc";
+		reg = <0x71>;
+		status = "okay";
+	};
+};
+
