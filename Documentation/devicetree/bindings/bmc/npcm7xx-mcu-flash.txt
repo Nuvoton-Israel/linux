@@ -1,0 +1,30 @@
+Nuvoton NPCM7XX MCU FLASH interface
+
+Nuvoton BMC NPCM7XX MCU FLASH is used for flashing MCU Firmware.
+
+Required properties for mcu node
+- compatible		: "nuvoton,npcm750-mcu-flash" for Poleg NPCM7XX.
+			  "nuvoton,npcm845-mcu-flash" for Arbel NPCM8XX.
+- dev-num		: specify the device node for MCU.
+- mfsel-offset		: specify the offset of MFSEL.
+- smb-offset		: specify the SMBSEL offset of MFSEL.
+- mcu-gpios		: specify the GPIO number of SCLK pin.
+		          specify the GPIO number of MOSI pin.
+			  specify the GPIO number of MISO pin.
+			  specify the GPIO number of RESET# pin.
+
+Example:
+mcu_flash {
+    compatible = "nuvoton,npcm750-mcu-flash";
+    status = "okay";
+    #address-cells = <1>;
+    #size-cells = <1>;
+    dev-num = <0>;                              /* /dev/mcu0 */
+    mfsel-offset = <0x260>;                     /* MFSEL1 */
+    smb-offset = <1>;                           /* SMBSEL offset of MFSEL */
+    mcu-gpios =  <&gpio0 29 GPIO_ACTIVE_HIGH>,	 /* GPIO29: SCLK */
+		  <&gpio0 28 GPIO_ACTIVE_HIGH>,	 /* GPIO28: MOSI */
+		  <&gpio2 12 GPIO_ACTIVE_HIGH>,	 /* GPIO76: MISO */
+		  <&gpio2 13 GPIO_ACTIVE_LOW>;	 /* GPIO77: RESET# */
+};
+
