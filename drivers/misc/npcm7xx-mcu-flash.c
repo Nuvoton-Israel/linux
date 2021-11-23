@@ -475,7 +475,7 @@ static int npcm7xx_mcu_probe(struct platform_device *pdev)
 	int i, ret;
 
 	enum gpiod_flags pin_flags[PIN_TOTAL] = {
-		GPIOD_OUT_LOW, GPIOD_OUT_LOW, GPIOD_IN, GPIOD_OUT_HIGH,
+		GPIOD_OUT_HIGH, GPIOD_OUT_HIGH, GPIOD_IN, GPIOD_OUT_HIGH,
 	};
 
 	dev_info(&pdev->dev, "%s", __func__);
