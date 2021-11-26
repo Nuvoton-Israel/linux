@@ -1,0 +1,37 @@
+Nuvoton  SGPIO controller Device Tree Bindings
+--------------------------------------------
+
+This SGPIO controller is for Nuvoton BMC
+Nuvoton BMC includes two sgpio module.
+Each module can supports up 64 pin input and 64 pin output.
+
+Required properties:
+
+- compatible : Should be one of  "nuvoton,npcm-sgpio"
+- gpio-controller : Marks the device node as a GPIO controller
+- interrupts : Interrupt specifier, see interrupt-controller/interrupts.txt
+- ngpios : number of nin_gpios GPIO lines and nout_gpios GPIO line.
+- clocks : A phandle to the APB3 clock for SGPM clock division
+- bus-frequency : SGPM CLK frequency
+
+The sgpio and interrupt properties are further described in their respective
+bindings documentation:
+
+- Documentation/devicetree/bindings/gpio/gpio.txt
+- Documentation/devicetree/bindings/interrupt-controller/interrupts.txt
+
+  Example:
+	sgpio2: sgpio@102000 {
+        	clocks = <&clk NPCM7XX_CLK_APB3>;
+                compatible = "nuvoton,npcm7xx-sgpio";
+                interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>;
+                gpio-controller;
+                pinctrl-names = "default";
+                pinctrl-0 = <&iox2_pins>;
+                reg = <0x102000 0x200>;
+		bus-frequency = <16000000>;
+        	nin_gpios = <8>;
+        	nout_gpios = <8>;
+        	gpio-line-names="s1","s2","s3","s4","s5","s6","s7","s8";
+        	status = "okay";
+                };

@@ -1,0 +1,21 @@
+Nuvoton NPCM MCU I2C GPI Expender Emulator
+--------------------------------------------
+
+The Nuvoton Poleg BMC NPCM7XX MCU emulates an I2C expender with eight GPI signals.
+MCU I2C 7-bit address 0x72,and One port 8 inputs.
+
+Required properties:
+- compatible	: "nuvoton,npcm7xx_mcu_gpi"; for Poleg NPCM7XX.
+- reg		: I2C 7-bit address 0x72.
+
+
+Example MCU I2C expander node:
+
+&i2c13 {
+	mcu_gpi@72 {
+                compatible = "nuvoton,npcm7xx_mcu_gpi";
+                reg = <0x72>;
+                status = "okay";
+                interrupts = <&gpio1 6 GPIO_ACTIVE_LOW>;
+        };
+};
