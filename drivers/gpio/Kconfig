@@ -1530,7 +1530,7 @@ config GPIO_NUVOTON_SGPIO
         help
           Say Y here to support Nuvoton NPCM7XX/NPCM8XX SGPIO functionality.
 
-config GPIO_NUVOTON_GPI
+config GPIO_NUVOTON_MCU
         bool "Nuvoton MCU GPI support"
         depends on (ARCH_NPCM || COMPILE_TEST) && OF_GPIO
         select GPIO_GENERIC
