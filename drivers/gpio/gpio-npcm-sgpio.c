@@ -15,11 +15,6 @@
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
-#include <linux/interrupt.h>
-#include <linux/irq.h>
-#include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
 
 #define MAX_NR_HW_SGPIO			64
 
@@ -53,6 +48,7 @@
 struct npcm_sgpio {
 	struct gpio_chip chip;
 	struct clk *pclk;
+	struct irq_chip intc;
 	spinlock_t lock; /*protect event config*/
 	void __iomem *base;
 	int irq;
@@ -71,58 +67,58 @@ struct npcm_sgpio_bank {
 };
 
 enum npcm_sgpio_reg {
-	rdata_reg,
-	wdata_reg,
-	event_config,
-	event_status,
+	read_data,
+	write_data,
+	event_cfg,
+	event_sts,
 };
 
 static const struct npcm_sgpio_bank npcm_sgpio_banks[] = {
 	{
-		.rdata_reg = 0x08,
 		.wdata_reg = 0x00,
+		.rdata_reg = 0x08,
 		.event_config = 0x10,
 		.event_status = 0x20,
 	},
 	{
-		.rdata_reg = 0x09,
 		.wdata_reg = 0x01,
+		.rdata_reg = 0x09,
 		.event_config = 0x12,
 		.event_status = 0x21,
 	},
 	{
-		.rdata_reg = 0x0a,
 		.wdata_reg = 0x02,
+		.rdata_reg = 0x0a,
 		.event_config = 0x14,
 		.event_status = 0x22,
 	},
 	{
-		.rdata_reg = 0x0b,
 		.wdata_reg = 0x03,
+		.rdata_reg = 0x0b,
 		.event_config = 0x16,
 		.event_status = 0x23,
 	},
 	{
-		.rdata_reg = 0x0c,
 		.wdata_reg = 0x04,
+		.rdata_reg = 0x0c,
 		.event_config = 0x18,
 		.event_status = 0x24,
 	},
 	{
-		.rdata_reg = 0x0d,
 		.wdata_reg = 0x05,
+		.rdata_reg = 0x0d,
 		.event_config = 0x1a,
 		.event_status = 0x25,
 	},
 	{
-		.rdata_reg = 0x0e,
 		.wdata_reg = 0x06,
+		.rdata_reg = 0x0e,
 		.event_config = 0x1c,
 		.event_status = 0x26,
 	},
 	{
-		.rdata_reg = 0x0f,
 		.wdata_reg = 0x07,
+		.rdata_reg = 0x0f,
 		.event_config = 0x1e,
 		.event_status = 0x27,
 	},
@@ -134,13 +130,13 @@ static void __iomem *bank_reg(struct npcm_sgpio *gpio,
 				const enum npcm_sgpio_reg reg)
 {
 	switch (reg) {
-	case rdata_reg:
+	case read_data:
 		return gpio->base + bank->rdata_reg;
-	case wdata_reg:
+	case write_data:
 		return gpio->base + bank->wdata_reg;
-	case event_config:
+	case event_cfg:
 		return gpio->base + bank->event_config;
-	case event_status:
+	case event_sts:
 		return gpio->base + bank->event_status;
 	default:
 		/* acturally if code runs to here, it's an error case */
@@ -231,7 +227,7 @@ static void npcm_sgpio_set(struct gpio_chip *gc, unsigned int offset, int val)
 	void __iomem *addr;
 	u8 reg = 0;
 
-	addr = bank_reg(gpio, bank, wdata_reg);
+	addr = bank_reg(gpio, bank, write_data);
 	reg = ioread8(addr);
 
 	if (val) {
@@ -254,14 +250,14 @@ static int npcm_sgpio_get(struct gpio_chip *gc, unsigned int offset)
 	if (dir == 0) {
 		bank = to_bank(offset);
 
-		addr = bank_reg(gpio, bank, wdata_reg);
+		addr = bank_reg(gpio, bank, write_data);
 		reg = ioread8(addr);
 		reg = (reg >> GPIO_BIT(offset)) & 0x01;
 	} else {
 		offset -= gpio->nout_sgpio;
 		bank = to_bank(offset);
 
-		addr = bank_reg(gpio, bank, rdata_reg);
+		addr = bank_reg(gpio, bank, read_data);
 		reg = ioread8(addr);
 		reg = (reg >> GPIO_BIT(offset)) & 0x01;
 	}
@@ -344,7 +340,7 @@ static void npcm_sgpio_irq_set_mask(struct irq_data *d, bool set)
 	u8 bit;
 
 	irqd_to_npcm_sgpio_data(d, &gpio, &bank, &bit, &offset);
-	addr = bank_reg(gpio, bank, event_config);
+	addr = bank_reg(gpio, bank, event_cfg);
 
 	spin_lock_irqsave(&gpio->lock, flags);
 
@@ -362,7 +358,7 @@ static void npcm_sgpio_irq_set_mask(struct irq_data *d, bool set)
 
 	npcm_sgpio_setup_enable(gpio, true);
 
-	addr = bank_reg(gpio, bank, event_status);
+	addr = bank_reg(gpio, bank, event_sts);
 	reg = ioread8(addr);
 	reg |= BIT(bit);
 	iowrite8(reg, addr);
@@ -380,7 +376,7 @@ static void npcm_sgpio_irq_ack(struct irq_data *d)
 	u8 bit;
 
 	irqd_to_npcm_sgpio_data(d, &gpio, &bank, &bit, &offset);
-	status_addr = bank_reg(gpio, bank, event_status);
+	status_addr = bank_reg(gpio, bank, event_sts);
 	spin_lock_irqsave(&gpio->lock, flags);
 	iowrite8(BIT(bit), status_addr);
 	spin_unlock_irqrestore(&gpio->lock, flags);
@@ -438,7 +434,7 @@ static int npcm_sgpio_set_type(struct irq_data *d, unsigned int type)
 
 	spin_lock_irqsave(&gpio->lock, flags);
 	npcm_sgpio_setup_enable(gpio, false);
-	addr = bank_reg(gpio, bank, event_config);
+	addr = bank_reg(gpio, bank, event_cfg);
 	reg = ioread16(addr);
 
 	reg |= (val << (bit * 2));
@@ -465,7 +461,7 @@ static void npcm_sgpio_irq_handler(struct irq_desc *desc)
 	for (i = 0; i < ARRAY_SIZE(npcm_sgpio_banks); i++) {
 		const struct npcm_sgpio_bank *bank = &npcm_sgpio_banks[i];
 
-		reg = ioread8(bank_reg(gpio, bank, event_status));
+		reg = ioread8(bank_reg(gpio, bank, event_sts));
 		for_each_set_bit(j, &reg, 8) {
 			girq = irq_find_mapping(gc->irq.domain, i * 8 + gpio->nout_sgpio + j);
 			generic_handle_irq(girq);
@@ -475,18 +471,10 @@ static void npcm_sgpio_irq_handler(struct irq_desc *desc)
 	chained_irq_exit(ic, desc);
 }
 
-static struct irq_chip npcm_sgpio_irqchip = {
-	.name       = "npcm-sgpio",
-	.irq_ack    = npcm_sgpio_irq_ack,
-	.irq_mask   = npcm_sgpio_irq_mask,
-	.irq_unmask = npcm_sgpio_irq_unmask,
-	.irq_set_type   = npcm_sgpio_set_type,
-};
-
 static int npcm_sgpio_setup_irqs(struct npcm_sgpio *gpio,
 				 struct platform_device *pdev)
 {
-	int rc;
+	int rc, i;
 	struct gpio_irq_chip *irq;
 
 	rc = platform_get_irq(pdev, 0);
@@ -495,8 +483,22 @@ static int npcm_sgpio_setup_irqs(struct npcm_sgpio *gpio,
 
 	gpio->irq = rc;
 
+	/* Disable IRQ and clear Interrupt status registers for all SGPIO Pins. */
+	for (i = 0; i < ARRAY_SIZE(npcm_sgpio_banks); i++) {
+		const struct npcm_sgpio_bank *bank = &npcm_sgpio_banks[i];
+
+		iowrite16(0x0000, bank_reg(gpio, bank, event_cfg));
+		iowrite8(0xff, bank_reg(gpio, bank, event_sts));
+	}
+
+	gpio->intc.name = dev_name(&pdev->dev);
+	gpio->intc.irq_ack = npcm_sgpio_irq_ack;
+	gpio->intc.irq_mask = npcm_sgpio_irq_mask;
+	gpio->intc.irq_unmask = npcm_sgpio_irq_unmask;
+	gpio->intc.irq_set_type = npcm_sgpio_set_type;
+
 	irq = &gpio->chip.irq;
-	irq->chip = &npcm_sgpio_irqchip;
+	irq->chip = &gpio->intc;
 	irq->init_valid_mask = npcm_sgpio_irq_init_valid_mask;
 	irq->handler = handle_bad_irq;
 	irq->default_type = IRQ_TYPE_NONE;
@@ -530,12 +532,12 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 	if (IS_ERR(gpio->base))
 		return PTR_ERR(gpio->base);
 
-	rc = of_property_read_u32(pdev->dev.of_node, "nin_gpios", &nin_gpios);
+	rc = device_property_read_u32(&pdev->dev, "nin_gpios", &nin_gpios);
 	if (rc < 0) {
 		dev_err(&pdev->dev, "Could not read ngpios property\n");
 		return -EINVAL;
 	}
-	rc = of_property_read_u32(pdev->dev.of_node, "nout_gpios", &nout_gpios);
+	rc = device_property_read_u32(&pdev->dev, "nout_gpios", &nout_gpios);
 	if (rc < 0) {
 		dev_err(&pdev->dev, "Could not read ngpios property\n");
 		return -EINVAL;
@@ -549,7 +551,7 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	rc = of_property_read_u32(pdev->dev.of_node, "bus-frequency", &sgpio_freq);
+	rc = device_property_read_u32(&pdev->dev, "bus-frequency", &sgpio_freq);
 	if (rc < 0) {
 		dev_err(&pdev->dev, "Could not read bus-frequency property\n");
 		return -EINVAL;
