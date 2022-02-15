@@ -499,6 +499,7 @@
 				compatible = "nuvoton,npcm7xx-sgpio";
 				interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
 				gpio-controller;
+				#gpio-cells = <2>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&iox1_pins>;
 				bus-frequency = <16000000>;
@@ -513,6 +514,7 @@
 				compatible = "nuvoton,npcm7xx-sgpio";
 				interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>;
 				gpio-controller;
+				#gpio-cells = <2>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&iox2_pins>;
 				bus-frequency = <16000000>;
