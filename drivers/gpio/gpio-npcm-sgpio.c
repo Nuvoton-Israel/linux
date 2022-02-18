@@ -20,13 +20,6 @@
 
 #define  IOXCFG1 0x2A
 #define  IOXCFG1_SFT_CLK GENMASK(3, 0)
-#define  IOXCFG1_SFT_CLK_2	0x0E
-#define  IOXCFG1_SFT_CLK_3	0x0D
-#define  IOXCFG1_SFT_CLK_4	0x0C
-#define  IOXCFG1_SFT_CLK_8	0x07
-#define  IOXCFG1_SFT_CLK_16	0x06
-#define  IOXCFG1_SFT_CLK_32	0x05
-#define  IOXCFG1_SFT_CLK_1024	0x00
 #define  IOXCFG1_SCLK_POL BIT(4)
 #define  IOXCFG1_LDSH_POL BIT(5)
 
@@ -44,6 +37,16 @@
 
 #define GPIO_BANK(x)    ((x) / 8)
 #define GPIO_BIT(x)     ((x) % 8)
+
+/*
+ * Slect the freqency of shift clock.
+ * The shift clock is a division of the APB clock.
+ */
+struct npcm_clk_cfg {
+	const int *SFT_CLK;
+	const u8 *CLK_SEL;
+	const u8 cfg_opt;
+};
 
 struct npcm_sgpio {
 	struct gpio_chip chip;
@@ -282,11 +285,12 @@ static void npcm_sgpio_setup_enable(struct npcm_sgpio *gpio, bool enable)
 	}
 }
 
-static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio, u32 sgpio_freq)
+static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio, const struct npcm_clk_cfg *clk_cfg, u32 sgpio_freq)
 {
 	unsigned long apb_freq;
 	u32 sgpio_clk_div;
 	u8 tmp;
+	int i;
 
 	apb_freq = clk_get_rate(gpio->pclk);
 	sgpio_clk_div = (apb_freq / sgpio_freq);
@@ -295,27 +299,14 @@ static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio, u32 sgpio_freq)
 
 	tmp = ioread8(gpio->base + IOXCFG1) & ~IOXCFG1_SFT_CLK;
 
-	if (sgpio_clk_div >= 1024)
-		iowrite8(IOXCFG1_SFT_CLK_1024 | tmp, gpio->base + IOXCFG1);
-	else if (sgpio_clk_div >= 32)
-		iowrite8(IOXCFG1_SFT_CLK_32 | tmp, gpio->base + IOXCFG1);
-#ifndef CONFIG_ARCH_NPCM7XX
-	else if (sgpio_clk_div >= 16)
-		iowrite8(IOXCFG1_SFT_CLK_16 | tmp, gpio->base + IOXCFG1);
-#endif
-	else if (sgpio_clk_div >= 8)
-		iowrite8(IOXCFG1_SFT_CLK_8 | tmp, gpio->base + IOXCFG1);
-	else if (sgpio_clk_div >= 4)
-		iowrite8(IOXCFG1_SFT_CLK_4 | tmp, gpio->base + IOXCFG1);
-#ifdef CONFIG_ARCH_NPCM7XX
-	else if (sgpio_clk_div >= 3)
-		iowrite8(IOXCFG1_SFT_CLK_3 | tmp, gpio->base + IOXCFG1);
-	else if (sgpio_clk_div >= 2)
-		iowrite8(IOXCFG1_SFT_CLK_2 | tmp, gpio->base + IOXCFG1);
-#endif
-	else
-		return -EINVAL;
-	return 0;
+	for (i = 0; i < clk_cfg->cfg_opt; i++) {
+		if (sgpio_clk_div >= clk_cfg->SFT_CLK[i]) {
+			iowrite8(clk_cfg->CLK_SEL[i] | tmp, gpio->base + IOXCFG1);
+			return 0;
+		}
+	}
+
+	return -EINVAL;
 }
 
 static void npcm_sgpio_irq_init_valid_mask(struct gpio_chip *gc,
@@ -510,9 +501,37 @@ static int npcm_sgpio_setup_irqs(struct npcm_sgpio *gpio,
 	return 0;
 }
 
+static const int npcm7xx_SFT_CLK[] = {
+		1024, 32, 8, 4, 3, 2,
+};
+
+static const u8 npcm7xx_CLK_SEL[] = {
+		0x00, 0x05, 0x07, 0x0C, 0x0D, 0x0E,
+};
+
+static const int npcm845_SFT_CLK[] = {
+		1024, 32, 16, 8, 4,
+};
+
+static const u8 npcm845_CLK_SEL[] = {
+		0x00, 0x05, 0x06, 0x07, 0x0C,
+};
+
+static const struct npcm_clk_cfg npcm7xx_sgpio_pdata = {
+	.SFT_CLK = npcm7xx_SFT_CLK,
+	.CLK_SEL = npcm7xx_CLK_SEL,
+	.cfg_opt = 6,
+};
+
+static const struct npcm_clk_cfg npcm845_sgpio_pdata = {
+	.SFT_CLK = npcm845_SFT_CLK,
+	.CLK_SEL = npcm845_CLK_SEL,
+	.cfg_opt = 5,
+};
+
 static const struct of_device_id npcm_sgpio_of_table[] = {
-	{ .compatible = "nuvoton,npcm7xx-sgpio" },
-	{ .compatible = "nuvoton,npcm845-sgpio" },
+	{ .compatible = "nuvoton,npcm7xx-sgpio", .data = &npcm7xx_sgpio_pdata, },
+	{ .compatible = "nuvoton,npcm845-sgpio", .data = &npcm845_sgpio_pdata, },
 	{}
 };
 
@@ -521,6 +540,7 @@ MODULE_DEVICE_TABLE(of, npcm_sgpio_of_table);
 static int __init npcm_sgpio_probe(struct platform_device *pdev)
 {
 	struct npcm_sgpio *gpio;
+	const struct npcm_clk_cfg *clk_cfg;
 	int rc;
 	u32 nin_gpios, nout_gpios, sgpio_freq;
 
@@ -531,6 +551,10 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 	gpio->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(gpio->base))
 		return PTR_ERR(gpio->base);
+
+	clk_cfg = device_get_match_data(&pdev->dev);
+	if (!clk_cfg)
+		return -EINVAL;
 
 	rc = device_property_read_u32(&pdev->dev, "nin_gpios", &nin_gpios);
 	if (rc < 0) {
@@ -563,7 +587,7 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 		return PTR_ERR(gpio->pclk);
 	}
 
-	rc = npcm_sgpio_setup_clk(gpio, sgpio_freq);
+	rc = npcm_sgpio_setup_clk(gpio, clk_cfg, sgpio_freq);
 	if (rc < 0) {
 		dev_err(&pdev->dev, "Failed to setup clock\n");
 		return -EINVAL;
