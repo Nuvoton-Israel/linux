@@ -238,8 +238,7 @@
 
 		aes: aes@f0858000 {
 			compatible = "nuvoton,npcm845-aes";
-			reg = <0x0 0xf0858000 0x0 0x1000>,
-			<0x0 0xf0851000 0x0 0x1000>;
+			reg = <0x0 0xf0858000 0x0 0x1000>;
 			status = "disabled";
 			clocks = <&clk NPCM8XX_CLK_AHB>;
 			clock-names = "clk_ahb";
