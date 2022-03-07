@@ -604,6 +604,12 @@
 
 &i2c0 {
 	status = "okay";
+	rtc0: rtc@6f {
+		compatible = "nuvoton,nct3015y";
+		reg = <0x6f>;
+		#clock-cells = <0>;
+		host-wakeup-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
+	};
 };
 
 &i2c1 {
@@ -676,10 +682,6 @@
 };
 
 &i2c17 {
-	status = "okay";
-};
-
-&i2c18 {
 	status = "okay";
 };
 
