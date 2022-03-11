@@ -285,7 +285,8 @@ static void npcm_sgpio_setup_enable(struct npcm_sgpio *gpio, bool enable)
 	}
 }
 
-static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio, const struct npcm_clk_cfg *clk_cfg, u32 sgpio_freq)
+static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio,
+				const struct npcm_clk_cfg *clk_cfg, u32 sgpio_freq)
 {
 	unsigned long apb_freq;
 	u32 sgpio_clk_div;
@@ -530,7 +531,7 @@ static const struct npcm_clk_cfg npcm845_sgpio_pdata = {
 };
 
 static const struct of_device_id npcm_sgpio_of_table[] = {
-	{ .compatible = "nuvoton,npcm7xx-sgpio", .data = &npcm7xx_sgpio_pdata, },
+	{ .compatible = "nuvoton,npcm750-sgpio", .data = &npcm7xx_sgpio_pdata, },
 	{ .compatible = "nuvoton,npcm845-sgpio", .data = &npcm845_sgpio_pdata, },
 	{}
 };

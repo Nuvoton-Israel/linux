@@ -11,8 +11,8 @@ maintainers:
 
 description:
   This SGPIO controller is for NUVOTON NPCM7xx and NPCM8xx SoC,
-  NPCM7xx/NPCM8xx have two sgpio module each module can support up to 64 output pins,
-  and up to 64 input pin.
+  NPCM7xx/NPCM8xx have two sgpio module each module can support up
+  to 64 output pins,and up to 64 input pin.
   GPIO pins can be programmed to support the following options
   - Support interrupt option for each input port and various interrupt
     sensitivity option (level-high, level-low, edge-high, edge-low)
@@ -23,7 +23,7 @@ description:
 properties:
   compatible:
     enum:
-      - nuvoton,npcm7xx-sgpio
+      - nuvoton,npcm750-sgpio
       - nuvoton,npcm845-sgpio
 
   reg:
@@ -64,7 +64,7 @@ examples:
     #include <dt-bindings/clock/nuvoton,npcm7xx-clock.h>
     #include <dt-bindings/interrupt-controller/arm-gic.h>
     sgpio1: sgpio@101000 {
-        compatible = "nuvoton,npcm7xx-sgpio";
+        compatible = "nuvoton,npcm750-sgpio";
         gpio-controller;
         #gpio-cells = <2>;
         interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;

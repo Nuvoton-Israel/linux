@@ -496,7 +496,7 @@
 
 			sgpio1: sgpio@101000 {
 				clocks = <&clk NPCM7XX_CLK_APB3>;
-				compatible = "nuvoton,npcm7xx-sgpio";
+				compatible = "nuvoton,npcm750-sgpio";
 				interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
 				gpio-controller;
 				#gpio-cells = <2>;
@@ -511,7 +511,7 @@
 
 			sgpio2: sgpio@102000 {
 				clocks = <&clk NPCM7XX_CLK_APB3>;
-				compatible = "nuvoton,npcm7xx-sgpio";
+				compatible = "nuvoton,npcm750-sgpio";
 				interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>;
 				gpio-controller;
 				#gpio-cells = <2>;
