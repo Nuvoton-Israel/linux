@@ -1771,7 +1771,7 @@ config RTC_DRV_MXC_V2
 	   This driver can also be built as a module, if so, the module
 	   will be called "rtc-mxc_v2".
 
-config RTC_DRV_NCT3015Y
+config RTC_DRV_NCT3018Y
 	tristate "Nuvoton Real Time Clock"
 	depends on OF
 	help
@@ -1779,7 +1779,7 @@ config RTC_DRV_NCT3015Y
 	   module.
 
 	   This driver can also be built as a module, if so, the module
-	   will be called "rtc-nct3015y".
+	   will be called "rtc-nct3018y".
 
 config RTC_DRV_SNVS
 	tristate "Freescale SNVS RTC support"
