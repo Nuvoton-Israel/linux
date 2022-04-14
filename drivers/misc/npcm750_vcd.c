@@ -97,8 +97,6 @@
 #define  VCD_MODE_COLOR_222		0x1
 #define  VCD_MODE_COLOR_666		0x2
 #define  VCD_MODE_COLOR_888		0x3
-#define  VCD_MODE_CM_555		0x0
-#define  VCD_MODE_CM_565		0x1
 #define  VCD_MODE_COLOR_CNVRT_OFFSET 4
 
 #define VCD_CMD			0x8018
@@ -1177,7 +1175,7 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 
 	/* Set vcd mode */
 	regmap_update_bits(vcd, VCD_MODE, 0xFFFFFFFF,
-			    VCD_MODE_CM_565 | VCD_MODE_KVM_BW_SET);
+			   VCD_MODE_CM565 | VCD_MODE_KVM_BW_SET);
 
 	/* Set DVDE/DVHSYNC */
 	npcm750_vcd_dehs(priv, priv->de_mode);
