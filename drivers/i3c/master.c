@@ -1205,8 +1205,7 @@ static int i3c_master_setnewda_locked(struct i3c_master_controller *master,
 	return i3c_master_setda_locked(master, oldaddr, newaddr, false);
 }
 
-static int i3c_master_getmrl_locked(struct i3c_master_controller *master,
-				    struct i3c_device_info *info)
+int i3c_master_getmrl_locked(struct i3c_master_controller *master, struct i3c_device_info *info)
 {
 	struct i3c_ccc_cmd_dest dest;
 	struct i3c_ccc_mrl *mrl;
@@ -1247,8 +1246,7 @@ out:
 	return ret;
 }
 
-static int i3c_master_getmwl_locked(struct i3c_master_controller *master,
-				    struct i3c_device_info *info)
+int i3c_master_getmwl_locked(struct i3c_master_controller *master, struct i3c_device_info *info)
 {
 	struct i3c_ccc_cmd_dest dest;
 	struct i3c_ccc_mwl *mwl;
@@ -1272,6 +1270,52 @@ static int i3c_master_getmwl_locked(struct i3c_master_controller *master,
 	info->max_write_len = be16_to_cpu(mwl->len);
 
 out:
+	i3c_ccc_cmd_dest_cleanup(&dest);
+
+	return ret;
+}
+
+int i3c_master_setmrl_locked(struct i3c_master_controller *master,
+			     struct i3c_device_info *info, u16 read_len, u8 ibi_len)
+{
+	struct i3c_ccc_cmd_dest dest;
+	struct i3c_ccc_cmd cmd;
+	struct i3c_ccc_mrl *mrl;
+	int ret;
+
+	mrl = i3c_ccc_cmd_dest_init(&dest, info->dyn_addr, sizeof(*mrl));
+	if (!mrl)
+		return -ENOMEM;
+
+	mrl->read_len = cpu_to_be16(read_len);
+	mrl->ibi_len = ibi_len;
+	info->max_read_len = read_len;
+	info->max_ibi_len = mrl->ibi_len;
+	i3c_ccc_cmd_init(&cmd, false, I3C_CCC_SETMRL(false), &dest, 1);
+
+	ret = i3c_master_send_ccc_cmd_locked(master, &cmd);
+	i3c_ccc_cmd_dest_cleanup(&dest);
+
+	return ret;
+}
+
+int i3c_master_setmwl_locked(struct i3c_master_controller *master,
+			     struct i3c_device_info *info, u16 write_len)
+{
+	struct i3c_ccc_cmd_dest dest;
+	struct i3c_ccc_cmd cmd;
+	struct i3c_ccc_mwl *mwl;
+	int ret;
+
+	mwl = i3c_ccc_cmd_dest_init(&dest, info->dyn_addr, sizeof(*mwl));
+	if (!mwl)
+		return -ENOMEM;
+
+	mwl->len = cpu_to_be16(write_len);
+	info->max_write_len = write_len;
+	i3c_ccc_cmd_init(&cmd, false, I3C_CCC_SETMWL(false), &dest, 1);
+
+	ret = i3c_master_send_ccc_cmd_locked(master, &cmd);
 	i3c_ccc_cmd_dest_cleanup(&dest);
 
 	return ret;
@@ -1450,7 +1494,7 @@ int i3c_dev_getstatus_locked(struct i3c_dev_desc *dev,
 	if (ret)
 		goto out;
 
-	info->status = getsts->status;
+	info->status = be16_to_cpu(getsts->status);
 
 out:
 	i3c_ccc_cmd_dest_cleanup(&dest);
