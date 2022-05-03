@@ -79,6 +79,12 @@
 			no-map;
 		};
 
+		video_memory: framebuffer@0x1b000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x1b000000 0x02000000>;
+			reusable;
+			linux,cma-default;
+		};
 	};
 
 	regulators {
@@ -342,6 +348,11 @@
 &ece {
 	status = "okay";
 	memory-region = <&ece_memory>;
+};
+
+&video {
+	memory-region = <&video_memory>;
+	//status = "okay";
 };
 
 &watchdog1 {
