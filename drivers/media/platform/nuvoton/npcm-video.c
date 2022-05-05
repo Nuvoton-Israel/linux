@@ -305,7 +305,7 @@ static const struct v4l2_dv_timings_cap nuvoton_video_timings_cap = {
 
 static DECLARE_BITMAP(bitmap, BITMAP_SIZE);
 
-static void 123nuvoton_video_ece_prepend_rect_header(u8 *addr, u16 x, u16 y, u16 w,
+static void nuvoton_video_ece_prepend_rect_header(u8 *addr, u16 x, u16 y, u16 w,
 						  u16 h)
 {
 	__be16 x_pos = cpu_to_be16(x);
@@ -1847,10 +1847,9 @@ static int nuvoton_video_setup_video(struct nuvoton_video *video)
 			       V4L2_DETECT_MD_MODE_REGION_GRID, 0,
 			       V4L2_DETECT_MD_MODE_GLOBAL);
 
-
 	if (video->ctrl_handler.error) {
 		dev_err(video->dev, "Failed to init controls: %d\n",
-		video->ctrl_handler.error);
+			video->ctrl_handler.error);
 
 		rc = video->ctrl_handler.error;
 
