@@ -34,18 +34,19 @@
 
 #define VCD_VERSION "0.0.15"
 
-#define VCD_IOC_MAGIC     'v'
-#define VCD_IOCGETINFO	_IOR(VCD_IOC_MAGIC,  1, struct vcd_info)
-#define VCD_IOCSENDCMD	_IOW(VCD_IOC_MAGIC,  2, unsigned int)
-#define VCD_IOCCHKRES	_IOR(VCD_IOC_MAGIC,  3, int)
-#define VCD_IOCGETDIFF	_IOR(VCD_IOC_MAGIC,  4, struct rect)
-#define VCD_IOCDIFFCNT	_IOR(VCD_IOC_MAGIC,  5, int)
-#define VCD_IOCDEMODE	_IOR(VCD_IOC_MAGIC,  6, int)
-#define VCD_IOCRESET	_IO(VCD_IOC_MAGIC, 7)
-#define VCD_GETREG	_IOR(VCD_IOC_MAGIC, 8, struct vcd_info)
-#define VCD_SETREG	_IOW(VCD_IOC_MAGIC, 9, struct vcd_info)
-#define VCD_SHORT_RESET _IO(VCD_IOC_MAGIC, 10)
-#define VCD_IOC_MAXNR     10
+#define VCD_IOC_MAGIC		'v'
+#define VCD_IOCGETINFO		_IOR(VCD_IOC_MAGIC,  1, struct vcd_info)
+#define VCD_IOCSENDCMD		_IOW(VCD_IOC_MAGIC,  2, unsigned int)
+#define VCD_IOCCHKRES		_IOR(VCD_IOC_MAGIC,  3, int)
+#define VCD_IOCGETDIFF		_IOR(VCD_IOC_MAGIC,  4, struct rect)
+#define VCD_IOCDIFFCNT		_IOR(VCD_IOC_MAGIC,  5, int)
+#define VCD_IOCDEMODE		_IOR(VCD_IOC_MAGIC,  6, int)
+#define VCD_IOCRESET		_IO(VCD_IOC_MAGIC, 7)
+#define VCD_GETREG		_IOR(VCD_IOC_MAGIC, 8, struct vcd_info)
+#define VCD_SETREG		_IOW(VCD_IOC_MAGIC, 9, struct vcd_info)
+#define VCD_SHORT_RESET		_IO(VCD_IOC_MAGIC, 10)
+#define VCD_IOCSETDISPLAY	_IOW(VCD_IOC_MAGIC, 11, unsigned int)
+#define VCD_IOC_MAXNR		11
 
 #define VCD_OP_TIMEOUT msecs_to_jiffies(100)
 
@@ -1465,6 +1466,18 @@ npcm750_do_vcd_ioctl(struct npcm750_vcd *priv, unsigned int cmd,
 	case VCD_SHORT_RESET:
 	{
 		npcm750_short_vcd_reset(priv);
+		break;
+	}
+	case VCD_IOCSETDISPLAY:
+	{
+		unsigned int enable;
+
+		ret = copy_from_user(&enable, argp, sizeof(enable))
+			? -EFAULT : 0;
+
+		if (!ret)
+			npcm750_vcd_local_display(priv, enable);
+
 		break;
 	}
 
