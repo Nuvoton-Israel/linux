@@ -136,7 +136,7 @@
 		};*/
 
 		mc: memory-controller@f0824000 {
-			compatible = "nuvoton,npcm8xx-sdram-edac";
+			compatible = "nuvoton,npcm845-memory-controller";
 			reg = <0x0 0xf0824000 0x0 0x1000>;
 			interrupts = <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>;
 			status = "okay";
