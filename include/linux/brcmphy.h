@@ -87,6 +87,7 @@
 
 #define MII_BCM54XX_ESR		0x11	/* BCM54xx extended status register */
 #define MII_BCM54XX_ESR_IS	0x1000	/* Interrupt status */
+#define MII_BCM54XX_ESR_MDIX	0x2000	/* MDI Crossover status */
 
 #define MII_BCM54XX_EXP_DATA	0x15	/* Expansion register data */
 #define MII_BCM54XX_EXP_SEL	0x17	/* Expansion register select */

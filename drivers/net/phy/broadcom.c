@@ -26,6 +26,20 @@ MODULE_DESCRIPTION("Broadcom PHY driver");
 MODULE_AUTHOR("Maciej W. Rozycki");
 MODULE_LICENSE("GPL");
 
+static int bcm54xx_read_mdix(struct phy_device *phydev)
+{
+	int reg;
+
+	reg = phy_read(phydev, MII_BCM54XX_ESR);
+
+	if (reg & MII_BCM54XX_ESR_MDIX)
+		phydev->mdix = ETH_TP_MDI_X;
+	else
+		phydev->mdix = ETH_TP_MDI;
+
+	return 0;
+}
+
 static int bcm54xx_config_clock_delay(struct phy_device *phydev)
 {
 	int rc, val;
@@ -72,6 +86,9 @@ static int bcm54210e_config_init(struct phy_device *phydev)
 	int val;
 
 	bcm54xx_config_clock_delay(phydev);
+
+	/* Read MDI Crossover State */
+	bcm54xx_read_mdix(phydev);
 
 	if (phydev->dev_flags & PHY_BRCM_EN_MASTER_MODE) {
 		val = phy_read(phydev, MII_CTRL1000);
