@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-config VIDEO_NUVOTON
+config VIDEO_NPCM_VCD_ECE
 	tristate "Nuvoton NPCM Video Capture/Encode Engine driver"
 	depends on V4L_PLATFORM_DRIVERS
 	depends on VIDEO_V4L2

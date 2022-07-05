@@ -39,7 +39,7 @@
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-dma-contig.h>
 
-#define DEVICE_NAME			"nuvoton-video"
+#define DEVICE_NAME			"npcm-video"
 
 #define MAX_FRAME_RATE			60
 #define MAX_WIDTH			1920
@@ -215,19 +215,19 @@
 #define  GPLLST_PLLOTDIV2		GENMASK(5, 3)
 #define  GPLLST_GPLLFBDV109		GENMASK(7, 6)
 
-struct nuvoton_video_addr {
+struct npcm_video_addr {
 	unsigned int size;
 	dma_addr_t dma;
 	void *virt;
 };
 
-struct nuvoton_video_buffer {
+struct npcm_video_buffer {
 	struct vb2_v4l2_buffer vb;
 	struct list_head link;
 };
 
-#define to_nuvoton_video_buffer(x) \
-	container_of((x), struct nuvoton_video_buffer, vb)
+#define to_npcm_video_buffer(x) \
+	container_of((x), struct npcm_video_buffer, vb)
 
 enum {
 	VIDEO_STREAMING,
@@ -252,13 +252,13 @@ struct rect_list_info {
 	int tile_cnt;
 };
 
-struct nuvoton_ece {
+struct npcm_ece {
 	struct regmap *regmap;
 	atomic_t clients;
 	struct reset_control *reset;
 };
 
-struct nuvoton_video {
+struct npcm_video {
 	struct regmap *gcr_regmap;
 	struct regmap *gfx_regmap;
 	struct regmap *vcd_regmap;
@@ -280,9 +280,9 @@ struct nuvoton_video {
 	unsigned int sequence;
 
 	unsigned int max_buffer_size;
-	struct nuvoton_video_addr src;
+	struct npcm_video_addr src;
 	struct reset_control *reset;
-	struct nuvoton_ece ece;
+	struct npcm_ece ece;
 
 	int frame_rate;
 	int vb_index;
@@ -296,9 +296,9 @@ struct nuvoton_video {
 	int op_cmd;
 };
 
-#define to_nuvoton_video(x) container_of((x), struct nuvoton_video, v4l2_dev)
+#define to_npcm_video(x) container_of((x), struct npcm_video, v4l2_dev)
 
-static const struct v4l2_dv_timings_cap nuvoton_video_timings_cap = {
+static const struct v4l2_dv_timings_cap npcm_video_timings_cap = {
 	.type = V4L2_DV_BT_656_1120,
 	.bt = {
 		.min_width = MIN_WIDTH,
@@ -317,8 +317,8 @@ static const struct v4l2_dv_timings_cap nuvoton_video_timings_cap = {
 
 static DECLARE_BITMAP(bitmap, BITMAP_SIZE);
 
-static void nuvoton_video_ece_prepend_rect_header(u8 *addr, u16 x, u16 y, u16 w,
-						  u16 h)
+static void npcm_video_ece_prepend_rect_header(u8 *addr, u16 x, u16 y, u16 w,
+					       u16 h)
 {
 	__be16 x_pos = cpu_to_be16(x);
 	__be16 y_pos = cpu_to_be16(y);
@@ -333,8 +333,8 @@ static void nuvoton_video_ece_prepend_rect_header(u8 *addr, u16 x, u16 y, u16 w,
 	memcpy(addr + 8, &encoding, 4);
 }
 
-static u32 nuvoton_video_ece_get_ed_size(struct nuvoton_video *video,
-					 u32 offset, void *addr)
+static u32 npcm_video_ece_get_ed_size(struct npcm_video *video, u32 offset,
+				      void *addr)
 {
 	struct regmap *ece = video->ece.regmap;
 	u32 size, gap, val;
@@ -360,8 +360,8 @@ static u32 nuvoton_video_ece_get_ed_size(struct nuvoton_video *video,
 	return size + gap;
 }
 
-static void nuvoton_video_ece_enc_rect(struct nuvoton_video *video, u32 r_off_x,
-				       u32 r_off_y, u32 r_w, u32 r_h)
+static void npcm_video_ece_enc_rect(struct npcm_video *video, u32 r_off_x,
+				    u32 r_off_y, u32 r_w, u32 r_h)
 {
 	struct regmap *ece = video->ece.regmap;
 	u32 rect_offset = (r_off_y * video->bytesperline) + (r_off_x * 2);
@@ -399,7 +399,7 @@ static void nuvoton_video_ece_enc_rect(struct nuvoton_video *video, u32 r_off_x,
 	regmap_write(ece, ECE_RECT_DIMEN, temp);
 }
 
-static u32 nuvoton_video_ece_read_rect_offset(struct nuvoton_video *video)
+static u32 npcm_video_ece_read_rect_offset(struct npcm_video *video)
 {
 	struct regmap *ece = video->ece.regmap;
 	u32 offset;
@@ -412,7 +412,7 @@ static u32 nuvoton_video_ece_read_rect_offset(struct nuvoton_video *video)
  * Set the line pitch (in bytes) for the frame buffers.
  * Can be on of those values: 512, 1024, 2048, 2560 or 4096 bytes.
  */
-static void nuvoton_video_ece_set_lp(struct nuvoton_video *video, u32 pitch)
+static void npcm_video_ece_set_lp(struct npcm_video *video, u32 pitch)
 {
 	u32 lp;
 	struct regmap *ece = video->ece.regmap;
@@ -440,29 +440,28 @@ static void nuvoton_video_ece_set_lp(struct nuvoton_video *video, u32 pitch)
 	regmap_write(ece, ECE_RESOL, lp);
 }
 
-static void nuvoton_video_ece_set_fb_addr(struct nuvoton_video *video,
-					  u32 buffer)
+static void npcm_video_ece_set_fb_addr(struct npcm_video *video, u32 buffer)
 {
 	struct regmap *ece = video->ece.regmap;
 
 	regmap_write(ece, ECE_FBR_BA, buffer);
 }
 
-static void nuvoton_video_ece_set_enc_dba(struct nuvoton_video *video, u32 addr)
+static void npcm_video_ece_set_enc_dba(struct npcm_video *video, u32 addr)
 {
 	struct regmap *ece = video->ece.regmap;
 
 	regmap_write(ece, ECE_ED_BA, addr);
 }
 
-static void nuvoton_video_ece_clear_rect_offset(struct nuvoton_video *video)
+static void npcm_video_ece_clear_rect_offset(struct npcm_video *video)
 {
 	struct regmap *ece = video->ece.regmap;
 
 	regmap_write(ece, ECE_HEX_RECT_OFFSET, 0);
 }
 
-static void nuvoton_video_ece_ctrl_reset(struct nuvoton_video *video)
+static void npcm_video_ece_ctrl_reset(struct npcm_video *video)
 {
 	struct regmap *ece = video->ece.regmap;
 
@@ -473,10 +472,10 @@ static void nuvoton_video_ece_ctrl_reset(struct nuvoton_video *video)
 			   ECE_DDA_CTRL_ECEEN);
 	regmap_update_bits(ece, ECE_HEX_CTRL, ECE_HEX_CTRL_ENCDIS, 0);
 
-	nuvoton_video_ece_clear_rect_offset(video);
+	npcm_video_ece_clear_rect_offset(video);
 }
 
-static void nuvoton_video_ece_ip_reset(struct nuvoton_video *video)
+static void npcm_video_ece_ip_reset(struct npcm_video *video)
 {
 	reset_control_assert(video->ece.reset);
 	msleep(100);
@@ -484,15 +483,15 @@ static void nuvoton_video_ece_ip_reset(struct nuvoton_video *video)
 	msleep(100);
 }
 
-static int nuvoton_video_ece_init(struct nuvoton_video *video)
+static int npcm_video_ece_init(struct npcm_video *video)
 {
-	nuvoton_video_ece_ip_reset(video);
-	nuvoton_video_ece_ctrl_reset(video);
+	npcm_video_ece_ip_reset(video);
+	npcm_video_ece_ctrl_reset(video);
 
 	return 0;
 }
 
-static int nuvoton_video_ece_stop(struct nuvoton_video *video)
+static int npcm_video_ece_stop(struct npcm_video *video)
 {
 	struct regmap *ece = video->ece.regmap;
 
@@ -500,14 +499,14 @@ static int nuvoton_video_ece_stop(struct nuvoton_video *video)
 	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_INTEN, 0);
 	regmap_update_bits(ece, ECE_HEX_CTRL, ECE_HEX_CTRL_ENCDIS,
 			   ECE_HEX_CTRL_ENCDIS);
-	nuvoton_video_ece_clear_rect_offset(video);
+	npcm_video_ece_clear_rect_offset(video);
 
 	return 0;
 }
 
-static bool nuvoton_video_alloc_buf(struct nuvoton_video *video,
-				    struct nuvoton_video_addr *addr,
-				    unsigned int size)
+static bool npcm_video_alloc_buf(struct npcm_video *video,
+				 struct npcm_video_addr *addr,
+				 unsigned int size)
 {
 	if (size > VCD_MAX_SRC_BUFFER_SIZE)
 		size = VCD_MAX_SRC_BUFFER_SIZE;
@@ -522,8 +521,8 @@ static bool nuvoton_video_alloc_buf(struct nuvoton_video *video,
 	return true;
 }
 
-static void nuvoton_video_free_buf(struct nuvoton_video *video,
-				   struct nuvoton_video_addr *addr)
+static void npcm_video_free_buf(struct npcm_video *video,
+				struct npcm_video_addr *addr)
 {
 	dma_free_coherent(video->dev, addr->size, addr->virt, addr->dma);
 	addr->size = 0;
@@ -531,7 +530,7 @@ static void nuvoton_video_free_buf(struct nuvoton_video *video,
 	addr->virt = NULL;
 }
 
-static void nuvoton_video_free_diff_table(struct nuvoton_video *video)
+static void npcm_video_free_diff_table(struct npcm_video *video)
 {
 	struct list_head *head, *pos, *nx;
 	struct rect_list *tmp;
@@ -549,8 +548,8 @@ static void nuvoton_video_free_diff_table(struct nuvoton_video *video)
 	}
 }
 
-static int nuvoton_video_add_rect(struct nuvoton_video *video, int index,
-				  u32 x, u32 y, u32 w, u32 h)
+static int npcm_video_add_rect(struct npcm_video *video, int index, u32 x,
+			       u32 y, u32 w, u32 h)
 {
 	struct list_head *head = &video->list[index];
 	struct rect_list *list = NULL;
@@ -570,8 +569,8 @@ static int nuvoton_video_add_rect(struct nuvoton_video *video, int index,
 	return 1;
 }
 
-static void nuvoton_video_merge_rect(struct nuvoton_video *video,
-				     struct rect_list_info *info)
+static void npcm_video_merge_rect(struct npcm_video *video,
+				  struct rect_list_info *info)
 {
 	struct list_head *head = info->head;
 	struct rect_list *list = info->list;
@@ -605,8 +604,8 @@ static void nuvoton_video_merge_rect(struct nuvoton_video *video,
 	}
 }
 
-static struct rect_list *nuvoton_video_new_rect(struct nuvoton_video *video,
-						int offset, int index)
+static struct rect_list *npcm_video_new_rect(struct npcm_video *video,
+					     int offset, int index)
 {
 	struct v4l2_bt_timings *act = &video->active_timings;
 	struct rect_list *list = NULL;
@@ -630,23 +629,23 @@ static struct rect_list *nuvoton_video_new_rect(struct nuvoton_video *video,
 	return list;
 }
 
-static int nuvoton_video_find_rect(struct nuvoton_video *video,
-				   struct rect_list_info *info, u32 offset)
+static int npcm_video_find_rect(struct npcm_video *video,
+				struct rect_list_info *info, u32 offset)
 {
 	int i = info->index;
 
 	if (offset < info->tile_perline) {
-		info->list = nuvoton_video_new_rect(video, offset, i);
+		info->list = npcm_video_new_rect(video, offset, i);
 		if (!info->list)
 			return -ENOMEM;
 
-		nuvoton_video_merge_rect(video, info);
+		npcm_video_merge_rect(video, info);
 	}
 	return 0;
 }
 
-static int nuvoton_video_build_table(struct nuvoton_video *video,
-				     struct rect_list_info *info)
+static int npcm_video_build_table(struct npcm_video *video,
+				  struct rect_list_info *info)
 {
 	int i = info->index;
 	int j, ret, bit;
@@ -659,7 +658,7 @@ static int nuvoton_video_build_table(struct nuvoton_video *video,
 		bitmap_from_arr32(bitmap, &value, BITMAP_SIZE);
 
 		for_each_set_bit(bit, bitmap, BITMAP_SIZE) {
-			ret = nuvoton_video_find_rect(video, info,
+			ret = npcm_video_find_rect(video, info,
 						      bit + (j << 3));
 			if (ret < 0)
 				return ret;
@@ -669,7 +668,7 @@ static int nuvoton_video_build_table(struct nuvoton_video *video,
 	return info->tile_perline;
 }
 
-static int nuvoton_video_get_rect_list(struct nuvoton_video *video, int index)
+static int npcm_video_get_rect_list(struct npcm_video *video, int index)
 {
 	struct v4l2_bt_timings *act = &video->active_timings;
 	struct rect_list_info info;
@@ -699,7 +698,7 @@ static int nuvoton_video_get_rect_list(struct nuvoton_video *video, int index)
 	info.offset_perline *= 4;
 
 	do {
-		ret = nuvoton_video_build_table(video, &info);
+		ret = npcm_video_build_table(video, &info);
 		if (ret < 0)
 			return ret;
 		tile_cnt += ret;
@@ -708,7 +707,7 @@ static int nuvoton_video_get_rect_list(struct nuvoton_video *video, int index)
 	return ret;
 }
 
-static u8 nuvoton_video_is_mga(struct nuvoton_video *video)
+static u8 npcm_video_is_mga(struct npcm_video *video)
 {
 	struct regmap *gfxi = video->gfx_regmap;
 	u32 dispst;
@@ -717,7 +716,7 @@ static u8 nuvoton_video_is_mga(struct nuvoton_video *video)
 	return ((dispst & DISPST_MGAMODE) == DISPST_MGAMODE);
 }
 
-static u32 nuvoton_video_hres(struct nuvoton_video *video)
+static u32 npcm_video_hres(struct npcm_video *video)
 {
 	struct regmap *gfxi = video->gfx_regmap;
 	u32 hvcnth, hvcntl, apb_hor_res;
@@ -730,7 +729,7 @@ static u32 nuvoton_video_hres(struct nuvoton_video *video)
 	return apb_hor_res;
 }
 
-static u32 nuvoton_video_vres(struct nuvoton_video *video)
+static u32 npcm_video_vres(struct npcm_video *video)
 {
 	struct regmap *gfxi = video->gfx_regmap;
 	u32 vvcnth, vvcntl, apb_ver_res;
@@ -743,8 +742,8 @@ static u32 nuvoton_video_vres(struct nuvoton_video *video)
 	return apb_ver_res;
 }
 
-static int nuvoton_video_capres(struct nuvoton_video *video, u32 hor_res,
-				u32 vert_res)
+static int npcm_video_capres(struct npcm_video *video, u32 hor_res,
+			     u32 vert_res)
 {
 	struct regmap *vcd = video->vcd_regmap;
 	u32 res, cap_res;
@@ -764,7 +763,7 @@ static int nuvoton_video_capres(struct nuvoton_video *video, u32 hor_res,
 	return 0;
 }
 
-static void nuvoton_video_vcd_ip_reset(struct nuvoton_video *video)
+static void npcm_video_vcd_ip_reset(struct npcm_video *video)
 {
 	reset_control_assert(video->reset);
 	msleep(100);
@@ -772,7 +771,7 @@ static void nuvoton_video_vcd_ip_reset(struct nuvoton_video *video)
 	msleep(100);
 }
 
-static void nuvoton_video_vcd_state_machine_reset(struct nuvoton_video *video)
+static void npcm_video_vcd_state_machine_reset(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
 	u32 stat;
@@ -800,24 +799,24 @@ static void nuvoton_video_vcd_state_machine_reset(struct nuvoton_video *video)
 	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_IDBC, VCD_MODE_IDBC);
 }
 
-static int nuvoton_video_gfx_reset(struct nuvoton_video *video)
+static int npcm_video_gfx_reset(struct npcm_video *video)
 {
 	struct regmap *gcr = video->gcr_regmap;
 
 	regmap_update_bits(gcr, INTCR2, INTCR2_GIRST2, INTCR2_GIRST2);
 
-	nuvoton_video_vcd_state_machine_reset(video);
+	npcm_video_vcd_state_machine_reset(video);
 
 	regmap_update_bits(gcr, INTCR2, INTCR2_GIRST2, 0);
 
 	return 0;
 }
 
-static void nuvoton_video_kvm_bw(struct nuvoton_video *video, u8 bandwidth)
+static void npcm_video_kvm_bw(struct npcm_video *video, u8 bandwidth)
 {
 	struct regmap *vcd = video->vcd_regmap;
 
-	if (!nuvoton_video_is_mga(video))
+	if (!npcm_video_is_mga(video))
 		bandwidth = 1;
 
 	if (bandwidth)
@@ -827,7 +826,7 @@ static void nuvoton_video_kvm_bw(struct nuvoton_video *video, u8 bandwidth)
 		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_KVM_BW_SET, 0);
 }
 
-static u32 nuvoton_video_pclk(struct nuvoton_video *video)
+static u32 npcm_video_pclk(struct npcm_video *video)
 {
 	struct regmap *gfxi = video->gfx_regmap;
 	u32 tmp, pllfbdiv, pllinotdiv, gpllfbdiv;
@@ -854,7 +853,7 @@ static u32 nuvoton_video_pclk(struct nuvoton_video *video)
 	return ((pllfbdiv * 25000) / pllinotdiv) * 1000;
 }
 
-static int nuvoton_video_get_bpp(struct nuvoton_video *video)
+static int npcm_video_get_bpp(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
 	u32 mode, color_cnvr;
@@ -879,8 +878,7 @@ static int nuvoton_video_get_bpp(struct nuvoton_video *video)
  * Pitch must be a power of 2, >= linebytes,
  * at least 512, and no more than 4096.
  */
-static void nuvoton_video_set_linepitch(struct nuvoton_video *video,
-					u32 linebytes)
+static void npcm_video_set_linepitch(struct npcm_video *video, u32 linebytes)
 {
 	struct regmap *vcd = video->vcd_regmap;
 	u32 pitch = MIN_LP;
@@ -892,7 +890,7 @@ static void nuvoton_video_set_linepitch(struct nuvoton_video *video,
 		     FIELD_PREP(VCD_FBB_LP, pitch));
 }
 
-static u32 nuvoton_video_get_linepitch(struct nuvoton_video *video)
+static u32 npcm_video_get_linepitch(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
 	u32 linepitch;
@@ -902,7 +900,7 @@ static u32 nuvoton_video_get_linepitch(struct nuvoton_video *video)
 	return FIELD_GET(VCD_FBA_LP, linepitch);
 }
 
-static int nuvoton_video_command(struct nuvoton_video *video, u32 value)
+static int npcm_video_command(struct npcm_video *video, u32 value)
 {
 	struct regmap *vcd = video->vcd_regmap;
 	u32 cmd;
@@ -919,7 +917,7 @@ static int nuvoton_video_command(struct nuvoton_video *video, u32 value)
 	return 0;
 }
 
-static int nuvoton_video_init_reg(struct nuvoton_video *video)
+static int npcm_video_init_reg(struct npcm_video *video)
 {
 	struct regmap *gcr = video->gcr_regmap;
 	struct regmap *vcd = video->vcd_regmap;
@@ -938,8 +936,8 @@ static int nuvoton_video_init_reg(struct nuvoton_video *video)
 	regmap_update_bits(gcr, MFSEL1, MFSEL1_DVH1SEL, 0);
 
 	/* Reset video modules */
-	nuvoton_video_vcd_ip_reset(video);
-	nuvoton_video_gfx_reset(video);
+	npcm_video_vcd_ip_reset(video);
+	npcm_video_gfx_reset(video);
 
 	/* Set the FIFO thresholds */
 	regmap_write(vcd, VCD_FIFO, VCD_FIFO_TH);
@@ -954,10 +952,10 @@ static int nuvoton_video_init_reg(struct nuvoton_video *video)
 	return 0;
 }
 
-static int nuvoton_video_start_frame(struct nuvoton_video *video)
+static int npcm_video_start_frame(struct npcm_video *video)
 {
 	unsigned long flags;
-	struct nuvoton_video_buffer *buf;
+	struct npcm_video_buffer *buf;
 	struct regmap *vcd = video->vcd_regmap;
 	u32 val;
 	int ret;
@@ -980,7 +978,7 @@ static int nuvoton_video_start_frame(struct nuvoton_video *video)
 
 	spin_lock_irqsave(&video->lock, flags);
 	buf = list_first_entry_or_null(&video->buffers,
-				       struct nuvoton_video_buffer, link);
+				       struct npcm_video_buffer, link);
 	if (!buf) {
 		spin_unlock_irqrestore(&video->lock, flags);
 		dev_dbg(video->dev, "No empty buffers; skip capture frame\n");
@@ -990,22 +988,22 @@ static int nuvoton_video_start_frame(struct nuvoton_video *video)
 	set_bit(VIDEO_FRAME_INPRG, &video->flags);
 	spin_unlock_irqrestore(&video->lock, flags);
 
-	nuvoton_video_vcd_state_machine_reset(video);
+	npcm_video_vcd_state_machine_reset(video);
 
 	regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
 			   VCD_INTE_IFOR_IE, VCD_INTE_DONE_IE |
 			   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE);
 
-	nuvoton_video_command(video, video->ctrl_cmd);
+	npcm_video_command(video, video->ctrl_cmd);
 
 	return 0;
 }
 
-static void nuvoton_video_bufs_done(struct nuvoton_video *video,
-				    enum vb2_buffer_state state)
+static void npcm_video_bufs_done(struct npcm_video *video,
+				 enum vb2_buffer_state state)
 {
 	unsigned long flags;
-	struct nuvoton_video_buffer *buf;
+	struct npcm_video_buffer *buf;
 
 	spin_lock_irqsave(&video->lock, flags);
 	list_for_each_entry(buf, &video->buffers, link)
@@ -1014,26 +1012,26 @@ static void nuvoton_video_bufs_done(struct nuvoton_video *video,
 	spin_unlock_irqrestore(&video->lock, flags);
 }
 
-static void nuvoton_video_get_diff_rect(struct nuvoton_video *video, int index)
+static void npcm_video_get_diff_rect(struct npcm_video *video, int index)
 {
 	u32 width = video->active_timings.width;
 	u32 height = video->active_timings.height;
 
 	if (video->op_cmd != VCD_CMD_OPERATION_CAPTURE) {
 		video->rect_cnt = 0;
-		nuvoton_video_get_rect_list(video, index);
+		npcm_video_get_rect_list(video, index);
 		video->rect[index] = video->rect_cnt;
 	} else {
-		video->rect[index] = nuvoton_video_add_rect(video, index, 0, 0,
+		video->rect[index] = npcm_video_add_rect(video, index, 0, 0,
 							    width, height);
 	}
 }
 
-static irqreturn_t nuvoton_video_irq(int irq, void *arg)
+static irqreturn_t npcm_video_irq(int irq, void *arg)
 {
-	struct nuvoton_video *video = arg;
+	struct npcm_video *video = arg;
 	struct regmap *vcd = video->vcd_regmap;
-	struct nuvoton_video_buffer *buf;
+	struct npcm_video_buffer *buf;
 	struct rect_list *rect_list;
 	struct v4l2_rect *rect;
 	u32 status, ed_offset, ed_size, total_size;
@@ -1056,7 +1054,7 @@ static irqreturn_t nuvoton_video_irq(int irq, void *arg)
 	if (status & VCD_STAT_DONE) {
 		spin_lock(&video->lock);
 		buf = list_first_entry_or_null(&video->buffers,
-					       struct nuvoton_video_buffer,
+					       struct npcm_video_buffer,
 					       link);
 
 		if (!buf) {
@@ -1069,35 +1067,35 @@ static irqreturn_t nuvoton_video_irq(int irq, void *arg)
 		vb_dma_addr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
 		index = buf->vb.vb2_buf.index;
 
-		nuvoton_video_ece_ctrl_reset(video);
-		nuvoton_video_ece_clear_rect_offset(video);
+		npcm_video_ece_ctrl_reset(video);
+		npcm_video_ece_clear_rect_offset(video);
 
-		nuvoton_video_ece_set_fb_addr(video, video->src.dma);
+		npcm_video_ece_set_fb_addr(video, video->src.dma);
 
 		/* Set base address of encoded data to video buffer */
-		nuvoton_video_ece_set_enc_dba(video, vb_dma_addr);
+		npcm_video_ece_set_enc_dba(video, vb_dma_addr);
 
-		nuvoton_video_ece_set_lp(video, video->bytesperline);
-		nuvoton_video_get_diff_rect(video, index);
+		npcm_video_ece_set_lp(video, video->bytesperline);
+		npcm_video_get_diff_rect(video, index);
 
 		total_size = 0;
 
 		list_for_each_entry(rect_list, &video->list[index], list) {
 			rect = &rect_list->clip.c;
-			ed_offset = nuvoton_video_ece_read_rect_offset(video);
+			ed_offset = npcm_video_ece_read_rect_offset(video);
 
-			nuvoton_video_ece_enc_rect(video, rect->left,
-						   rect->top, rect->width,
-						   rect->height);
-			ed_size = nuvoton_video_ece_get_ed_size(video,
-								ed_offset,
-								addr);
+			npcm_video_ece_enc_rect(video, rect->left,
+						rect->top, rect->width,
+						rect->height);
+			ed_size = npcm_video_ece_get_ed_size(video,
+							     ed_offset,
+							     addr);
 
-			nuvoton_video_ece_prepend_rect_header(addr + ed_offset,
-							      rect->left,
-							      rect->top,
-							      rect->width,
-							      rect->height);
+			npcm_video_ece_prepend_rect_header(addr + ed_offset,
+							   rect->left,
+							   rect->top,
+							   rect->width,
+							   rect->height);
 
 			total_size += ed_size;
 		}
@@ -1116,15 +1114,15 @@ static irqreturn_t nuvoton_video_irq(int irq, void *arg)
 
 	if (status & VCD_STAT_IFOR || status & VCD_STAT_IFOT) {
 		dev_warn(video->dev, "VCD FIFO overrun or over thresholds\n");
-		nuvoton_video_vcd_ip_reset(video);
-		nuvoton_video_gfx_reset(video);
-		nuvoton_video_start_frame(video);
+		npcm_video_vcd_ip_reset(video);
+		npcm_video_gfx_reset(video);
+		npcm_video_start_frame(video);
 	}
 
 	return IRQ_HANDLED;
 }
 
-static void nuvoton_video_clear_gmmap(struct nuvoton_video *video)
+static void npcm_video_clear_gmmap(struct npcm_video *video)
 {
 	struct regmap *gcr = video->gcr_regmap;
 	u32 intcr, gmmap;
@@ -1182,7 +1180,7 @@ static void nuvoton_video_clear_gmmap(struct nuvoton_video *video)
 	iounmap(baseptr);
 }
 
-static void nuvoton_video_get_resolution(struct nuvoton_video *video)
+static void npcm_video_get_resolution(struct npcm_video *video)
 {
 	struct v4l2_bt_timings *act = &video->active_timings;
 	struct v4l2_bt_timings *det = &video->detected_timings;
@@ -1191,19 +1189,16 @@ static void nuvoton_video_get_resolution(struct nuvoton_video *video)
 
 	video->v4l2_input_status = 0;
 
-	det->width = nuvoton_video_hres(video);
-	det->height = nuvoton_video_vres(video);
+	det->width = npcm_video_hres(video);
+	det->height = npcm_video_vres(video);
 
 	if (act->width != det->width || act->height != det->height) {
 		dev_dbg(video->dev, "Resolution changed\n");
 
-		nuvoton_video_bufs_done(video, VB2_BUF_STATE_ERROR);
+		npcm_video_bufs_done(video, VB2_BUF_STATE_ERROR);
 
-		if (nuvoton_video_hres(video) > 0 &&
-		    nuvoton_video_vres(video) > 0) {
-			//struct regmap *gfxi = video->gfx_regmap;
+		if (npcm_video_hres(video) > 0 && npcm_video_vres(video) > 0) {
 			gfxi = video->gfx_regmap;
-			//u32 dispst;
 
 			if (test_bit(VIDEO_STREAMING, &video->flags)) {
 				/*
@@ -1213,21 +1208,21 @@ static void nuvoton_video_get_resolution(struct nuvoton_video *video)
 				do {
 					mdelay(100);
 					regmap_read(gfxi, DISPST, &dispst);
-				} while (nuvoton_video_vres(video) < 100 ||
-					 nuvoton_video_pclk(video) == 0 ||
+				} while (npcm_video_vres(video) < 100 ||
+					 npcm_video_pclk(video) == 0 ||
 					 (dispst & DISPST_HSCROFF));
 			}
 
-			det->width = nuvoton_video_hres(video);
-			det->height = nuvoton_video_vres(video);
-			det->pixelclock = nuvoton_video_pclk(video);
+			det->width = npcm_video_hres(video);
+			det->height = npcm_video_vres(video);
+			det->pixelclock = npcm_video_pclk(video);
 		}
 	}
 
 	if (det->width == 0 || det->height == 0) {
 		det->width = MIN_WIDTH;
 		det->height = MIN_HEIGHT;
-		nuvoton_video_clear_gmmap(video);
+		npcm_video_clear_gmmap(video);
 		video->v4l2_input_status = V4L2_IN_ST_NO_SIGNAL;
 	}
 
@@ -1236,7 +1231,7 @@ static void nuvoton_video_get_resolution(struct nuvoton_video *video)
 		video->v4l2_input_status);
 }
 
-static void nuvoton_video_set_resolution(struct nuvoton_video *video)
+static void npcm_video_set_resolution(struct npcm_video *video)
 {
 	struct v4l2_bt_timings *act = &video->active_timings;
 	struct regmap *vcd = video->vcd_regmap;
@@ -1246,23 +1241,23 @@ static void nuvoton_video_set_resolution(struct nuvoton_video *video)
 	regmap_write(vcd, VCD_FBA_ADR, video->src.dma);
 	regmap_write(vcd, VCD_FBB_ADR, video->src.dma);
 
-	nuvoton_video_capres(video, act->width, act->height);
+	npcm_video_capres(video, act->width, act->height);
 
-	video->bytesperpixel = nuvoton_video_get_bpp(video);
-	nuvoton_video_set_linepitch(video, act->width * video->bytesperpixel);
+	video->bytesperpixel = npcm_video_get_bpp(video);
+	npcm_video_set_linepitch(video, act->width * video->bytesperpixel);
 
-	video->bytesperline = nuvoton_video_get_linepitch(video);
+	video->bytesperline = npcm_video_get_linepitch(video);
 
-	nuvoton_video_kvm_bw(video, act->pixelclock > VCD_KVM_BW_PCLK);
+	npcm_video_kvm_bw(video, act->pixelclock > VCD_KVM_BW_PCLK);
 
-	nuvoton_video_gfx_reset(video);
+	npcm_video_gfx_reset(video);
 
 	regmap_read(vcd, VCD_MODE, &mode);
 
 	clear_bit(VIDEO_FRAME_INPRG, &video->flags);
 
 	dev_dbg(video->dev, "VCD mode = 0x%x, %s mode\n", mode,
-		nuvoton_video_is_mga(video) ? "Hi Res" : "VGA");
+		npcm_video_is_mga(video) ? "Hi Res" : "VGA");
 
 	dev_dbg(video->dev,
 		"Digital mode: %d x %d x %d, pixelclock %lld, bytesperline %d\n",
@@ -1270,26 +1265,25 @@ static void nuvoton_video_set_resolution(struct nuvoton_video *video)
 		video->bytesperline);
 }
 
-static int nuvoton_video_start(struct nuvoton_video *video)
+static int npcm_video_start(struct npcm_video *video)
 {
 	int rc;
 
 	dev_dbg(video->dev, "%s\n", __func__);
 
-	rc = nuvoton_video_init_reg(video);
+	rc = npcm_video_init_reg(video);
 	if (rc)
 		return rc;
 
-	nuvoton_video_get_resolution(video);
+	npcm_video_get_resolution(video);
 
 	video->active_timings = video->detected_timings;
 
 	video->max_buffer_size = VCD_MAX_SRC_BUFFER_SIZE;
-	if (!nuvoton_video_alloc_buf(video, &video->src,
-				     video->max_buffer_size))
+	if (!npcm_video_alloc_buf(video, &video->src, video->max_buffer_size))
 		return -ENOMEM;
 
-	nuvoton_video_set_resolution(video);
+	npcm_video_set_resolution(video);
 
 	video->pix_fmt.width = video->active_timings.width;
 	video->pix_fmt.height = video->active_timings.height;
@@ -1297,9 +1291,9 @@ static int nuvoton_video_start(struct nuvoton_video *video)
 	video->pix_fmt.bytesperline = video->bytesperline;
 
 	if (atomic_inc_return(&video->ece.clients) == 1) {
-		nuvoton_video_ece_init(video);
-		nuvoton_video_ece_set_fb_addr(video, video->src.dma);
-		nuvoton_video_ece_set_lp(video, video->bytesperline);
+		npcm_video_ece_init(video);
+		npcm_video_ece_set_fb_addr(video, video->src.dma);
+		npcm_video_ece_set_lp(video, video->bytesperline);
 
 		dev_dbg(video->dev, "ECE open: client %d\n",
 			atomic_read(&video->ece.clients));
@@ -1308,7 +1302,7 @@ static int nuvoton_video_start(struct nuvoton_video *video)
 	return 0;
 }
 
-static void nuvoton_video_stop(struct nuvoton_video *video)
+static void npcm_video_stop(struct npcm_video *video)
 {
 	unsigned long flags;
 	struct regmap *vcd = video->vcd_regmap;
@@ -1325,10 +1319,10 @@ static void nuvoton_video_stop(struct nuvoton_video *video)
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 
 	if (video->src.size)
-		nuvoton_video_free_buf(video, &video->src);
+		npcm_video_free_buf(video, &video->src);
 
 	if (video->list)
-		nuvoton_video_free_diff_table(video);
+		npcm_video_free_diff_table(video);
 
 	kfree(video->list);
 	video->list = NULL;
@@ -1341,25 +1335,25 @@ static void nuvoton_video_stop(struct nuvoton_video *video)
 	video->ctrl_cmd = VCD_CMD_OPERATION_CAPTURE;
 
 	if (atomic_dec_return(&video->ece.clients) == 0) {
-		nuvoton_video_ece_stop(video);
+		npcm_video_ece_stop(video);
 		dev_dbg(video->dev, "ECE close: client %d\n",
 			atomic_read(&video->ece.clients));
 	}
 }
 
-static int nuvoton_video_querycap(struct file *file, void *fh,
-				  struct v4l2_capability *cap)
+static int npcm_video_querycap(struct file *file, void *fh,
+			       struct v4l2_capability *cap)
 {
 	strscpy(cap->driver, DEVICE_NAME, sizeof(cap->driver));
-	strscpy(cap->card, "Nuvoton Video Engine", sizeof(cap->card));
+	strscpy(cap->card, "NPCM Video Engine", sizeof(cap->card));
 	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s",
 		 DEVICE_NAME);
 
 	return 0;
 }
 
-static int nuvoton_video_enum_format(struct file *file, void *fh,
-				     struct v4l2_fmtdesc *f)
+static int npcm_video_enum_format(struct file *file, void *fh,
+				  struct v4l2_fmtdesc *f)
 {
 	if (f->index)
 		return -EINVAL;
@@ -1369,20 +1363,20 @@ static int nuvoton_video_enum_format(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_get_format(struct file *file, void *fh,
-				    struct v4l2_format *f)
+static int npcm_video_get_format(struct file *file, void *fh,
+				 struct v4l2_format *f)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	f->fmt.pix = video->pix_fmt;
 
 	return 0;
 }
 
-static int nuvoton_video_enum_input(struct file *file, void *fh,
-				    struct v4l2_input *inp)
+static int npcm_video_enum_input(struct file *file, void *fh,
+				 struct v4l2_input *inp)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	if (inp->index)
 		return -EINVAL;
@@ -1395,14 +1389,14 @@ static int nuvoton_video_enum_input(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_get_input(struct file *file, void *fh, unsigned int *i)
+static int npcm_video_get_input(struct file *file, void *fh, unsigned int *i)
 {
 	*i = 0;
 
 	return 0;
 }
 
-static int nuvoton_video_set_input(struct file *file, void *fh, unsigned int i)
+static int npcm_video_set_input(struct file *file, void *fh, unsigned int i)
 {
 	if (i)
 		return -EINVAL;
@@ -1410,10 +1404,10 @@ static int nuvoton_video_set_input(struct file *file, void *fh, unsigned int i)
 	return 0;
 }
 
-static int nuvoton_video_get_parm(struct file *file, void *fh,
-				  struct v4l2_streamparm *a)
+static int npcm_video_get_parm(struct file *file, void *fh,
+			       struct v4l2_streamparm *a)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	a->parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
 	a->parm.capture.readbuffers = 3;
@@ -1426,8 +1420,8 @@ static int nuvoton_video_get_parm(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_set_parm(struct file *file, void *fh,
-				  struct v4l2_streamparm *a)
+static int npcm_video_set_parm(struct file *file, void *fh,
+			       struct v4l2_streamparm *a)
 {
 	unsigned int frame_rate = 0;
 
@@ -1447,10 +1441,10 @@ static int nuvoton_video_set_parm(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_enum_framesizes(struct file *file, void *fh,
-					 struct v4l2_frmsizeenum *fsize)
+static int npcm_video_enum_framesizes(struct file *file, void *fh,
+				      struct v4l2_frmsizeenum *fsize)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	if (fsize->index)
 		return -EINVAL;
@@ -1465,10 +1459,10 @@ static int nuvoton_video_enum_framesizes(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_enum_frameintervals(struct file *file, void *fh,
-					     struct v4l2_frmivalenum *fival)
+static int npcm_video_enum_frameintervals(struct file *file, void *fh,
+					  struct v4l2_frmivalenum *fival)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	if (fival->index)
 		return -EINVAL;
@@ -1491,10 +1485,10 @@ static int nuvoton_video_enum_frameintervals(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_get_vid_overlay(struct file *file, void *fh,
-					 struct v4l2_format *fmt)
+static int npcm_video_get_vid_overlay(struct file *file, void *fh,
+				      struct v4l2_format *fmt)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 	struct v4l2_window *win = &fmt->fmt.win;
 	struct list_head *head, *pos, *nx;
 	struct rect_list *entry, *tmp;
@@ -1506,7 +1500,6 @@ static int nuvoton_video_get_vid_overlay(struct file *file, void *fh,
 
 		entry = list_first_entry_or_null(head, struct rect_list, list);
 		if (entry) {
-			//struct v4l2_rect *r = &entry->clip.c;
 			rect = &entry->clip.c;
 
 			win->w.top = rect->top;
@@ -1532,10 +1525,10 @@ static int nuvoton_video_get_vid_overlay(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_set_dv_timings(struct file *file, void *fh,
-					struct v4l2_dv_timings *timings)
+static int npcm_video_set_dv_timings(struct file *file, void *fh,
+				     struct v4l2_dv_timings *timings)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	if (timings->bt.width == video->active_timings.width &&
 	    timings->bt.height == video->active_timings.height)
@@ -1548,7 +1541,7 @@ static int nuvoton_video_set_dv_timings(struct file *file, void *fh,
 
 	video->active_timings = timings->bt;
 
-	nuvoton_video_set_resolution(video);
+	npcm_video_set_resolution(video);
 
 	video->pix_fmt.width = timings->bt.width;
 	video->pix_fmt.height = timings->bt.height;
@@ -1560,10 +1553,10 @@ static int nuvoton_video_set_dv_timings(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_get_dv_timings(struct file *file, void *fh,
-					struct v4l2_dv_timings *timings)
+static int npcm_video_get_dv_timings(struct file *file, void *fh,
+				     struct v4l2_dv_timings *timings)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	timings->type = V4L2_DV_BT_656_1120;
 	timings->bt = video->active_timings;
@@ -1571,12 +1564,12 @@ static int nuvoton_video_get_dv_timings(struct file *file, void *fh,
 	return 0;
 }
 
-static int nuvoton_video_query_dv_timings(struct file *file, void *fh,
-					  struct v4l2_dv_timings *timings)
+static int npcm_video_query_dv_timings(struct file *file, void *fh,
+				       struct v4l2_dv_timings *timings)
 {
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
-	nuvoton_video_get_resolution(video);
+	npcm_video_get_resolution(video);
 
 	timings->type = V4L2_DV_BT_656_1120;
 	timings->bt = video->detected_timings;
@@ -1584,23 +1577,23 @@ static int nuvoton_video_query_dv_timings(struct file *file, void *fh,
 	return video->v4l2_input_status ? -ENOLINK : 0;
 }
 
-static int nuvoton_video_enum_dv_timings(struct file *file, void *fh,
-					 struct v4l2_enum_dv_timings *timings)
+static int npcm_video_enum_dv_timings(struct file *file, void *fh,
+				      struct v4l2_enum_dv_timings *timings)
 {
-	return v4l2_enum_dv_timings_cap(timings, &nuvoton_video_timings_cap,
+	return v4l2_enum_dv_timings_cap(timings, &npcm_video_timings_cap,
 					NULL, NULL);
 }
 
-static int nuvoton_video_dv_timings_cap(struct file *file, void *fh,
-					struct v4l2_dv_timings_cap *cap)
+static int npcm_video_dv_timings_cap(struct file *file, void *fh,
+				     struct v4l2_dv_timings_cap *cap)
 {
-	*cap = nuvoton_video_timings_cap;
+	*cap = npcm_video_timings_cap;
 
 	return 0;
 }
 
-static int nuvoton_video_sub_event(struct v4l2_fh *fh,
-				   const struct v4l2_event_subscription *sub)
+static int npcm_video_sub_event(struct v4l2_fh *fh,
+				const struct v4l2_event_subscription *sub)
 {
 	switch (sub->type) {
 	case V4L2_EVENT_SOURCE_CHANGE:
@@ -1610,13 +1603,13 @@ static int nuvoton_video_sub_event(struct v4l2_fh *fh,
 	return v4l2_ctrl_subscribe_event(fh, sub);
 }
 
-static const struct v4l2_ioctl_ops nuvoton_video_ioctls = {
-	.vidioc_querycap = nuvoton_video_querycap,
+static const struct v4l2_ioctl_ops npcm_video_ioctls = {
+	.vidioc_querycap = npcm_video_querycap,
 
-	.vidioc_enum_fmt_vid_cap = nuvoton_video_enum_format,
-	.vidioc_g_fmt_vid_cap = nuvoton_video_get_format,
-	.vidioc_s_fmt_vid_cap = nuvoton_video_get_format,
-	.vidioc_try_fmt_vid_cap = nuvoton_video_get_format,
+	.vidioc_enum_fmt_vid_cap = npcm_video_enum_format,
+	.vidioc_g_fmt_vid_cap = npcm_video_get_format,
+	.vidioc_s_fmt_vid_cap = npcm_video_get_format,
+	.vidioc_try_fmt_vid_cap = npcm_video_get_format,
 
 	.vidioc_reqbufs = vb2_ioctl_reqbufs,
 	.vidioc_querybuf = vb2_ioctl_querybuf,
@@ -1628,31 +1621,31 @@ static const struct v4l2_ioctl_ops nuvoton_video_ioctls = {
 	.vidioc_streamon = vb2_ioctl_streamon,
 	.vidioc_streamoff = vb2_ioctl_streamoff,
 
-	.vidioc_enum_input = nuvoton_video_enum_input,
-	.vidioc_g_input = nuvoton_video_get_input,
-	.vidioc_s_input = nuvoton_video_set_input,
+	.vidioc_enum_input = npcm_video_enum_input,
+	.vidioc_g_input = npcm_video_get_input,
+	.vidioc_s_input = npcm_video_set_input,
 
-	.vidioc_g_parm = nuvoton_video_get_parm,
-	.vidioc_s_parm = nuvoton_video_set_parm,
-	.vidioc_g_fmt_vid_overlay = nuvoton_video_get_vid_overlay,
-	.vidioc_enum_framesizes = nuvoton_video_enum_framesizes,
-	.vidioc_enum_frameintervals = nuvoton_video_enum_frameintervals,
+	.vidioc_g_parm = npcm_video_get_parm,
+	.vidioc_s_parm = npcm_video_set_parm,
+	.vidioc_g_fmt_vid_overlay = npcm_video_get_vid_overlay,
+	.vidioc_enum_framesizes = npcm_video_enum_framesizes,
+	.vidioc_enum_frameintervals = npcm_video_enum_frameintervals,
 
-	.vidioc_s_dv_timings = nuvoton_video_set_dv_timings,
-	.vidioc_g_dv_timings = nuvoton_video_get_dv_timings,
-	.vidioc_query_dv_timings = nuvoton_video_query_dv_timings,
-	.vidioc_enum_dv_timings = nuvoton_video_enum_dv_timings,
-	.vidioc_dv_timings_cap = nuvoton_video_dv_timings_cap,
+	.vidioc_s_dv_timings = npcm_video_set_dv_timings,
+	.vidioc_g_dv_timings = npcm_video_get_dv_timings,
+	.vidioc_query_dv_timings = npcm_video_query_dv_timings,
+	.vidioc_enum_dv_timings = npcm_video_enum_dv_timings,
+	.vidioc_dv_timings_cap = npcm_video_dv_timings_cap,
 
-	.vidioc_subscribe_event = nuvoton_video_sub_event,
+	.vidioc_subscribe_event = npcm_video_sub_event,
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
 };
 
-static int nuvoton_video_set_ctrl(struct v4l2_ctrl *ctrl)
+static int npcm_video_set_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct nuvoton_video *video = container_of(ctrl->handler,
-						   struct nuvoton_video,
-						   ctrl_handler);
+	struct npcm_video *video = container_of(ctrl->handler,
+						struct npcm_video,
+						ctrl_handler);
 
 	switch (ctrl->id) {
 	case V4L2_CID_DETECT_MD_MODE:
@@ -1668,14 +1661,14 @@ static int nuvoton_video_set_ctrl(struct v4l2_ctrl *ctrl)
 	return 0;
 }
 
-static const struct v4l2_ctrl_ops nuvoton_video_ctrl_ops = {
-	.s_ctrl = nuvoton_video_set_ctrl,
+static const struct v4l2_ctrl_ops npcm_video_ctrl_ops = {
+	.s_ctrl = npcm_video_set_ctrl,
 };
 
-static int nuvoton_video_open(struct file *file)
+static int npcm_video_open(struct file *file)
 {
 	int rc;
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	mutex_lock(&video->video_lock);
 
@@ -1686,22 +1679,22 @@ static int nuvoton_video_open(struct file *file)
 	}
 
 	if (v4l2_fh_is_singular_file(file))
-		nuvoton_video_start(video);
+		npcm_video_start(video);
 
 	mutex_unlock(&video->video_lock);
 
 	return 0;
 }
 
-static int nuvoton_video_release(struct file *file)
+static int npcm_video_release(struct file *file)
 {
 	int rc;
-	struct nuvoton_video *video = video_drvdata(file);
+	struct npcm_video *video = video_drvdata(file);
 
 	mutex_lock(&video->video_lock);
 
 	if (v4l2_fh_is_singular_file(file))
-		nuvoton_video_stop(video);
+		npcm_video_stop(video);
 
 	rc = _vb2_fop_release(file, NULL);
 
@@ -1710,23 +1703,23 @@ static int nuvoton_video_release(struct file *file)
 	return rc;
 }
 
-static const struct v4l2_file_operations nuvoton_video_v4l2_fops = {
+static const struct v4l2_file_operations npcm_video_v4l2_fops = {
 	.owner = THIS_MODULE,
 	.read = vb2_fop_read,
 	.poll = vb2_fop_poll,
 	.unlocked_ioctl = video_ioctl2,
 	.mmap = vb2_fop_mmap,
-	.open = nuvoton_video_open,
-	.release = nuvoton_video_release,
+	.open = npcm_video_open,
+	.release = npcm_video_release,
 };
 
-static int nuvoton_video_queue_setup(struct vb2_queue *q,
-				     unsigned int *num_buffers,
-				     unsigned int *num_planes,
-				     unsigned int sizes[],
-				     struct device *alloc_devs[])
+static int npcm_video_queue_setup(struct vb2_queue *q,
+				  unsigned int *num_buffers,
+				  unsigned int *num_planes,
+				  unsigned int sizes[],
+				  struct device *alloc_devs[])
 {
-	struct nuvoton_video *video = vb2_get_drv_priv(q);
+	struct npcm_video *video = vb2_get_drv_priv(q);
 	int i;
 
 	dev_dbg(video->dev, "%s\n", __func__);
@@ -1747,7 +1740,7 @@ static int nuvoton_video_queue_setup(struct vb2_queue *q,
 	video->rect = kcalloc(*num_buffers, sizeof(*video->rect), GFP_KERNEL);
 
 	if (video->list) {
-		nuvoton_video_free_diff_table(video);
+		npcm_video_free_diff_table(video);
 		kfree(video->list);
 		video->list = NULL;
 	}
@@ -1762,9 +1755,9 @@ static int nuvoton_video_queue_setup(struct vb2_queue *q,
 	return 0;
 }
 
-static int nuvoton_video_buf_prepare(struct vb2_buffer *vb)
+static int npcm_video_buf_prepare(struct vb2_buffer *vb)
 {
-	struct nuvoton_video *video = vb2_get_drv_priv(vb->vb2_queue);
+	struct npcm_video *video = vb2_get_drv_priv(vb->vb2_queue);
 
 	if (vb2_plane_size(vb, 0) < video->max_buffer_size)
 		return -EINVAL;
@@ -1772,19 +1765,18 @@ static int nuvoton_video_buf_prepare(struct vb2_buffer *vb)
 	return 0;
 }
 
-static int nuvoton_video_start_streaming(struct vb2_queue *q,
-					 unsigned int count)
+static int npcm_video_start_streaming(struct vb2_queue *q, unsigned int count)
 {
 	int rc;
-	struct nuvoton_video *video = vb2_get_drv_priv(q);
+	struct npcm_video *video = vb2_get_drv_priv(q);
 
 	dev_dbg(video->dev, "%s\n", __func__);
 
 	video->sequence = 0;
 
-	rc = nuvoton_video_start_frame(video);
+	rc = npcm_video_start_frame(video);
 	if (rc) {
-		nuvoton_video_bufs_done(video, VB2_BUF_STATE_QUEUED);
+		npcm_video_bufs_done(video, VB2_BUF_STATE_QUEUED);
 		return rc;
 	}
 
@@ -1792,9 +1784,9 @@ static int nuvoton_video_start_streaming(struct vb2_queue *q,
 	return 0;
 }
 
-static void nuvoton_video_stop_streaming(struct vb2_queue *q)
+static void npcm_video_stop_streaming(struct vb2_queue *q)
 {
-	struct nuvoton_video *video = vb2_get_drv_priv(q);
+	struct npcm_video *video = vb2_get_drv_priv(q);
 	struct regmap *vcd = video->vcd_regmap;
 
 	dev_dbg(video->dev, "%s\n", __func__);
@@ -1803,19 +1795,19 @@ static void nuvoton_video_stop_streaming(struct vb2_queue *q)
 
 	regmap_write(vcd, VCD_INTE, 0);
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
-	nuvoton_video_gfx_reset(video);
+	npcm_video_gfx_reset(video);
 
-	nuvoton_video_bufs_done(video, VB2_BUF_STATE_ERROR);
+	npcm_video_bufs_done(video, VB2_BUF_STATE_ERROR);
 
 	video->ctrl_cmd = VCD_CMD_OPERATION_CAPTURE;
 }
 
-static void nuvoton_video_buf_queue(struct vb2_buffer *vb)
+static void npcm_video_buf_queue(struct vb2_buffer *vb)
 {
 	int empty;
-	struct nuvoton_video *video = vb2_get_drv_priv(vb->vb2_queue);
+	struct npcm_video *video = vb2_get_drv_priv(vb->vb2_queue);
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
-	struct nuvoton_video_buffer *nvb = to_nuvoton_video_buffer(vbuf);
+	struct npcm_video_buffer *nvb = to_npcm_video_buffer(vbuf);
 	unsigned long flags;
 
 	dev_dbg(video->dev, "%s\n", __func__);
@@ -1826,9 +1818,9 @@ static void nuvoton_video_buf_queue(struct vb2_buffer *vb)
 	spin_unlock_irqrestore(&video->lock, flags);
 }
 
-static void nuvoton_video_buf_finish(struct vb2_buffer *vb)
+static void npcm_video_buf_finish(struct vb2_buffer *vb)
 {
-	struct nuvoton_video *video = vb2_get_drv_priv(vb->vb2_queue);
+	struct npcm_video *video = vb2_get_drv_priv(vb->vb2_queue);
 	struct regmap *vcd = video->vcd_regmap;
 	u32 val;
 	int ret;
@@ -1845,23 +1837,23 @@ static void nuvoton_video_buf_finish(struct vb2_buffer *vb)
 	}
 
 	/* Capture next frame when a video buffer is dequeued */
-	nuvoton_video_start_frame(video);
+	npcm_video_start_frame(video);
 
 	video->vb_index = vb->index;
 }
 
-static const struct vb2_ops nuvoton_video_vb2_ops = {
-	.queue_setup = nuvoton_video_queue_setup,
+static const struct vb2_ops npcm_video_vb2_ops = {
+	.queue_setup = npcm_video_queue_setup,
 	.wait_prepare = vb2_ops_wait_prepare,
 	.wait_finish = vb2_ops_wait_finish,
-	.buf_prepare = nuvoton_video_buf_prepare,
-	.buf_finish = nuvoton_video_buf_finish,
-	.start_streaming = nuvoton_video_start_streaming,
-	.stop_streaming = nuvoton_video_stop_streaming,
-	.buf_queue =  nuvoton_video_buf_queue,
+	.buf_prepare = npcm_video_buf_prepare,
+	.buf_finish = npcm_video_buf_finish,
+	.start_streaming = npcm_video_start_streaming,
+	.stop_streaming = npcm_video_stop_streaming,
+	.buf_queue =  npcm_video_buf_queue,
 };
 
-static int nuvoton_video_setup_video(struct nuvoton_video *video)
+static int npcm_video_setup_video(struct npcm_video *video)
 {
 	struct v4l2_device *v4l2_dev = &video->v4l2_dev;
 	struct video_device *vdev = &video->vdev;
@@ -1881,7 +1873,7 @@ static int nuvoton_video_setup_video(struct nuvoton_video *video)
 
 	v4l2_ctrl_handler_init(&video->ctrl_handler, 10);
 
-	v4l2_ctrl_new_std_menu(&video->ctrl_handler, &nuvoton_video_ctrl_ops,
+	v4l2_ctrl_new_std_menu(&video->ctrl_handler, &npcm_video_ctrl_ops,
 			       V4L2_CID_DETECT_MD_MODE,
 			       V4L2_DETECT_MD_MODE_REGION_GRID, 0,
 			       V4L2_DETECT_MD_MODE_GLOBAL);
@@ -1904,10 +1896,10 @@ static int nuvoton_video_setup_video(struct nuvoton_video *video)
 	vbq->io_modes = VB2_MMAP | VB2_READ | VB2_DMABUF;
 	vbq->dev = v4l2_dev->dev;
 	vbq->lock = &video->video_lock;
-	vbq->ops = &nuvoton_video_vb2_ops;
+	vbq->ops = &npcm_video_vb2_ops;
 	vbq->mem_ops = &vb2_dma_contig_memops;
 	vbq->drv_priv = video;
-	vbq->buf_struct_size = sizeof(struct nuvoton_video_buffer);
+	vbq->buf_struct_size = sizeof(struct npcm_video_buffer);
 	vbq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	vbq->min_buffers_needed = 3;
 
@@ -1921,7 +1913,7 @@ static int nuvoton_video_setup_video(struct nuvoton_video *video)
 	}
 
 	vdev->queue = vbq;
-	vdev->fops = &nuvoton_video_v4l2_fops;
+	vdev->fops = &npcm_video_v4l2_fops;
 	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
 			    V4L2_CAP_STREAMING;
 	vdev->v4l2_dev = v4l2_dev;
@@ -1929,7 +1921,7 @@ static int nuvoton_video_setup_video(struct nuvoton_video *video)
 	vdev->vfl_type = VFL_TYPE_VIDEO;
 	vdev->vfl_dir = VFL_DIR_RX;
 	vdev->release = video_device_release_empty;
-	vdev->ioctl_ops = &nuvoton_video_ioctls;
+	vdev->ioctl_ops = &npcm_video_ioctls;
 	vdev->lock = &video->video_lock;
 
 	video_set_drvdata(vdev, video);
@@ -1946,7 +1938,7 @@ static int nuvoton_video_setup_video(struct nuvoton_video *video)
 	return 0;
 }
 
-static int nuvoton_video_init(struct nuvoton_video *video)
+static int npcm_video_init(struct npcm_video *video)
 {
 	int irq;
 	int rc;
@@ -1958,7 +1950,7 @@ static int nuvoton_video_init(struct nuvoton_video *video)
 		return -ENODEV;
 	}
 
-	rc = devm_request_threaded_irq(dev, irq, NULL, nuvoton_video_irq,
+	rc = devm_request_threaded_irq(dev, irq, NULL, npcm_video_irq,
 				       IRQF_ONESHOT, DEVICE_NAME, video);
 	if (rc < 0) {
 		dev_err(dev, "Unable to request IRQ %d\n", irq);
@@ -1976,25 +1968,25 @@ static int nuvoton_video_init(struct nuvoton_video *video)
 	return rc;
 }
 
-static const struct regmap_config nuvoton_video_regmap_cfg = {
+static const struct regmap_config npcm_video_regmap_cfg = {
 	.reg_bits	= 32,
 	.reg_stride	= 4,
 	.val_bits	= 32,
 	.max_register	= VCD_FIFO,
 };
 
-static const struct regmap_config nuvoton_video_ece_regmap_cfg = {
+static const struct regmap_config npcm_video_ece_regmap_cfg = {
 	.reg_bits	= 32,
 	.reg_stride	= 4,
 	.val_bits	= 32,
 	.max_register	= ECE_HEX_RECT_OFFSET,
 };
 
-static int nuvoton_video_probe(struct platform_device *pdev)
+static int npcm_video_probe(struct platform_device *pdev)
 {
 	int rc;
 	void __iomem *regs;
-	struct nuvoton_video *video = kzalloc(sizeof(*video), GFP_KERNEL);
+	struct npcm_video *video = kzalloc(sizeof(*video), GFP_KERNEL);
 
 	if (!video)
 		return -ENOMEM;
@@ -2012,7 +2004,7 @@ static int nuvoton_video_probe(struct platform_device *pdev)
 	}
 
 	video->vcd_regmap = devm_regmap_init_mmio(&pdev->dev, regs,
-						  &nuvoton_video_regmap_cfg);
+						  &npcm_video_regmap_cfg);
 	if (IS_ERR(video->vcd_regmap)) {
 		dev_err(&pdev->dev, "Failed to init VCD regmap!\n");
 		return PTR_ERR(video->vcd_regmap);
@@ -2025,7 +2017,7 @@ static int nuvoton_video_probe(struct platform_device *pdev)
 	}
 
 	video->ece.regmap = devm_regmap_init_mmio(&pdev->dev, regs,
-						  &nuvoton_video_ece_regmap_cfg);
+						  &npcm_video_ece_regmap_cfg);
 	if (IS_ERR(video->ece.regmap)) {
 		dev_err(&pdev->dev, "Failed to init ECE regmap!\n");
 		return PTR_ERR(video->ece.regmap);
@@ -2053,11 +2045,11 @@ static int nuvoton_video_probe(struct platform_device *pdev)
 	if (IS_ERR(video->gfx_regmap))
 		return PTR_ERR(video->gfx_regmap);
 
-	rc = nuvoton_video_init(video);
+	rc = npcm_video_init(video);
 	if (rc)
 		return rc;
 
-	rc = nuvoton_video_setup_video(video);
+	rc = npcm_video_setup_video(video);
 	if (rc)
 		return rc;
 
@@ -2066,11 +2058,11 @@ static int nuvoton_video_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int nuvoton_video_remove(struct platform_device *pdev)
+static int npcm_video_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct v4l2_device *v4l2_dev = dev_get_drvdata(dev);
-	struct nuvoton_video *video = to_nuvoton_video(v4l2_dev);
+	struct npcm_video *video = to_npcm_video(v4l2_dev);
 
 	video_unregister_device(&video->vdev);
 
@@ -2080,31 +2072,31 @@ static int nuvoton_video_remove(struct platform_device *pdev)
 
 	v4l2_device_unregister(v4l2_dev);
 
-	nuvoton_video_ece_stop(video);
+	npcm_video_ece_stop(video);
 
 	of_reserved_mem_device_release(dev);
 
 	return 0;
 }
 
-static const struct of_device_id nuvoton_video_match[] = {
+static const struct of_device_id npcm_video_match[] = {
 	{ .compatible = "nuvoton,npcm750-video" },
 	{ .compatible = "nuvoton,npcm845-video" },
 	{},
 };
 
-MODULE_DEVICE_TABLE(of, nuvoton_video_match)
+MODULE_DEVICE_TABLE(of, npcm_video_match)
 
-static struct platform_driver nuvoton_video_driver = {
+static struct platform_driver npcm_video_driver = {
 	.driver = {
 		.name = DEVICE_NAME,
-		.of_match_table = nuvoton_video_match,
+		.of_match_table = npcm_video_match,
 	},
-	.probe = nuvoton_video_probe,
-	.remove = nuvoton_video_remove,
+	.probe = npcm_video_probe,
+	.remove = npcm_video_remove,
 };
 
-module_platform_driver(nuvoton_video_driver);
+module_platform_driver(npcm_video_driver);
 
 MODULE_AUTHOR("Joseph Liu<kwliu@nuvoton.com>");
 MODULE_AUTHOR("Marvin Lin<kflin@nuvoton.com>");
