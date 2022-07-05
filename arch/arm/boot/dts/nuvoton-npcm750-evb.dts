@@ -359,7 +359,7 @@
 
 &video {
 	memory-region = <&video_memory>;
-	//status = "okay";
+	status = "okay";
 };
 
 &watchdog1 {

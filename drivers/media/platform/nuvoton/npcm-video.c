@@ -163,11 +163,23 @@
 #define   INTCR3_GMMAP_1GB		3
 #define   INTCR3_GMMAP_2GB		4
 
+#define INTCR4				0xc0
+#define  INTCR4_GMMAP			GENMASK(22, 16)
+#define  INTCR4_GMMAP_512MB		0x1f
+#define  INTCR4_GMMAP_512MB_ECC		0x1b
+#define  INTCR4_GMMAP_1GB		0x3f
+#define  INTCR4_GMMAP_1GB_ECC		0x37
+#define  INTCR4_GMMAP_2GB		0x7f
+#define  INTCR4_GMMAP_2GB_ECC		0x6f
+
 #define ADDR_GMMAP_128MB		0x07000000
 #define ADDR_GMMAP_256MB		0x0f000000
 #define ADDR_GMMAP_512MB		0x1f000000
+#define ADDR_GMMAP_512MB_ECC		0x1b000000
 #define ADDR_GMMAP_1GB			0x3f000000
+#define ADDR_GMMAP_1GB_ECC		0x37000000
 #define ADDR_GMMAP_2GB			0x7f000000
+#define ADDR_GMMAP_2GB_ECC		0x6f000000
 
 #define GMMAP_LENGTH			0xc00000 /* Total 16MB, but 4MB preserved*/
 
@@ -1115,28 +1127,55 @@ static irqreturn_t nuvoton_video_irq(int irq, void *arg)
 static void nuvoton_video_clear_gmmap(struct nuvoton_video *video)
 {
 	struct regmap *gcr = video->gcr_regmap;
-	u32 intcr3, gmmap;
+	u32 intcr, gmmap;
 	void __iomem *baseptr;
 
-	regmap_read(gcr, INTCR3, &intcr3);
-	gmmap = FIELD_GET(INTCR3_GMMAP, intcr3);
+	if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm750-video")) {
+		regmap_read(gcr, INTCR3, &intcr);
+		gmmap = FIELD_GET(INTCR3_GMMAP, intcr);
 
-	switch (gmmap) {
-	case INTCR3_GMMAP_128MB:
-		baseptr = ioremap(ADDR_GMMAP_128MB, GMMAP_LENGTH);
-		break;
-	case INTCR3_GMMAP_256MB:
-		baseptr = ioremap(ADDR_GMMAP_256MB, GMMAP_LENGTH);
-		break;
-	case INTCR3_GMMAP_512MB:
-		baseptr = ioremap(ADDR_GMMAP_512MB, GMMAP_LENGTH);
-		break;
-	case INTCR3_GMMAP_1GB:
-		baseptr = ioremap(ADDR_GMMAP_1GB, GMMAP_LENGTH);
-		break;
-	case INTCR3_GMMAP_2GB:
-		baseptr = ioremap(ADDR_GMMAP_2GB, GMMAP_LENGTH);
-		break;
+		switch (gmmap) {
+		case INTCR3_GMMAP_128MB:
+			baseptr = ioremap_wc(ADDR_GMMAP_128MB, GMMAP_LENGTH);
+			break;
+		case INTCR3_GMMAP_256MB:
+			baseptr = ioremap_wc(ADDR_GMMAP_256MB, GMMAP_LENGTH);
+			break;
+		case INTCR3_GMMAP_512MB:
+			baseptr = ioremap_wc(ADDR_GMMAP_512MB, GMMAP_LENGTH);
+			break;
+		case INTCR3_GMMAP_1GB:
+			baseptr = ioremap_wc(ADDR_GMMAP_1GB, GMMAP_LENGTH);
+			break;
+		case INTCR3_GMMAP_2GB:
+			baseptr = ioremap_wc(ADDR_GMMAP_2GB, GMMAP_LENGTH);
+			break;
+		}
+	}
+	else if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm845-video")) {
+		regmap_read(gcr, INTCR4, &intcr);
+		gmmap = FIELD_GET(INTCR4_GMMAP, intcr);
+
+		switch (gmmap) {
+		case INTCR4_GMMAP_512MB:
+			baseptr = ioremap_wc(ADDR_GMMAP_512MB, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_512MB_ECC:
+			baseptr = ioremap_wc(ADDR_GMMAP_512MB_ECC, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_1GB:
+			baseptr = ioremap_wc(ADDR_GMMAP_1GB, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_1GB_ECC:
+			baseptr = ioremap_wc(ADDR_GMMAP_1GB_ECC, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_2GB:
+			baseptr = ioremap_wc(ADDR_GMMAP_2GB, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_2GB_ECC:
+			baseptr = ioremap_wc(ADDR_GMMAP_2GB_ECC, GMMAP_LENGTH);
+			break;
+		}
 	}
 
 	memset(baseptr, 0, GMMAP_LENGTH);
@@ -2005,12 +2044,12 @@ static int nuvoton_video_probe(struct platform_device *pdev)
 	}
 
 	video->gcr_regmap =
-		syscon_regmap_lookup_by_compatible("nuvoton,npcm750-gcr");
+		syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "gcr-syscon");
 	if (IS_ERR(video->gcr_regmap))
 		return PTR_ERR(video->gcr_regmap);
 
 	video->gfx_regmap =
-		syscon_regmap_lookup_by_compatible("nuvoton,npcm750-gfxi");
+		syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "gfxi-syscon");
 	if (IS_ERR(video->gfx_regmap))
 		return PTR_ERR(video->gfx_regmap);
 
@@ -2049,9 +2088,8 @@ static int nuvoton_video_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id nuvoton_video_match[] = {
-	{
-		.compatible = "nuvoton,npcm750-video",
-	},
+	{ .compatible = "nuvoton,npcm750-video" },
+	{ .compatible = "nuvoton,npcm845-video" },
 	{},
 };
 

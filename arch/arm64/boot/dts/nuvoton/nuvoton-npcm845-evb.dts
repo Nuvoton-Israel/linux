@@ -100,6 +100,13 @@
 			reg = <0x0 0x35600000 0x0 0x600000>;
 			no-map;
 		};
+
+		video_memory: framebuffer@0x33000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x0 0x33000000 0x0 0x02000000>;
+			reusable;
+			linux,cma-default;
+		};
 	};
 
 	regulators {
@@ -372,13 +379,18 @@
 		};*/
 
 		vcd:vcd@f0810000 {
-			status = "okay";
+			status = "disabled";
 			memory-region = <&vcd_memory>, <&gfx_memory>;
 		};
 
 		ece:ece@f0820000 {
-			status = "okay";
+			status = "disabled";
 			memory-region = <&ece_memory>;
+		};
+
+		video: video@f0810000 {
+			status = "okay";
+			memory-region = <&video_memory>;
 		};
 
 		apb {

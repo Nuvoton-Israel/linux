@@ -338,6 +338,19 @@
 			status = "disabled";
 		};
 
+		video: video@f0810000 {
+			compatible = "nuvoton,npcm845-video";
+			reg = <0x0 0xf0810000 0x0 0x10000>, <0x0 0xf0820000 0x0 0x2000>;
+			reg-names = "vcd", "ece";
+			interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>;
+			resets = <&rstc NPCM8XX_RESET_IPSRST2 NPCM8XX_RESET_VCD>,
+				 <&rstc NPCM8XX_RESET_IPSRST2 NPCM8XX_RESET_ECE>;
+			reset-names = "vcd", "ece";
+			gcr-syscon = <&gcr>;
+			gfxi-syscon = <&gfxi>;
+			status = "disabled";
+		};
+
 		apb {
 			#address-cells = <1>;
 			#size-cells = <1>;
