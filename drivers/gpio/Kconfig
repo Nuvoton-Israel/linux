@@ -1522,7 +1522,7 @@ config GPIO_SODAVILLE
 
 endmenu
 
-config GPIO_NUVOTON_SGPIO
+config GPIO_NPCM_SGPIO
         bool "Nuvoton SGPIO support"
         depends on (ARCH_NPCM || COMPILE_TEST) && OF_GPIO
         select GPIO_GENERIC
