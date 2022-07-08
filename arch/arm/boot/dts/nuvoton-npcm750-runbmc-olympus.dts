@@ -64,23 +64,12 @@
 		#size-cells = <1>;
 		ranges;
 
-		vcd_memory: framebuffer@0x1e200000 {
-			reg = <0x1e200000 0x600000>;
-			no-map;
+		video_memory: framebuffer@0x1b000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x1b000000 0x02000000>;
+			reusable;
+			linux,cma-default;
 		};
-
-		gfx_memory: framebuffer@0x1f000000 {
-			reg = <0x07000000 0xc00000>, <0x0f000000 0xc00000>,
-			<0x1f000000 0xc00000>, <0x3f000000 0xc00000>,
-			<0x7f000000 0xc00000>;
-			no-map;
-		};
-
-		ece_memory: framebuffer@0x1e800000 {
-			reg = <0x1e800000 0x600000>;
-			no-map;
-		};
-
 	};
 
 	iio-hwmon {
@@ -988,14 +977,9 @@
 	status = "okay";
 };
 
-&vcd {
+&video {
+	memory-region = <&video_memory>;
 	status = "okay";
-	memory-region = <&vcd_memory>, <&gfx_memory>;
-};
-
-&ece {
-	status = "okay";
-	memory-region = <&ece_memory>;
 };
 
 &watchdog1 {

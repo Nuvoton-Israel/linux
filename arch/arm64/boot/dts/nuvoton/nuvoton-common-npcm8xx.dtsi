@@ -320,24 +320,6 @@
 			interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
-		vcd: vcd@f0810000 {
-			compatible = "nuvoton,npcm845-vcd";
-			reg = <0x0 0xf0810000 0x0 0x10000>;
-			interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>;
-			resets = <&rstc NPCM8XX_RESET_IPSRST2 NPCM8XX_RESET_VCD>;
-			status = "disabled";
-			gcr-syscon = <&gcr>;
-			gfxi-syscon = <&gfxi>;
-		};
-
-		ece: ece@f0820000 {
-			compatible = "nuvoton,npcm845-ece";
-			reg = <0x0 0xf0820000 0x0 0x2000>;
-			interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
-			resets = <&rstc NPCM8XX_RESET_IPSRST2 NPCM8XX_RESET_ECE>;
-			status = "disabled";
-		};
-
 		video: video@f0810000 {
 			compatible = "nuvoton,npcm845-video";
 			reg = <0x0 0xf0810000 0x0 0x10000>, <0x0 0xf0820000 0x0 0x2000>;

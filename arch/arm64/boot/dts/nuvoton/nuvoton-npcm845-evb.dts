@@ -84,23 +84,6 @@
 		#size-cells = <2>;
 		ranges;
 
-		vcd_memory: framebuffer@0x35000000 {
-			reg = <0x0 0x35000000 0x0 0x600000>;
-			no-map;
-		};
-
-		gfx_memory: framebuffer@0x1f000000 {
-			reg = <0x0 0x1F000000 0x0 0xc00000>, <0x0 0x1B000000 0x0 0xc00000>,
-			<0x0 0x3F000000 0x0 0xc00000>, <0x0 0x37000000 0x0 0xc00000>,
-			<0x0 0x7F000000 0x0 0xc00000>, <0x0 0x6F000000 0x0 0xc00000>;
-			no-map;
-		};
-
-		ece_memory: framebuffer@0x35600000 {
-			reg = <0x0 0x35600000 0x0 0x600000>;
-			no-map;
-		};
-
 		video_memory: framebuffer@0x33000000 {
 			compatible = "shared-dma-pool";
 			reg = <0x0 0x33000000 0x0 0x02000000>;
@@ -377,16 +360,6 @@
 		/*udc9:udc@f0839000 {
 			status = "okay";
 		};*/
-
-		vcd:vcd@f0810000 {
-			status = "disabled";
-			memory-region = <&vcd_memory>, <&gfx_memory>;
-		};
-
-		ece:ece@f0820000 {
-			status = "disabled";
-			memory-region = <&ece_memory>;
-		};
 
 		video: video@f0810000 {
 			status = "okay";
