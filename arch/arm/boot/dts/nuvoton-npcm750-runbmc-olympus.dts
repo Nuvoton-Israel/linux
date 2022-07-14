@@ -66,7 +66,7 @@
 
 		video_memory: framebuffer@0x1b000000 {
 			compatible = "shared-dma-pool";
-			reg = <0x1b000000 0x02000000>;
+			reg = <0x1b000000 0x01800000>;
 			reusable;
 			linux,cma-default;
 		};
