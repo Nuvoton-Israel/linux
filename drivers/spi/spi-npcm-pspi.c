@@ -409,6 +409,7 @@ static int npcm_pspi_probe(struct platform_device *pdev)
 		npcm_pspi_prepare_transfer_hardware;
 	master->unprepare_transfer_hardware =
 		npcm_pspi_unprepare_transfer_hardware;
+	master->flags = SPI_CONTROLLER_MUST_RX | SPI_CONTROLLER_MUST_TX;
 	master->use_gpio_descriptors = true;
 
 	/* set to default clock rate */
