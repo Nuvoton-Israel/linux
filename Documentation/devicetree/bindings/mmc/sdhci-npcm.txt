@@ -1,0 +1,22 @@
+* NPCM SDHCI Controller
+
+This file documents differences between the core properties in mmc.txt
+and the properties used by the sdhci-npcm driver.
+
+Required properties:
+- compatible  : "nuvoton,npcm750-sdhci" for the NPCM7XX BMC.
+				"nuvoton,npcm845-sdhci" for the NPCM8XX BMC.
+
+Example:
+
+		sdhci0: sdhci@f0842000 {
+			compatible = "nuvoton,npcm750-sdhci";
+			status = "disabled";
+			reg = <0xf0842000 0x200>;
+			interrupts = <GIC_SPI 26 IRQ_TYPE_LEVEL_HIGH>;
+			clocks =  <&clk NPCM7XX_CLK_MMC>;
+			clock-names = "clk_mmc";
+			pinctrl-names = "default";
+			pinctrl-0 = <&mmc8_pins
+				     &mmc_pins>;
+		};
