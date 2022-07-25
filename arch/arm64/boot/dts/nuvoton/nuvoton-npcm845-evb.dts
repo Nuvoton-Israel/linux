@@ -146,6 +146,10 @@
 	status = "okay";
 };
 
+&sdhci {
+	status = "okay";
+};
+
 &lpc_kcs {
 	kcs1: kcs1@0 {
 		status = "okay";

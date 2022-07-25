@@ -80,6 +80,18 @@
 			status = "disabled";
 		};
 
+		sdhci: sdhci@f0842000 {
+			compatible = "nuvoton,npcm845-sdhci";
+			reg = <0x0 0xf0842000 0x0 0x100>;
+			interrupts = <GIC_SPI 26 IRQ_TYPE_LEVEL_HIGH>;
+			clocks =  <&clk NPCM8XX_CLK_AHB>;
+			clock-names = "clk_mmc";
+			pinctrl-names = "default";
+			pinctrl-0 = <&mmc8_pins
+				     &mmc_pins>;
+			status = "disabled";
+		};
+
 		fiu0: spi@fb000000 {
 			compatible = "nuvoton,npcm845-fiu";
 			#address-cells = <1>;
