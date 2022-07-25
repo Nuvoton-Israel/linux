@@ -46,9 +46,15 @@
 #define NPCM7XX_PWM_CTRL_CH3_EN_BIT		BIT(16)
 
 /* Define the maximum PWM channel number */
+#ifdef CONFIG_ARCH_NPCM7XX
 #define NPCM7XX_PWM_MAX_CHN_NUM			8
 #define NPCM7XX_PWM_MAX_CHN_NUM_IN_A_MODULE	4
 #define NPCM7XX_PWM_MAX_MODULES                 2
+#else
+#define NPCM7XX_PWM_MAX_CHN_NUM			12
+#define NPCM7XX_PWM_MAX_CHN_NUM_IN_A_MODULE	4
+#define NPCM7XX_PWM_MAX_MODULES                 3
+#endif
 
 /* Define the Counter Register, value = 100 for match 100% */
 #define NPCM7XX_PWM_COUNTER_DEFAULT_NUM		255
@@ -659,6 +665,40 @@ static const struct hwmon_channel_info *npcm7xx_info[] = {
 	NULL
 };
 
+static const struct hwmon_channel_info *npcm8xx_info[] = {
+	HWMON_CHANNEL_INFO(pwm,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT),
+	HWMON_CHANNEL_INFO(fan,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT),
+	NULL
+};
+
 static const struct hwmon_ops npcm7xx_hwmon_ops = {
 	.is_visible = npcm7xx_is_visible,
 	.read = npcm7xx_read,
@@ -668,6 +708,17 @@ static const struct hwmon_ops npcm7xx_hwmon_ops = {
 static const struct hwmon_chip_info npcm7xx_chip_info = {
 	.ops = &npcm7xx_hwmon_ops,
 	.info = npcm7xx_info,
+};
+
+static const struct hwmon_ops npcm8xx_hwmon_ops = {
+	.is_visible = npcm7xx_is_visible,
+	.read = npcm7xx_read,
+	.write = npcm7xx_write,
+};
+
+static const struct hwmon_chip_info npcm8xx_chip_info = {
+	.ops = &npcm8xx_hwmon_ops,
+	.info = npcm8xx_info,
 };
 
 static u32 npcm7xx_pwm_init(struct npcm7xx_pwm_fan_data *data)
@@ -988,12 +1039,24 @@ static int npcm7xx_pwm_fan_probe(struct platform_device *pdev)
 		}
 	}
 
-	hwmon = devm_hwmon_device_register_with_info(dev, "npcm7xx_pwm_fan",
-						     data, &npcm7xx_chip_info,
-						     NULL);
-	if (IS_ERR(hwmon)) {
-		dev_err(dev, "unable to register hwmon device\n");
-		return PTR_ERR(hwmon);
+	if (of_device_is_compatible(np, "nuvoton,npcm750-pwm-fan")) {
+		hwmon = devm_hwmon_device_register_with_info(dev, "npcm7xx_pwm_fan",
+							     data, &npcm7xx_chip_info,
+							     NULL);
+		if (IS_ERR(hwmon)) {
+			dev_err(dev, "unable to register npcm7xx hwmon device\n");
+			return PTR_ERR(hwmon);
+		}
+	}
+
+	if (of_device_is_compatible(np, "nuvoton,npcm845-pwm-fan")) {
+		hwmon = devm_hwmon_device_register_with_info(dev, "npcm8xx_pwm_fan",
+							     data, &npcm8xx_chip_info,
+							     NULL);
+		if (IS_ERR(hwmon)) {
+			dev_err(dev, "unable to register npcm8xx hwmon device\n");
+			return PTR_ERR(hwmon);
+		}
 	}
 
 	for (i = 0; i < NPCM7XX_FAN_MAX_CHN_NUM; i++) {
@@ -1008,7 +1071,7 @@ static int npcm7xx_pwm_fan_probe(struct platform_device *pdev)
 		}
 	}
 
-	pr_info("NPCM7XX PWM-FAN Driver probed, output Freq %dHz[PWM], input Freq %dHz[FAN]\n",
+	pr_info("NPCM PWM-FAN Driver probed, output Freq %dHz[PWM], input Freq %dHz[FAN]\n",
 		output_freq, data->input_clk_freq);
 
 	return 0;
@@ -1016,6 +1079,7 @@ static int npcm7xx_pwm_fan_probe(struct platform_device *pdev)
 
 static const struct of_device_id of_pwm_fan_match_table[] = {
 	{ .compatible = "nuvoton,npcm750-pwm-fan", },
+	{ .compatible = "nuvoton,npcm845-pwm-fan", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, of_pwm_fan_match_table);
