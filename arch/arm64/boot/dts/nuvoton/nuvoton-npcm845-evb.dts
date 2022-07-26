@@ -150,6 +150,10 @@
 	status = "okay";
 };
 
+&pcimbox {
+	status = "okay";
+};
+
 &lpc_kcs {
 	kcs1: kcs1@0 {
 		status = "okay";
@@ -160,6 +164,13 @@
 	};
 
 	kcs3: kcs3@0 {
+		status = "okay";
+	};
+};
+
+&lpc_host {
+	lpc_bpc: lpc_bpc@40 {
+		monitor-ports = <0x80>;
 		status = "okay";
 	};
 };

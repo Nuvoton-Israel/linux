@@ -144,6 +144,14 @@
 			status = "disabled";
 		};
 
+		pcimbox: pcimbox@f0848000 {
+			compatible = "nuvoton,npcm845-pci-mbox", "nuvoton,npcm750-pci-mbox",
+					"simple-mfd", "syscon";
+			reg = <0x0 0xf084C000 0x0 0x8
+				0x0 0xf0848000 0x0 0x3F00>;
+			interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
 		apb {
 			#address-cells = <1>;
 			#size-cells = <1>;
@@ -183,6 +191,23 @@
 					reg = <0x0 0x40>;
 					interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
 					kcs_chan = <3>;
+					status = "disabled";
+				};
+			};
+
+			lpc_host: lpc_host@7000 {
+				compatible = "nuvoton,npcm845-lpc-host",
+						"simple-mfd", "syscon";
+				reg = <0x7000 0x60>;
+
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0x0 0x7000 0x60>;
+
+				lpc_bpc: lpc_bpc@40 {
+					compatible = "nuvoton,npcm845-lpc-bpc", "nuvoton,npcm750-lpc-bpc";
+					reg = <0x40 0x20>;
+					interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
 					status = "disabled";
 				};
 			};
