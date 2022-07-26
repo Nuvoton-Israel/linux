@@ -1,15 +1,16 @@
-Nuvoton NPCM7xx LPC BPC interface
+Nuvoton NPCM LPC BPC interface
 
-Nuvoton BMC NPCM7xx BIOS Post Code (BPC) monitoring two
+Nuvoton BMC NPCM BIOS Post Code (BPC) monitoring two
 configurable I/O addresses written by the host on the
 Low Pin Count (LPC) bus, the capure data stored in 128-word FIFO.
 
-NPCM7xx BPC supports capture double words, when using capture
+NPCM BPC supports capture double words, when using capture
 double word only I/O address 1 is monitored.
 
 Required properties for lpc_bpc node
 - compatible	: "nuvoton,npcm750-lpc-bpc" for Poleg NPCM7XX.
-- reg 			: specifies physical base address and size of the registers.
+		  "nuvoton,npcm845-lpc-bpc", "nuvoton,npcm750-lpc-bpc" for Arbel NPCM8XX.
+- reg 		: specifies physical base address and size of the registers.
 - interrupts	: contain the LPC BPC with flags for falling edge.
 - monitor-ports : contain monitor I/O addresses, at least one monitor I/O
 				  address required
