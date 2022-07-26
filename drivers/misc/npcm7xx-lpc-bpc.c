@@ -352,7 +352,7 @@ static int npcm7xx_bpc_probe(struct platform_device *pdev)
 		}
 	}
 
-	pr_info("npcm7xx BIOS post code probe\n");
+	pr_info("NPCM BIOS Post Code probe\n");
 
 	return rc;
 }
