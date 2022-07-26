@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2022 Nuvoton Technology Corporation
 
+#include <linux/debugfs.h>
 #include <linux/delay.h>
+#include <linux/iopoll.h>
 #include <linux/of_device.h>
 
 #include "edac_module.h"
@@ -9,6 +11,8 @@
 #define NPCM_EDAC_MOD_NAME "npcm-edac"
 #define FORCED_ECC_ERR_EVENT_SUPPORT		BIT(1)
 #define EDAC_MSG_SIZE				256
+#define BUSY_TIMEOUT_US				10000
+
 /* Granularity of reported error in bytes */
 #define NPCM_EDAC_ERR_GRAIN			1
 
@@ -32,7 +36,7 @@
 #define NPCM_ECC_CTL_GLOBAL_INT_DISABLE		BIT(31)
 
 /* Syndrome values */
-#define ECC_DOUBLE_MULTI_ERR_SYND		0x03
+#define UE_SYNDROME		0x03
 
 static char data_synd[] = {
 	0xf4, 0xf1, 0xec, 0xea, 0xe9, 0xe6, 0xe5, 0xe3,
@@ -114,6 +118,12 @@ struct priv_data {
 	u32 ue_cnt;
 	char message[EDAC_MSG_SIZE];
 	const struct npcm_edac_platform_data *npcm_chip;
+
+	/* error injection */
+	struct dentry *debugfs;
+	u8 error_type;
+	u8 location;
+	u8 bit;
 };
 
 static void handle_ce(struct mem_ctl_info *mci)
@@ -331,7 +341,7 @@ static ssize_t forced_ecc_error_store(struct device *dev,
 	} else if (!strcmp(args[0], "UE")) {
 		regval = readl(priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
 		regval = (regval & ~(NPCM_ECC_CTL_XOR_BITS_MASK)) |
-				 (ECC_DOUBLE_MULTI_ERR_SYND << XOR_CHECK_BIT_SPLIT_WIDTH);
+				 (UE_SYNDROME << XOR_CHECK_BIT_SPLIT_WIDTH);
 		writel(regval, priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
 	}
 
@@ -471,6 +481,88 @@ static const struct of_device_id npcm_edac_of_match[] = {
 
 MODULE_DEVICE_TABLE(of, npcm_edac_of_match);
 
+static ssize_t edac_force_ecc_error(struct file *file, const char __user *data,
+				    size_t count, loff_t *ppos)
+{
+	struct device *dev = file->private_data;
+	struct mem_ctl_info *mci = to_mci(dev);
+	struct priv_data *priv = mci->pvt_info;
+	struct npcm_edac_platform_data *npcm_chip = priv->npcm_chip;
+	u32 reg_val;
+	u32 syndrome;
+
+	/*
+	 * error_type - 0: CE, 1: UE
+	 * location   - 0: data, 1: checkcode
+	 * bit        - 0 ~ 63 for data and 0 ~ 7 for checkcode
+	 */
+	edac_printk(KERN_INFO, NPCM_EDAC_MOD_NAME, "Force an ECC error, error_type = %d, location = %d, bit = %d\n",
+		    priv->error_type, priv->location, priv->bit);
+
+	/* ensure no pending writes */
+	readl_poll_timeout(priv->reg + npcm_chip->ddr_ctl_controller_busy_reg,
+			   reg_val, !(reg_val & CTL_CONTROLLER_BUSY_FLAG), 1000,
+			   BUSY_TIMEOUT_US);
+
+	reg_val = readl(priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
+
+	/* write syndrome to XOR_CHECK_BITS */
+	if (priv->error_type == 0) {
+		if (priv->location == 0 && priv->bit > 63) {
+			edac_printk(KERN_INFO, NPCM_EDAC_MOD_NAME, "data bit should not exceed 63\n");
+			return count;
+		}
+
+		if (priv->location == 1 && priv->bit > 7) {
+			edac_printk(KERN_INFO, NPCM_EDAC_MOD_NAME, "checkcode bit should not exceed 7\n");
+			return count;
+		}
+
+		syndrome = priv->location? 1 << priv->bit: data_synd[priv->bit];
+
+		writel((reg_val & ~NPCM_ECC_CTL_XOR_BITS_MASK) |
+		       (syndrome << XOR_CHECK_BIT_SPLIT_WIDTH) |
+		       NPCM_ECC_CTL_AUTO_WRITEBACK_EN,
+		       priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
+	} else if (priv->error_type == 1) {
+		writel((reg_val & ~NPCM_ECC_CTL_XOR_BITS_MASK) |
+		       (UE_SYNDROME << XOR_CHECK_BIT_SPLIT_WIDTH),
+		       priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
+	}
+
+	/* force write check */
+	writel(readl(priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg) |
+	       NPCM_ECC_CTL_FORCE_WC,
+	       priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
+
+	return count;
+}
+
+static const struct file_operations force_ecc_error_fops = {
+	.open = simple_open,
+	.write = edac_force_ecc_error,
+	.llseek = generic_file_llseek,
+};
+
+static void edac_setup_debugfs(struct mem_ctl_info *mci)
+{
+	struct priv_data *priv = mci->pvt_info;
+
+	priv->debugfs = edac_debugfs_create_dir(mci->mod_name);
+
+	if (!priv->debugfs)
+		return;
+
+	edac_debugfs_create_x8("error_type", S_IRUGO | S_IWUSR, priv->debugfs,
+			       &priv->error_type);
+	edac_debugfs_create_x8("location", S_IRUGO | S_IWUSR, priv->debugfs,
+			       &priv->location);
+	edac_debugfs_create_x8("bit", S_IRUGO | S_IWUSR, priv->debugfs,
+			       &priv->bit);
+	edac_debugfs_create_file("force_ecc_error", S_IWUSR, priv->debugfs,
+				 &mci->dev, &force_ecc_error_fops);
+}
+
 static int npcm_edac_mc_probe(struct platform_device *pdev)
 {
 	const struct npcm_edac_platform_data *npcm_chip;
@@ -572,6 +664,8 @@ static int npcm_edac_mc_probe(struct platform_device *pdev)
 		       priv_data->reg + npcm_chip->ecc_ctl_int_mask_ecc);
 	}
 
+	edac_setup_debugfs(mci);
+
 	return 0;
 
 	edac_mc_del_mc(&pdev->dev);
@@ -592,6 +686,8 @@ static int npcm_edac_mc_remove(struct platform_device *pdev)
 	/* Disable ecc feature before removing driver by writing 0 */
 	writel((unsigned int)(~(npcm_chip->ecc_ctl_ecc_enable_mask)),
 	       priv->reg + npcm_chip->ecc_ctl_en_reg);
+
+	edac_debugfs_remove_recursive(priv->debugfs);
 
 	if (IS_ENABLED(CONFIG_EDAC_DEBUG))
 		remove_sysfs_attributes(mci);
