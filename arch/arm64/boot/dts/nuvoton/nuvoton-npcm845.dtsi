@@ -74,6 +74,13 @@
 			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
 	};
 
+	firmware {
+		optee {
+			compatible = "linaro,optee-tz";
+			method = "smc";
+		};
+	};
+
 	ahb {
 		udc0:udc@f0830000 {
 			compatible = "nuvoton,npcm845-udc";
