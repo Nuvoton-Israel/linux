@@ -11,6 +11,14 @@
 
 	aliases {
 		serial0 = &serial0;
+		udc0 = &udc0;
+		udc1 = &udc1;
+		udc2 = &udc2;
+		udc3 = &udc3;
+		udc4 = &udc4;
+		udc5 = &udc5;
+		udc6 = &udc6;
+		udc7 = &udc7;
 		fiu0 = &fiu0;
 		fiu1 = &fiu1;
 		fiu2 = &fiu3;
@@ -150,6 +158,38 @@
 };
 
 &pcimbox {
+	status = "okay";
+};
+
+&udc0 {
+	status = "okay";
+};
+
+&udc1 {
+	status = "okay";
+};
+
+&udc2 {
+	status = "okay";
+};
+
+&udc3 {
+	status = "okay";
+};
+
+&udc4 {
+	status = "okay";
+};
+
+&udc5 {
+	status = "okay";
+};
+
+&udc6 {
+	status = "okay";
+};
+
+&udc7 {
 	status = "okay";
 };
 
