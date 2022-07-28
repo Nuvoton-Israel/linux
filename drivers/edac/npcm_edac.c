@@ -271,103 +271,6 @@ static irqreturn_t edac_ecc_isr(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static ssize_t forced_ecc_error_show(struct device *dev,
-				     struct device_attribute *mattr,
-				     char *data)
-{
-	return sprintf(data, "CDNS-DDR4 Force Injection Help:\n"
-		       "Example:\n"
-		       "echo \"CE checkcode 0\" > /sys/devices/system/edac/mc/mc0/forced_ecc_error\n"
-		       "CE: Corrected\n"
-		       "UE: Uncorrected\n"
-		       "checkcode/data:source\n"
-		       "bit [0-63] for data [0-7] for checkcode:bit number\n");
-}
-
-static ssize_t forced_ecc_error_store(struct device *dev,
-				      struct device_attribute *mattr,
-				      const char *data, size_t count)
-{
-	struct mem_ctl_info *mci = to_mci(dev);
-	struct priv_data *priv = mci->pvt_info;
-	const struct npcm_edac_platform_data *npcm_chip = priv->npcm_chip;
-	int	args_cnt;
-	int	ret;
-	char	**args;
-	u32	regval;
-	u8	bit_no;
-
-	/* Check ecc enabled */
-	if (!(readl(priv->reg + npcm_chip->ecc_ctl_en_reg) & npcm_chip->ecc_ctl_ecc_enable_mask))
-		return count;
-
-	/* Check no write operation pending to controller */
-	while (readl(priv->reg + npcm_chip->ddr_ctl_controller_busy_reg) &
-			CTL_CONTROLLER_BUSY_FLAG) {
-		usleep_range(1000, 10000);
-	}
-
-	/* Split string buffer into separate parameters */
-	args = argv_split(GFP_KERNEL, data, &args_cnt);
-
-	/* Write appropriate syndrome to xor_check_bit */
-	if (!strcmp(args[0], "CE") && args_cnt == 3) {
-		ret = kstrtou8(args[2], 0, &bit_no);
-		if (ret)
-			return ret;
-		if (!strcmp(args[1], "checkcode")) {
-			if (bit_no > 7) {
-				edac_printk(KERN_INFO, NPCM_EDAC_MOD_NAME, "bit_no for checkcode must be 0~7\n");
-				return count;
-			}
-			regval = readl(priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-			regval = (regval & ~(NPCM_ECC_CTL_XOR_BITS_MASK)) |
-				(check_synd[bit_no] << XOR_CHECK_BIT_SPLIT_WIDTH);
-			writel(regval, priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-		} else if (!strcmp(args[1], "data")) {
-			if (bit_no > 63) {
-				edac_printk(KERN_INFO, NPCM_EDAC_MOD_NAME, "bit_no for data must be 0~63\n");
-				return count;
-			}
-			regval = readl(priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-			regval = (regval & ~(NPCM_ECC_CTL_XOR_BITS_MASK)) |
-					 (data_synd[bit_no] << XOR_CHECK_BIT_SPLIT_WIDTH);
-			writel(regval, priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-		}
-		/* Enable the ECC writeback_en for corrected error */
-		regval = readl(priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-		writel((regval | NPCM_ECC_CTL_AUTO_WRITEBACK_EN),
-		       priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-	} else if (!strcmp(args[0], "UE")) {
-		regval = readl(priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-		regval = (regval & ~(NPCM_ECC_CTL_XOR_BITS_MASK)) |
-				 (UE_SYNDROME << XOR_CHECK_BIT_SPLIT_WIDTH);
-		writel(regval, priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-	}
-
-	/* Assert fwc */
-	writel((NPCM_ECC_CTL_FORCE_WC | readl(priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg)),
-	       priv->reg + npcm_chip->ecc_ctl_xor_check_bits_reg);
-
-	return count;
-}
-
-static DEVICE_ATTR_RW(forced_ecc_error);
-static int create_sysfs_attributes(struct mem_ctl_info *mci)
-{
-	int rc;
-
-	rc = device_create_file(&mci->dev, &dev_attr_forced_ecc_error);
-	if (rc < 0)
-		return rc;
-	return 0;
-}
-
-static void remove_sysfs_attributes(struct mem_ctl_info *mci)
-{
-	device_remove_file(&mci->dev, &dev_attr_forced_ecc_error);
-}
-
 static const struct npcm_edac_platform_data npcm7xx_edac = {
 	.chip = NPCM7XX_CHIP,
 
@@ -647,13 +550,6 @@ static int npcm_edac_mc_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	if (IS_ENABLED(CONFIG_EDAC_DEBUG) &&
-	   (npcm_chip->ip_features & FORCED_ECC_ERR_EVENT_SUPPORT) &&
-	    npcm_chip->chip == NPCM8XX_CHIP) {
-		if (create_sysfs_attributes(mci))
-			edac_printk(KERN_ERR, NPCM_EDAC_MOD_NAME, "Failed to create sysfs entries\n");
-	}
-
 	/* Only enable MC interrupts with ECC - clear global int mask bit and ecc bit */
 	writel(npcm_chip->ecc_ctl_en_int_master_mask,
 	       priv_data->reg + npcm_chip->ecc_ctl_int_mask_master);
@@ -688,10 +584,6 @@ static int npcm_edac_mc_remove(struct platform_device *pdev)
 	       priv->reg + npcm_chip->ecc_ctl_en_reg);
 
 	edac_debugfs_remove_recursive(priv->debugfs);
-
-	if (IS_ENABLED(CONFIG_EDAC_DEBUG))
-		remove_sysfs_attributes(mci);
-
 	edac_mc_del_mc(&pdev->dev);
 	edac_mc_free(mci);
 
