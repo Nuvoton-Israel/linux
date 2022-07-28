@@ -463,6 +463,17 @@ config USB_TEGRA_XUDC
 	 dynamically linked module called "tegra_xudc" and force all
 	 gadget drivers to also be dynamically linked.
 
+config USB_NPCM_UDC
+	bool "NPCM USB Device Controller"
+	depends on ARCH_NPCM
+	depends on USB_GADGET
+	help
+	 Enables Nuvoton NPCM USB device controller driver.
+
+	 Say "y" to link the driver statically, or "m" to build a
+	 dynamically linked module called "npcm-udc" and force
+	 all gadget drivers to also be dynamically linked.
+
 source "drivers/usb/gadget/udc/aspeed-vhub/Kconfig"
 
 #
