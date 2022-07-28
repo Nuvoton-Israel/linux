@@ -1,0 +1,33 @@
+Nuvoton NPCM USB Device controller.
+
+This DT-binding describe Nuvoton NPCM USB Device controller (UDC) device node.
+The UDC is based on Chipidea Subsystem Device Controller IP.
+
+Required properties:
+- compatible	  : "nuvoton,npcm750-udc" for Poleg NPCM7XX.
+		    "nuvoton,npcm845-udc" for Arbel NPCM8XX.
+- reg             : Offset and length of the register set for the device,
+		    Offset and length of the DTD buffer.
+- interrupts      : Contain the UDC interrupt.
+- clocks          : phandle of UDC reference clock.
+- clock-names     : Should be "clk_usb_bridge".
+
+Note: Each npcm-udc which should have an alias correctly numbered
+in "aliases" node.
+
+e.g.
+aliases {
+	udc1 = &udc1;
+};
+
+Example:
+		udc0:udc@f0830000 {
+			compatible = "nuvoton,npcm750-udc";
+			reg = <0xf0830000 0x1000
+			       0xfffd0000 0x800>;
+			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>;
+			status = "disabled";
+			clocks = <&clk NPCM7XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+		};
+
