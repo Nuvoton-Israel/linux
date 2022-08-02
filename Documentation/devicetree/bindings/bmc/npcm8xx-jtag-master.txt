@@ -1,0 +1,29 @@
+Nuvoton NPCM8xx JTAG MASTER interface
+
+Nuvoton BMC NPCM8xx JTAG Master is used for debugging host CPU or programming
+CPLD device.
+
+Required properties for jtag_master node
+- compatible	: "nuvoton,npcm845-jtm" for Arbel NPCM8XX.
+- reg 			: specifies physical base address and size of the registers.
+- #address-cells: should be 1.
+- #size-cells	: should be 0.
+- interrupts	: contain the JTAG Master interrupt.
+- clocks		: phandle of JTAG Master reference clock.
+- clock-names	: Should be "clk_apb5".
+- pinctrl-names : a pinctrl state named "default" must be defined.
+- resets		: phandle to the reset control for this device.
+
+Example:
+jtm1: jtm@208000 {
+	compatible = "nuvoton,npcm845-jtm";
+	reg = <0x208000 0x1000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&jm1_pins>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	interrupts = <GIC_SPI 188 IRQ_TYPE_LEVEL_HIGH>;
+	clocks = <&clk NPCM8XX_CLK_APB5>;
+	clock-names = "clk_apb5";
+	resets = <&rstc NPCM8XX_RESET_IPSRST4 NPCM8XX_RESET_JTM1>;
+};
