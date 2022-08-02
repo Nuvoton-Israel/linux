@@ -293,6 +293,34 @@
 				status = "disabled";
 			};
 
+			jtm1: jtm@208000 {
+				compatible = "nuvoton,npcm845-jtm";
+				reg = <0x208000 0x1000>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&jm1_pins>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				interrupts = <GIC_SPI 188 IRQ_TYPE_LEVEL_HIGH>;
+				clocks = <&clk NPCM8XX_CLK_APB5>;
+				clock-names = "clk_apb5";
+				resets = <&rstc 0x74 29>;
+				status = "disabled";
+			};
+
+			jtm2: jtm@209000 {
+				compatible = "nuvoton,npcm845-jtm";
+				reg = <0x209000 0x1000>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&jm2_pins>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				interrupts = <GIC_SPI 189 IRQ_TYPE_LEVEL_HIGH>;
+				clocks = <&clk NPCM8XX_CLK_APB5>;
+				clock-names = "clk_apb5";
+				resets = <&rstc 0x74 30>;
+				status = "disabled";
+			};
+
 			timer0: timer@8000 {
 				compatible = "nuvoton,npcm845-timer";
 				interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;
