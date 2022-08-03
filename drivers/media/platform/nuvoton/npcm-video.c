@@ -106,7 +106,7 @@
 
 #define VCD_MAX_SRC_BUFFER_SIZE		0x500000 /* 1920 x 1200 x 2 bpp */
 #define VCD_KVM_BW_PCLK			120000000UL
-#define VCD_BUSY_TIMEOUT_US		50000
+#define VCD_BUSY_TIMEOUT_US		300000
 
 /* ECE Registers */
 #define ECE_DDA_CTRL			0x0000
@@ -143,7 +143,7 @@
 
 #define ECE_TILE_W			16
 #define ECE_TILE_H			16
-#define ECE_POLL_TIMEOUT_US		50000
+#define ECE_POLL_TIMEOUT_US		300000
 
 /* GCR Registers */
 #define INTCR				0x3c
