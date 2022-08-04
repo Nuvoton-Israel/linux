@@ -546,4 +546,11 @@ config EDAC_NPCM7XX
 	  Support for error detection and correction on the
 	  Nuvoton NPCM7xx DDR memory controller.
 
+config EDAC_NPCM
+	tristate "Nuvoton NPCM DDR Memory Controller"
+	depends on ARCH_NPCM
+	help
+	  Support for error detection and correction on the
+	  Nuvoton NPCM DDR memory controller.
+
 endif # EDAC
