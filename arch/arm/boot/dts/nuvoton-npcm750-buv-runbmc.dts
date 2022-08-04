@@ -226,15 +226,18 @@
 
 &fiux {
 	pinctrl-0 = <&spix_pins>;
+	pinctrl-names = "default";
 	status = "okay";
-	spix-mode;
+	reg = <0xfb001000 0x1000>, <0xf8000000 0x2000000>;
+	reg-names = "control", "memory";
 	spi-nor@0 {
 		compatible = "m25p80-nonjedec";
 		spi-max-frequency = <5000000>;
 		#address-cells = <1>;
 		#size-cells = <1>;
 		reg = <0>;
-		spi-rx-bus-width = <1>;
+		spi-rx-bus-width = <2>;
+		spi-tx-bus-width = <2>;
 
 		partitions@F8000000 {
 			compatible = "fixed-partitions";
