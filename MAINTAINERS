@@ -6377,6 +6377,12 @@ L:	linux-edac@vger.kernel.org
 S:	Maintained
 F:	drivers/edac/mpc85xx_edac.[ch]
 
+EDAC-NPCM
+M:	Marvin Lin <kflin@nuvoton.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/edac/nuvoton,npcm-memory-controller.yaml
+F:	drivers/edac/npcm_edac.c
+
 EDAC-NPCM7XX
 M:	George Hung <george.hung@quantatw.com>
 S:	Maintained
