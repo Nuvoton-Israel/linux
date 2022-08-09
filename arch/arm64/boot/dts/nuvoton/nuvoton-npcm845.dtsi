@@ -88,6 +88,86 @@
 			interrupts = <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
+		gmac0: eth@f0802000 {
+			device_type = "network";
+			compatible = "snps,npcm";
+			reg = <0x0 0xf0802000 0x0 0x2000>,
+				<0x0 0xf0780000 0x0 0x200>;
+			interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "macirq";
+			clocks	= <&clk NPCM8XX_CLK_AHB>;
+			clock-names = "stmmaceth";
+			pinctrl-names = "default";
+			pinctrl-0 = <&rg1mdio_pins>;
+			status = "disabled";
+		};
+
+		gmac1: eth@f0804000 {
+			device_type = "network";
+			compatible = "snps,dwmac";
+			reg = <0x0 0xf0804000 0x0 0x2000>;
+			interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "macirq";
+			clocks	= <&clk NPCM8XX_CLK_AHB>;
+			clock-names = "stmmaceth";
+			pinctrl-names = "default";
+			pinctrl-0 = <&rg2_pins
+					&rg2mdio_pins>;
+			status = "disabled";
+		};
+
+		mdio0: mdio@0 {
+			compatible = "virtual,mdio-gpio";
+			gpios = <&gpio1 25 GPIO_ACTIVE_HIGH>,
+				<&gpio1 26 GPIO_ACTIVE_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			phy0: ethernet-phy@1 {
+			};
+		};
+
+		gmac2: eth@f0806000 {
+			device_type = "network";
+			compatible = "snps,dwmac";
+			reg = <0x0 0xf0806000 0x0 0x2000>;
+			interrupts = <GIC_SPI 16 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "macirq";
+			clocks	= <&clk NPCM8XX_CLK_AHB>;
+			clock-names = "stmmaceth";
+			pinctrl-names = "default";
+			pinctrl-0 = <&r1_pins
+					&r1err_pins
+					&r1md_pins>;
+			status = "disabled";
+		};
+
+		mdio1: mdio@1 {
+			compatible = "virtual,mdio-gpio";
+			gpios = <&gpio2 27 GPIO_ACTIVE_HIGH>,
+				<&gpio2 28 GPIO_ACTIVE_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			phy1: ethernet-phy@1 {
+			};
+		};
+
+		gmac3: eth@f0808000 {
+			device_type = "network";
+			compatible = "snps,dwmac";
+			reg = <0x0 0xf0808000 0x0 0x2000>;
+			interrupts = <GIC_SPI 17 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "macirq";
+			clocks	= <&clk NPCM8XX_CLK_AHB>;
+			clock-names = "stmmaceth";
+			pinctrl-names = "default";
+			pinctrl-0 = <&r2_pins
+					&r2err_pins
+					&r2md_pins>;
+			status = "disabled";
+		};
+
 		udc0:udc@f0830000 {
 			compatible = "nuvoton,npcm845-udc";
 			reg = <0x0 0xf0830000 0x0 0x1000

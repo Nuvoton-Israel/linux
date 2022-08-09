@@ -11,6 +11,12 @@
 
 	aliases {
 		serial0 = &serial0;
+		ethernet0 = &gmac0;
+		ethernet1 = &gmac1;
+		ethernet2 = &gmac2;
+		ethernet3 = &gmac3;
+		mdio-gpio0 = &mdio0;
+		mdio-gpio1 = &mdio1;
 		udc0 = &udc0;
 		udc1 = &udc1;
 		udc2 = &udc2;
@@ -439,6 +445,38 @@
 };
 
 &mc {
+	status = "okay";
+};
+
+&gmac0 {
+	phy-mode = "rgmii-id";
+	snps,eee-force-disable;
+	gpios = <&gpio2 14 GPIO_ACTIVE_HIGH>,
+		<&gpio2 15 GPIO_ACTIVE_HIGH>;
+	status = "okay";
+};
+
+&gmac1 {
+	phy-mode = "rgmii-id";
+	snps,eee-force-disable;
+	status = "okay";
+};
+
+&gmac2 {
+	phy-mode = "rmii";
+	pinctrl-names = "default";
+	pinctrl-0 = <&r1_pins
+			&r1oen_pins>;
+	phy-handle = <&phy0>;
+	status = "okay";
+};
+
+&gmac3 {
+	phy-mode = "rmii";
+	pinctrl-names = "default";
+	pinctrl-0 = <&r2_pins
+			&r2oen_pins>;
+	phy-handle = <&phy1>;
 	status = "okay";
 };
 
