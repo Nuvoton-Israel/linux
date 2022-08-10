@@ -25,6 +25,7 @@
 #define NCT3018Y_REG_CLKO	0x0C /* clock out */
 #define NCT3018Y_REG_INTR_CTRL	0x12 /* intrusion control */
 #define NCT3018Y_REG_INTR_TS_SC	0x13 /* intrusion seconds */
+#define NCT3018Y_REG_VCC_DROP_TS_SC	0x19 /* intrusion seconds */
 
 #define NCT3018Y_BIT_AF		BIT(7)
 #define NCT3018Y_BIT_ST		BIT(7)
@@ -48,9 +49,9 @@ struct nct3018y {
 #ifdef CONFIG_COMMON_CLK
 	struct clk_hw clkout_hw;
 #endif
+	struct rtc_time *intrusion_timestamp;
+	struct rtc_time *vcc_drop_timestamp;
 };
-
-static struct rtc_time intrusion_timestamp;
 
 static int nct3018y_set_alarm_mode(struct i2c_client *client, bool on)
 {
@@ -155,6 +156,26 @@ static int nct3018y_set_intrusion_mode(struct i2c_client *client, bool on)
 	return 0;
 }
 
+static int nct3018y_get_intrusion_mode(struct i2c_client *client, unsigned char *enable,
+				       unsigned char *flag)
+{
+	int ret = 0;
+	int control;
+
+	if (enable) {
+		dev_dbg(&client->dev, "%s:NCT3018Y_REG_INTR_CTRL\n", __func__);
+		control =  i2c_smbus_read_byte_data(client, NCT3018Y_REG_INTR_CTRL);
+		if (control < 0)
+			return control;
+		*enable = control & NCT3018Y_BIT_INTRIE;
+		*flag = control & NCT3018Y_BIT_INTRF;
+	}
+
+	dev_dbg(&client->dev, "%s:enable:%x flag:%x\n",
+		__func__, *enable, *flag);
+	return ret;
+}
+
 static int nct3018y_get_intrusion_timestamp(struct i2c_client *client, struct rtc_time *tm)
 {
 	int ret = 0;
@@ -177,38 +198,51 @@ static int nct3018y_get_intrusion_timestamp(struct i2c_client *client, struct rt
 	return 0;
 }
 
-static int nct3018y_get_intrusion_mode(struct i2c_client *client, unsigned char *enable,
-				       unsigned char *flag)
+static int nct3018y_get_vcc_drop_timestamp(struct i2c_client *client, struct rtc_time *tm)
 {
 	int ret = 0;
-	int control;
+	unsigned char buf[6];
 
-	if (enable) {
-		dev_dbg(&client->dev, "%s:NCT3018Y_REG_INTR_CTRL\n", __func__);
-		control =  i2c_smbus_read_byte_data(client, NCT3018Y_REG_INTR_CTRL);
-		if (control < 0)
-			return control;
-		*enable = control & NCT3018Y_BIT_INTRIE;
-		*flag = control & NCT3018Y_BIT_INTRF;
-	}
+	ret = i2c_smbus_read_i2c_block_data(client, NCT3018Y_REG_VCC_DROP_TS_SC, sizeof(buf), buf);
+	if (ret < 0)
+		return ret;
 
-	dev_dbg(&client->dev, "%s:enable:%x flag:%x\n",
-		__func__, *enable, *flag);
-	return ret;
+	tm->tm_sec = bcd2bin(buf[0] & 0x7F);
+	tm->tm_min = bcd2bin(buf[1] & 0x7F);
+	tm->tm_hour = bcd2bin(buf[2] & 0xFF);
+	tm->tm_mday = bcd2bin(buf[3] & 0x3F);
+	tm->tm_mon = bcd2bin(buf[4] & 0x1F) - 1;
+	tm->tm_year = bcd2bin(buf[5]) + 100;
+
+	dev_dbg(&client->dev, "%s:s=%d m=%d, hr=%d\n",
+		__func__, tm->tm_sec, tm->tm_min,
+		tm->tm_hour);
+	return 0;
 }
 
 static ssize_t intrusion_timestamp_show(struct device *dev,
 			       struct device_attribute *attr, char *buf)
 {
-	struct rtc_time *intrusion_ts = &intrusion_timestamp;
+	struct nct3018y *nct3018y = dev_get_drvdata(dev->parent);
 
-	return sprintf(buf, "%ptR UTC\n", intrusion_ts);
+	return sprintf(buf, "%ptR UTC\n", nct3018y->intrusion_timestamp);
 };
 
 static DEVICE_ATTR_RO(intrusion_timestamp);
 
+static ssize_t vcc_drop_timestamp_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct nct3018y *nct3018y = dev_get_drvdata(dev->parent);
+
+	return sprintf(buf, "%ptR UTC\n", nct3018y->vcc_drop_timestamp);
+};
+
+static DEVICE_ATTR_RO(vcc_drop_timestamp);
+
 static struct attribute *nct3018y_attrs[] = {
 	&dev_attr_intrusion_timestamp.attr,
+	&dev_attr_vcc_drop_timestamp.attr,
 	NULL
 };
 
@@ -220,7 +254,6 @@ static irqreturn_t nct3018y_irq(int irq, void *dev_id)
 {
 	struct nct3018y *nct3018y = i2c_get_clientdata(dev_id);
 	struct i2c_client *client = nct3018y->client;
-	struct rtc_time *intrusion_ts = &intrusion_timestamp;
 	int err;
 	unsigned char alarm_flag;
 	unsigned char alarm_enable;
@@ -245,10 +278,10 @@ static irqreturn_t nct3018y_irq(int irq, void *dev_id)
 
 	if (intrusion_enable && intrusion_flag) {
 		/* Get the timestamp of intrusion event */
-		err = nct3018y_get_intrusion_timestamp(nct3018y->client, intrusion_ts);
+		err = nct3018y_get_intrusion_timestamp(nct3018y->client, nct3018y->intrusion_timestamp);
 		if (err < 0)
 			return IRQ_NONE;
-		nct3018y_set_intrusion_mode(nct3018y->client, 0);
+		nct3018y_set_intrusion_mode(nct3018y->client, 1);
 		sysfs_notify(&nct3018y->rtc->dev.kobj, NULL, dev_attr_intrusion_timestamp.attr.name);
 	}
 
@@ -629,9 +662,23 @@ static int nct3018y_probe(struct i2c_client *client,
 		}
 	}
 
+	/* Create sysfs file */
 	err = rtc_add_group(nct3018y->rtc, &nct3018y_attr_group);
 	if (err)
 		return err;
+
+	nct3018y->intrusion_timestamp = devm_kzalloc(&client->dev, sizeof(struct rtc_time), GFP_KERNEL);
+	nct3018y->vcc_drop_timestamp = devm_kzalloc(&client->dev, sizeof(struct rtc_time), GFP_KERNEL);
+
+	/* Record intrusion timestamp */
+	err = nct3018y_get_intrusion_timestamp(client, nct3018y->intrusion_timestamp);
+	if (err < 0)
+		dev_dbg(&client->dev, "%s: read error\n", __func__);
+
+	/* Record Vcc drop timestamp */
+	err = nct3018y_get_vcc_drop_timestamp(client, nct3018y->vcc_drop_timestamp);
+	if (err < 0)
+		dev_dbg(&client->dev, "%s: read error\n", __func__);
 
 	/* Enable intrusion interrupt */
 	of_property_read_u32(client->dev.of_node, "intrusion-enable", &intrusion_en);
