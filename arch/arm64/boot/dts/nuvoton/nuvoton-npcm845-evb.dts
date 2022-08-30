@@ -65,6 +65,19 @@
 	memory {
 		reg = <0x0 0x0 0x0 0x40000000>;
 	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		video_memory: framebuffer@0x33400000 {
+			compatible = "shared-dma-pool";
+			reg = <0x0 0x33400000 0x0 0x01800000>;
+			reusable;
+			linux,cma-default;
+		};
+	};
 };
 
 &serial0 {
@@ -492,4 +505,9 @@
 			&pin241_slew
 			&pin242_slew
 			&pin243_slew>;
+};
+
+&video {
+	status = "okay";
+	memory-region = <&video_memory>;
 };
