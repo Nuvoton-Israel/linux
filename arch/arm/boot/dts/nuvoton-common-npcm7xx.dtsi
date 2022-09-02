@@ -279,21 +279,16 @@
 			interrupts = <0 23 4>;
 		};
 
-		vcd: vcd@f0810000 {
-			compatible = "nuvoton,npcm750-vcd";
-			reg = <0xf0810000 0x10000>;
-			mem-addr = <0x3e200000>;
-			mem-size = <0x600000>;
+		video: video@f0810000 {
+			compatible = "nuvoton,npcm750-video";
+			reg = <0xf0810000 0x10000>, <0xf0820000 0x2000>;
+			reg-names = "vcd", "ece";
 			interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
-		};
-
-		ece: ece@f0820000 {
-			compatible = "nuvoton,npcm750-ece";
-			reg = <0xf0820000 0x2000>;
-			mem-addr = <0x3e800000>;
-			mem-size = <0x600000>;
-			interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
+			resets = <&rstc NPCM7XX_RESET_IPSRST2 NPCM7XX_RESET_VCD>,
+				 <&rstc NPCM7XX_RESET_IPSRST2 NPCM7XX_RESET_ECE>;
+			reset-names = "vcd", "ece";
+			gcr-syscon = <&gcr>;
+			gfxi-syscon = <&gfxi>;
 			status = "disabled";
 		};
 
@@ -728,9 +723,10 @@
 				status = "disabled";
 			};
 
-			gfxi: gfxi@f000e000 {
-				compatible = "nuvoton,npcm750-gfxi", "syscon", "simple-mfd";
-				reg = <0xf000e000 0x100>;
+			gfxi: gfxi@e000 {
+				compatible = "nuvoton,npcm750-gfxi", "syscon",
+					     "simple-mfd";
+				reg = <0xe000 0x100>;
 			};
 		};
 	};
