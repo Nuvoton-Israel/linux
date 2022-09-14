@@ -6,9 +6,10 @@
 #include "nuvoton-npcm730.dtsi"
 #include "nuvoton-npcm730-gsz-gpio.dtsi"
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/i2c/i2c.h>
 
 / {
-	model = "Quanta GSZ Board (Device Tree v00.22)";
+	model = "Quanta GSZ Board (Device Tree v01.09)";
 	compatible = "nuvoton,npcm750";
 
 	aliases {
@@ -38,7 +39,6 @@
 		i2c12 = &i2c12;
 		i2c13 = &i2c13;
 		i2c14 = &i2c14;
-		i2c15 = &i2c15;
 		fiu0 = &fiu0;
 		fiu1 = &fiu3;
 		i2c16 = &i2c_9SQ440NQQI8;
@@ -67,15 +67,34 @@
 		i2c39 = &i2c_fru_2;
 		i2c40 = &i2c_io_exp_2;
 		i2c41 = &i2c_io_exp_3;
-		i2c42 = &i2c_cpld_m;
 		i2c43 = &i2c_fru_3;
 		i2c44 = &i2c_seq;
 		i2c45 = &i2c_fru_1;
 		i2c46 = &i2c_tang;
-		i2c47 = &I3C_SPD_DDRABCD_CPU0;
-		i2c48 = &I3C_SPD_DDREFGH_CPU0;
-		i2c49 = &I3C_SPD_DDRABCD_CPU1;
-		i2c50 = &I3C_SPD_DDREFGH_CPU1;
+		i2c51 = &i2c_pe0_0;
+		i2c52 = &i2c_pe0_1;
+		i2c53 = &i2c_pe0_2;
+		i2c54 = &i2c_pe1_0;
+		i2c55 = &i2c_pe1_1;
+		i2c56 = &i2c_pe1_2;
+		i2c57 = &i2c_pe2_0;
+		i2c58 = &i2c_pe2_1;
+		i2c59 = &i2c_pe2_2;
+		i2c60 = &i2c_pe3_0;
+		i2c61 = &i2c_pe3_1;
+		i2c62 = &i2c_pe3_2;
+		i2c63 = &i2c_pe4_0;
+		i2c64 = &i2c_pe4_1;
+		i2c65 = &i2c_pe4_2;
+		i2c66 = &i2c_pe5_0;
+		i2c67 = &i2c_pe5_1;
+		i2c68 = &i2c_pe5_2;
+		i2c69 = &i2c_pe6_0;
+		i2c70 = &i2c_pe6_1;
+		i2c71 = &i2c_pe6_2;
+		i2c72 = &i2c_pe7_0;
+		i2c73 = &i2c_pe7_1;
+		i2c74 = &i2c_pe7_2;
 	};
 
 	chosen {
@@ -84,6 +103,20 @@
 
 	memory {
 		reg = <0 0x40000000>;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		sata-present {
+			label = "sata-present";
+			gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
+			linux,code = <5>;
+		};
+		efuse-pg {
+			label = "efuse-pg";
+			gpios = <&gpio1 25 GPIO_ACTIVE_HIGH>;
+			linux,code = <57>;
+		};
 	};
 
 	iio-hwmon {
@@ -119,7 +152,23 @@
 			gpios = <&gpio6 25 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
+
+		ERR0 {
+			gpios = <&pca9555 0 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		ERR1 {
+			gpios = <&pca9555 1 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		ERR2 {
+			gpios = <&pca9555 2 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
 	};
+
 	seven-seg-disp {
 		compatible = "seven-seg-gpio-dev";
 		refresh-interval-ms = /bits/ 16 <600>;
@@ -127,6 +176,7 @@
 		data-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
 		clear-gpios = <&gpio0 1 GPIO_ACTIVE_HIGH>;
 	};
+
 	pcie-slot {
 		pcie0: pcie-slot@0 {
 			label = "PE0";
@@ -178,9 +228,11 @@
 };
 
 &emc0 {
-	phy-mode = "rmii";
-	use-ncsi;
 	status = "okay";
+	fixed-link {
+		speed = <100>;
+		full-duplex;
+	};
 };
 
 &mc {
@@ -251,8 +303,8 @@
 				label = "image-descriptor";
 				reg = <0xf0000 0x10000>;
 			};
-			titan-s-update@100000 {
-				label = "titan-s-update";
+			hoth-update@100000 {
+				label = "hoth-update";
 				reg = <0x100000 0x100000>;
 			};
 			kernel@200000 {
@@ -267,8 +319,8 @@
 				label = "rwfs";
 				reg = <0x3cf0000 0x300000>;
 			};
-			titan-s-mailbox@3ff0000 {
-				label = "titan-s-mailbox";
+			hoth-mailbox@3ff0000 {
+				label = "hoth-mailbox";
 				reg = <0x3ff0000 0x10000>;
 			};
 		};
@@ -287,7 +339,6 @@
 		spi-rx-bus-width = <2>;
 		label="bios";
 	};
-
 };
 
 &watchdog1 {
@@ -343,8 +394,6 @@
 		status = "okay";
 	};
 };
-
-
 
 &i2c0 {
 	#address-cells = <1>;
@@ -461,7 +510,7 @@
 			#size-cells = <0>;
 			reg = <0>;
 			vrm@72 {
-				compatible = "isil,raa229004";
+				compatible = "isil,raa229004", "xdpe152";
 				reg = <0x72>;
 			};
 		};
@@ -471,7 +520,7 @@
 			#size-cells = <0>;
 			reg = <1>;
 			vrm@72 {
-				compatible = "isil,raa229004";
+				compatible = "isil,raa229004", "xdpe152";
 				reg = <0x72>;
 			};
 		};
@@ -481,7 +530,7 @@
 			#size-cells = <0>;
 			reg = <2>;
 			vrm@72 {
-				compatible = "isil,isl69260";
+				compatible = "isil,isl69260", "xdpe152";
 				reg = <0x72>;
 			};
 		};
@@ -491,7 +540,7 @@
 			#size-cells = <0>;
 			reg = <3>;
 			vrm@72 {
-				compatible = "isil,isl69260";
+				compatible = "isil,isl69260", "xdpe152";
 				reg = <0x72>;
 			};
 		};
@@ -501,7 +550,7 @@
 			#size-cells = <0>;
 			reg = <4>;
 			vrm@72 {
-				compatible = "isil,isl69260";
+				compatible = "isil,isl69260", "xdpe152";
 				reg = <0x72>;
 			};
 		};
@@ -511,7 +560,7 @@
 			#size-cells = <0>;
 			reg = <5>;
 			vrm@72 {
-				compatible = "isil,isl69260";
+				compatible = "isil,isl69260", "xdpe152";
 				reg = <0x72>;
 			};
 		};
@@ -523,7 +572,7 @@
 			adm1272@1f {
 				compatible = "adi,adm1272";
 				reg = <0x1f>;
-				shunt-resistor-micro-ohms = <250>;
+				shunt-resistor-micro-ohms = <267>;
 			};
 		};
 	};
@@ -558,27 +607,12 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <1>;
-
-			pdb_raa228000@68 {
-				compatible = "raa228000";
-				reg = <0x68>;
-			};
-			// P12V BRICK#1
-			p12v_brick@69 {
-				compatible = "delta,dps800";
-				reg = <0x69>;
-			};
 		};
 
 		i2c_p12v_2: i2c@2 {
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <2>;
-			// P12V BRICK#2
-			p12v_brick@68 {
-				compatible = "delta,dps800";
-				reg = <0x68>;
-			};
 		};
 
 		i2c_fan_controller_1: i2c@3 {
@@ -634,6 +668,44 @@
 	clock-frequency = <400000>;
 	status = "okay";
 	pcie-slot = &pcie0;
+	mctp-controller;
+
+  mctp@10 {
+    compatible = "mctp-i2c-controller";
+    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+  };
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9548";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pe0_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_pe0_1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		i2c_pe0_2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			pe0_x8_io_exp: pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+	};
 };
 
 &i2c4 {
@@ -699,116 +771,57 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <4>;
-			pca6416@20 {
+			pca6416_3: pca6416@20 {
 				compatible = "nxp,pca6416";
 				reg = <0x20>;
 				gpio-controller;
 				#gpio-cells = <2>;
+                               gpio-line-names = "PE0_ADP_R_PRSNT_N","PE1_ADP_R_PRSNT_N",
+				"PE2_ADP_R_PRSNT_N", "PE3_ADP_R_PRSNT_N", "PE4_ADP_R_PRSNT_N",
+				"PE5_ADP_R_PRSNT_N", "PE6_ADP_R_PRSNT_N", "PE7_ADP_R_PRSNT_N",
+					"", "", "", "", "", "", "", "";
 				reset-gpios = <&gpio2 25 GPIO_ACTIVE_LOW>;
-
 				G4B_P0 {
-					gpio-hog;
-					gpios = <0 0>;
+					gpios = <0 0 GPIO_ACTIVE_LOW>;
 					input;
 					line-name = "PE0_ADP_R_PRSNT_N";
 				};
 				G4B_P1 {
-					gpio-hog;
-					gpios = <1 0>;
+					gpios = <1 0 GPIO_ACTIVE_LOW>;
 					input;
 					line-name = "PE1_ADP_R_PRSNT_N";
 				};
 				G4B_P2 {
-					gpio-hog;
-					gpios = <2 0>;
+					gpios = <2 0 GPIO_ACTIVE_LOW>;
 					input;
 					line-name = "PE2_ADP_R_PRSNT_N";
 				};
 				G4B_P3 {
-					gpio-hog;
-					gpios = <3 0>;
+					gpios = <3 0 GPIO_ACTIVE_LOW>;
 					input;
 					line-name = "PE3_ADP_R_PRSNT_N";
 				};
 				G4B_P4 {
-					gpio-hog;
-					gpios = <4 0>;
+					gpios = <4 0 GPIO_ACTIVE_LOW>;
 					input;
 					line-name = "PE4_ADP_R_PRSNT_N";
 				};
 				G4B_P5 {
-					gpio-hog;
-					gpios = <5 0>;
+					gpios = <5 0 GPIO_ACTIVE_LOW>;
 					input;
 					line-name = "PE5_ADP_R_PRSNT_N";
 				};
 				G4B_P6 {
-					gpio-hog;
-					gpios = <6 0>;
+					gpios = <6 0 GPIO_ACTIVE_LOW>;
 					input;
 					line-name = "PE6_ADP_R_PRSNT_N";
 				};
 				G4B_P7 {
-					gpio-hog;
-					gpios = <7 0>;
+					gpios = <7 0 GPIO_ACTIVE_LOW>;
 					input;
 					line-name = "PE7_ADP_R_PRSNT_N";
 				};
-				G4B_P8 {
-					gpio-hog;
-					gpios = <8 0>;
-					input;
-					line-name = "PE0_PRSNT_R_N";
-				};
-				G4B_P9 {
-					gpio-hog;
-					gpios = <9 0>;
-					input;
-					line-name = "PE1_PRSNT_R_N";
-				};
-				G4B_P10 {
-					gpio-hog;
-					gpios = <10 0>;
-					input;
-					line-name = "PE2_PRSNT_R_N";
-				};
-				G4B_P11 {
-					gpio-hog;
-					gpios = <11 0>;
-					input;
-					line-name = "PE3_PRSNT_R_N";
-				};
-				G4B_P12 {
-					gpio-hog;
-					gpios = <12 0>;
-					input;
-					line-name = "PE4_PRSNT_R_N";
-				};
-				G4B_P13 {
-					gpio-hog;
-					gpios = <13 0>;
-					input;
-					line-name = "PE5_PRSNT_R_N";
-				};
-				G4B_P14 {
-					gpio-hog;
-					gpios = <14 0>;
-					input;
-					line-name = "PE6_PRSNT_R_N";
-				};
-				G4B_P15 {
-					gpio-hog;
-					gpios = <15 0>;
-					input;
-					line-name = "PE7_PRSNT_R_N";
-				};
 			};
-		};
-
-		i2c_cpld_m: i2c@5 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <5>;
 		};
 
 		i2c_fru_3: i2c@6 {
@@ -829,6 +842,44 @@
 	clock-frequency = <400000>;
 	status = "okay";
 	pcie-slot = &pcie1;
+	mctp-controller;
+
+  mctp@10 {
+    compatible = "mctp-i2c-controller";
+    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+  };
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9548";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pe1_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_pe1_1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		i2c_pe1_2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			pe1_x8_io_exp: pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+	};
 };
 
 &i2c6 {
@@ -837,6 +888,44 @@
 	clock-frequency = <400000>;
 	status = "okay";
 	pcie-slot = &pcie2;
+	mctp-controller;
+
+  mctp@10 {
+    compatible = "mctp-i2c-controller";
+    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+  };
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9548";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pe2_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_pe2_1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		i2c_pe2_2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			pe2_x8_io_exp: pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+	};
 };
 
 &i2c7 {
@@ -845,6 +934,44 @@
 	clock-frequency = <400000>;
 	status = "okay";
 	pcie-slot = &pcie3;
+	mctp-controller;
+
+  mctp@10 {
+    compatible = "mctp-i2c-controller";
+    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+  };
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9548";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pe3_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_pe3_1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		i2c_pe3_2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			pe3_x8_io_exp: pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+	};
 };
 
 &i2c8 {
@@ -853,6 +980,44 @@
 	clock-frequency = <400000>;
 	status = "okay";
 	pcie-slot = &pcie4;
+	mctp-controller;
+
+  mctp@10 {
+    compatible = "mctp-i2c-controller";
+    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+  };
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9548";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pe4_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_pe4_1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		i2c_pe4_2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			pe4_x8_io_exp: pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+	};
 };
 
 &i2c9 {
@@ -861,6 +1026,44 @@
 	clock-frequency = <400000>;
 	status = "okay";
 	pcie-slot = &pcie5;
+	mctp-controller;
+
+  mctp@10 {
+    compatible = "mctp-i2c-controller";
+    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+  };
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9548";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pe5_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_pe5_1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		i2c_pe5_2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			pe5_x8_io_exp: pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+	};
 };
 
 &i2c10 {
@@ -869,6 +1072,57 @@
 	clock-frequency = <400000>;
 	status = "okay";
 	pcie-slot = &pcie6;
+	mctp-controller;
+
+  mctp@10 {
+    compatible = "mctp-i2c-controller";
+    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+  };
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9548";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pe6_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_pe6_1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+			pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+
+		i2c_pe6_2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			pe6_x8_io_exp: pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+
+			fan_controller@2c {
+				compatible = "maxim,max31790";
+				reg = <0x2c>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+		};
+	};
 };
 
 &i2c11 {
@@ -877,6 +1131,44 @@
 	clock-frequency = <400000>;
 	status = "okay";
 	pcie-slot = &pcie7;
+	mctp-controller;
+
+  mctp@10 {
+    compatible = "mctp-i2c-controller";
+    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+  };
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9548";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pe7_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_pe7_1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		i2c_pe7_2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			pe7_x8_io_exp: pca9538@72 {
+				compatible = "nxp,pca9538";
+				reg = <0x72>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+	};
 };
 
 &i2c12 {
@@ -984,10 +1276,6 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <1>;
-			bmc_fru_1@55 {
-				compatible = "atmel,24c64";
-				reg = <0x55>;
-			};
 		};
 
 		i2c_tang: i2c@4 {
@@ -1004,44 +1292,6 @@
 	};
 };
 
-&i2c15 {
-	#address-cells = <1>;
-	#size-cells = <0>;
-	clock-frequency = <400000>;
-	status = "okay";
-	i2c-switch@75 {
-		compatible = "nxp,pca9546";
-		reg = <0x75>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-		i2c-mux-idle-disconnect;
-		reset-gpios = <&gpio1 0 GPIO_ACTIVE_LOW>; //gpio32
-
-		I3C_SPD_DDRABCD_CPU0: i2c@0 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <0>;
-		};
-
-		I3C_SPD_DDREFGH_CPU0: i2c@1 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <1>;
-		};
-		I3C_SPD_DDRABCD_CPU1: i2c@2 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <2>;
-		};
-
-		I3C_SPD_DDREFGH_CPU1: i2c@3 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <3>;
-		};
-	};
-};
-
 &spi0 {
 	cs-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
 	pinctrl-names = "default";
@@ -1052,10 +1302,12 @@
 		compatible = "nuvoton,npcm750-jtag-master";
 		spi-max-frequency = <25000000>;
 		reg = <0>;
+
 		pinctrl-names = "pspi", "gpio";
 		pinctrl-0 = <&pspi1_pins>;
 		pinctrl-1 = <&gpio175ol_pins &gpio176o_pins
 				&gpio177_pins>;
+
 		tck-gpios = <&gpio5 15 GPIO_ACTIVE_HIGH>;
 		tdi-gpios = <&gpio5 16 GPIO_ACTIVE_HIGH>;
 		tdo-gpios = <&gpio5 17 GPIO_ACTIVE_HIGH>;
@@ -1121,7 +1373,6 @@
 			&gpio194_pins
 			&gpio195_pins
 			&gpio196_pins
-			&gpio197_pins
 			&gpio199_pins
 			&gpio202_pins
 			&gpio204_pins
@@ -1147,16 +1398,22 @@
 &gpio0 {
 	gpio-line-names =
 	/*0-31*/	"","","","","","","RESET_OUT","POWER_OUT",
-			"CPU2_MEM_THERM_EVENT","CPU1_MEM_THERM_EVENT","","","SIO_POWER_GOOD","PS_PWROK","","",
+			"","","","","SIO_POWER_GOOD","PS_PWROK","","",
 			"","","","","","","","",
 			"CPU1_THERMTRIP","CPU2_THERMTRIP","","","","","","";
 };
 &gpio1 {
 	gpio-line-names =
 	/*32-63*/	"","","","","","P3VBAT","CPU_CATERR","",
-			"","","","","","","","",
+			"CPU_MCERR","","","","","","","",
 			"","","","","","","","",
 			"","","","","","","","";
+	U86_reset {
+		gpio-hog;
+		gpios = <0 0>;
+		output-low;
+		line-name = "RST_SMB_MUX_PCA9546_0_R_N";
+	};
 };
 &gpio2 {
 	gpio-line-names =
@@ -1175,7 +1432,7 @@
 &gpio4 {
 	gpio-line-names =
 	/*128-159*/	"","","","","","","","",
-			"","","CPU_ERR0","CPU_ERR1","CPU_ERR2","","","POST_COMPLETE",
+			"CPU1_MEM_THERM_EVENT","CPU2_MEM_THERM_EVENT","CPU_ERR0","CPU_ERR1","CPU_ERR2","","","POST_COMPLETE",
 			"PRDY_N","SYSPWROK","","","","","","",
 			"","","","","","","","";
 };
