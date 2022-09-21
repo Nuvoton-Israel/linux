@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 // Copyright (c) 2022 Nuvoton Technology Corporation
 
 #include <linux/debugfs.h>
@@ -96,8 +96,10 @@ static void handle_ce(struct mem_ctl_info *mci)
 {
 	struct priv_data *priv = mci->pvt_info;
 	const struct npcm_platform_data *pdata = priv->pdata;
-	u64 addr, data;
-	u32 val_l, val_h, id, synd;
+	u64 addr = 0;
+	u64 data = 0;
+	u32 val_h = 0;
+	u32 val_l, id, synd;
 
 	regmap_read(npcm_regmap, pdata->ctl_ce_addr_l, &val_l);
 	if (pdata->chip == NPCM8XX_CHIP) {
@@ -128,8 +130,10 @@ static void handle_ue(struct mem_ctl_info *mci)
 {
 	struct priv_data *priv = mci->pvt_info;
 	const struct npcm_platform_data *pdata = priv->pdata;
-	u64 addr, data;
-	u32 val_l, val_h, id, synd;
+	u64 addr = 0;
+	u64 data = 0;
+	u32 val_h = 0;
+	u32 val_l, id, synd;
 
 	regmap_read(npcm_regmap, pdata->ctl_ue_addr_l, &val_l);
 	if (pdata->chip == NPCM8XX_CHIP) {
@@ -189,7 +193,7 @@ static ssize_t force_ecc_error(struct file *file, const char __user *data,
 	struct device *dev = file->private_data;
 	struct mem_ctl_info *mci = to_mci(dev);
 	struct priv_data *priv = mci->pvt_info;
-	struct npcm_platform_data *pdata = priv->pdata;
+	const struct npcm_platform_data *pdata = priv->pdata;
 	int ret;
 	u32 val, syndrome;
 
@@ -509,4 +513,4 @@ module_platform_driver(npcm_edac_driver);
 MODULE_AUTHOR("Medad CChien <medadyoung@gmail.com>");
 MODULE_AUTHOR("Marvin Lin <kflin@nuvoton.com>");
 MODULE_DESCRIPTION("Nuvoton NPCM EDAC Driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
