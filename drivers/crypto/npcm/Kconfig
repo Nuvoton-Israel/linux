@@ -1,0 +1,17 @@
+config CRYPTO_DEV_NPCM_SHA
+	tristate "NPCM SHA acceleration support"
+	depends on CRYPTO_DEV_NPCM
+	default n	
+	select CRYPTO_SHA1
+	select CRYPTO_SHA256
+	select CRYPTO_SHA512
+	help
+	  Support for BMC Nuvoton NPCM SHA HW.
+
+config CRYPTO_DEV_NPCM_AES
+	tristate "NPCM AES acceleration support"
+	depends on CRYPTO_DEV_NPCM
+	default y
+	select CRYPTO_AES
+	help
+	  Support for Nuvoton BMC NPCM AES HW.
