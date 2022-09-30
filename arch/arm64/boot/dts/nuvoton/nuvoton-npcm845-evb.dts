@@ -56,6 +56,7 @@
 		i2c24 = &i2c24;
 		i2c25 = &i2c25;
 		i2c26 = &i2c26;
+		spi1 = &spi_gpio;
 	};
 
 	chosen {
@@ -78,6 +79,27 @@
 			linux,cma-default;
 		};
 	};
+
+	spi_gpio: spi-gpio {
+		compatible = "spi-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		gpio-sck = <&gpio0 12 GPIO_ACTIVE_HIGH>;
+		gpio-mosi = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+		gpio-miso = <&gpio0 14 GPIO_ACTIVE_HIGH>;
+		num-chipselects = <1>;
+		cs-gpios = <&gpio0 15 GPIO_ACTIVE_LOW>;
+
+		eeprom@0 {
+			compatible = "atmel,at25";
+			spi-max-frequency = <5000000>;
+			size = <0x10000>;
+			pagesize = <128>;
+			reg = <0>;
+			address-width = <16>;
+		};
+	};
+
 };
 
 &sgpio2 {
@@ -367,6 +389,11 @@
 
 &i2c0 {
 	status = "okay";
+	eeprom@50 {
+		compatible = "atmel,24c256";
+		reg = <0x50>;
+	};
+
 };
 
 &i2c1 {
