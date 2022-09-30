@@ -402,10 +402,20 @@
 
 &i2c2 {
 	status = "okay";
+	ipmb@10 {
+		compatible = "ipmb-dev";
+		reg = <0x10>;
+		i2c-protocol;
+	};
 };
 
 &i2c3 {
 	status = "okay";
+	ipmb@11 {
+		compatible = "ipmb-dev";
+		reg = <0x11>;
+		i2c-protocol;
+	};
 };
 
 &i2c4 {
