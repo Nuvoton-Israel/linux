@@ -561,12 +561,12 @@
 };
 
 &gmac2 {
-	phy-mode = "rmii";
 	pinctrl-names = "default";
+	snps,ps-speed = <100>;
 	pinctrl-0 = <&r1_pins
 			&r1oen_pins>;
-	phy-handle = <&phy0>;
 	status = "okay";
+	use-ncsi;
 };
 
 &gmac3 {

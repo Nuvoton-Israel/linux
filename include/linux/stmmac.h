@@ -236,6 +236,7 @@ struct plat_stmmacenet_data {
 	void (*dump_debug_regs)(void *priv);
 	void *bsp_priv;
 	int eee_force_disable;
+	int use_ncsi;
 	struct clk *stmmac_clk;
 	struct clk *pclk;
 	struct clk *clk_ptp_ref;
