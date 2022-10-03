@@ -100,6 +100,18 @@
 		};
 	};
 
+	leds {
+		compatible = "gpio-leds";
+		heartbeat {
+			label = "heartbeat";
+			gpios = <&gpio3 2 GPIO_ACTIVE_HIGH>; /* gpio98 */
+		};
+		identify {
+			label = "identify";
+			gpios = <&gpio1 29 GPIO_ACTIVE_HIGH>; /* gpio61 */
+		};
+	};
+
 };
 
 &sgpio2 {
@@ -389,15 +401,15 @@
 
 &i2c0 {
 	status = "okay";
-	eeprom@50 {
-		compatible = "atmel,24c256";
-		reg = <0x50>;
-	};
 
 };
 
 &i2c1 {
 	status = "okay";
+	eeprom@50 {
+		compatible = "atmel,24c256";
+		reg = <0x50>;
+	};
 };
 
 &i2c2 {
