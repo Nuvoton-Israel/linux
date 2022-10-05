@@ -294,6 +294,17 @@ config MAX77620_THERMAL
 	  interrupts when PMIC die temperature cross the threshold of
 	  120 degC and 140 degC.
 
+config NPCM_THERMAL
+	tristate "NPCM thermal driver"
+	depends on ARCH_NPCM || COMPILE_TEST
+	depends on HAS_IOMEM
+	depends on OF
+	default y
+	help
+	  Enable this to plug nuvoton NPCM BMC thermal sensor driver into the Linux
+	  thermal framework. cpufreq is used as the cooling device to throttle
+	  CPUs when the passive trip is crossed.
+
 config QORIQ_THERMAL
 	tristate "QorIQ Thermal Monitoring Unit"
 	depends on THERMAL_OF && HAS_IOMEM
