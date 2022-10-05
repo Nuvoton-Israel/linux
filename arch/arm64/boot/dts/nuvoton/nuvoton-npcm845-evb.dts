@@ -114,6 +114,11 @@
 
 };
 
+&tmps {
+	status = "okay";
+};
+
+
 &sgpio2 {
 	status = "okay";
 	gpio-line-names =

@@ -390,6 +390,14 @@
 				syscon = <&gcr>;
 			};
 
+			tmps: tmps@188000 {
+				compatible = "nuvoton,npcm845-thermal";
+				interrupts = <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>;
+				clocks = <&clk NPCM8XX_CLK_APB4>;
+				reg = <0x188000 0x5C>;
+				#thermal-sensor-cells = <1>;
+			};
+
 			sgpio1: sgpio@101000 {
 				compatible = "nuvoton,npcm845-sgpio";
 				reg = <0x101000 0x200>;
@@ -830,6 +838,33 @@
 				compatible = "nuvoton,npcm845-gfxi", "syscon",
 					     "simple-mfd";
 				reg = <0xe000 0x100>;
+			};
+		};
+	};
+
+	thermal-zones {
+		cpu0_thermal: cpu0-thermal {
+			polling-delay-passive = <250>;
+			polling-delay = <1000>;
+			thermal-sensors = <&tmps 0>;
+			trips {
+				cpu0_alert0: trip-point0 {
+					temperature = <90000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+			};
+		};
+		cpu1_thermal: cpu1-thermal {
+			polling-delay-passive = <250>;
+			polling-delay = <1000>;
+			thermal-sensors = <&tmps 1>;
+			trips {
+				cpu1_alert0: trip-point0 {
+					temperature = <90000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
 			};
 		};
 	};
