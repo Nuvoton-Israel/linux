@@ -420,11 +420,11 @@ if USB_OHCI_HCD
 
 config USB_OHCI_HCD_NPCM7XX
     tristate "Support for Nuvoton NPCM7XX on-chip OHCI USB controller"
-    depends on (USB_OHCI_HCD && ARCH_NPCM7XX) || COMPILE_TEST
-    default y if (USB_OHCI_HCD && ARCH_NPCM7XX)
+    depends on (USB_OHCI_HCD && ARCH_NPCM) || COMPILE_TEST
+    default y if (USB_OHCI_HCD && ARCH_NPCM)
     help
       Enables support for the on-chip OHCI controller on
-      Nuvoton NPCM7XX chips.
+      Nuvoton NPCM chips.
 
 config USB_OHCI_HCD_OMAP1
 	tristate "OHCI support for OMAP1/2 chips"

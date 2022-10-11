@@ -259,6 +259,10 @@
 	status = "okay";
 };
 
+&ohci1 {
+        status = "okay";
+};
+
 &sdhci {
 	status = "okay";
 };
