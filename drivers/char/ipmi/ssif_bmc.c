@@ -6,6 +6,7 @@
  *
  */
 
+#include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -42,12 +43,8 @@
 #define SSIF_IPMI_MULTIPART_READ_START          0x3
 #define SSIF_IPMI_MULTIPART_READ_MIDDLE         0x9
 
-/*
- * IPMI 2.0 Spec, section 12.7 SSIF Timing,
- * Request-to-Response Time is T6max(250ms) - T1max(20ms) - 3ms = 227ms
- * Recover ssif_bmc from busy state if it takes up to 500ms
- */
-#define RESPONSE_TIMEOUT                        500 /* ms */
+/* Max timeout is 15 seconds */
+#define RESPONSE_TIMEOUT                        15000 /*ms*/
 
 #define MAX_I2C_HW_FIFO_SIZE	32
 /* Common regs */
@@ -1035,6 +1032,8 @@ static int ssif_bmc_cb(struct i2c_client *client, enum i2c_slave_event event, u8
 
 	case I2C_SLAVE_WRITE_REQUESTED:
 		on_write_requested_event(ssif_bmc, val);
+		if (ssif_bmc->busy)
+			mdelay(30); /* 30 ms */
 		break;
 
 	case I2C_SLAVE_READ_PROCESSED:
