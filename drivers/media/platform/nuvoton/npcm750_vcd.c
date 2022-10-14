@@ -744,10 +744,8 @@ static void npcm750_vcd_update_info(struct npcm750_vcd *priv)
 	if (priv->info.vdisp > VCD_MAX_HIGHT)
 		priv->info.vdisp = VCD_MAX_HIGHT;
 
-	if (priv->de_mode) {
-		regmap_read(vcd, VCD_HOR_AC_TIM, &priv->hortact);
-		priv->hortact &= VCD_HOR_AC_TIM_MASK;
-	}
+	regmap_read(vcd, VCD_HOR_AC_TIM, &priv->hortact);
+	priv->hortact &= VCD_HOR_AC_TIM_MASK;
 }
 
 static void npcm750_vcd_detect_video_mode(struct npcm750_vcd *priv)
@@ -1075,7 +1073,10 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 		INTCR2_GIHCRST | INTCR2_GIVCRST);
 
 	/* Select KVM GFX input */
-	regmap_update_bits(gcr, MFSEL1, MFSEL1_DVH1SEL, ~MFSEL1_DVH1SEL);
+	if (!priv->de_mode)
+		regmap_update_bits(gcr, MFSEL1, MFSEL1_DVH1SEL, MFSEL1_DVH1SEL);
+	else
+		regmap_update_bits(gcr, MFSEL1, MFSEL1_DVH1SEL, ~MFSEL1_DVH1SEL);
 
 	if (npcm750_vcd_ready(priv))
 		return	-ENODEV;
