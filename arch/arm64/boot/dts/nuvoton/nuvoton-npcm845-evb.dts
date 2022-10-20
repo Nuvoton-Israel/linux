@@ -252,6 +252,18 @@
 	status = "okay";
 };
 
+&peci {
+	cmd-timeout-ms = <1000>;
+	npcm,pull-down = <0>;
+	npcm,host-neg-bit-rate = <15>;
+	status = "okay";
+	intel-peci-dimmtemp@30 {
+		compatible = "intel,peci-client";
+		reg = <0x30>;
+		status = "okay";
+	};
+};
+
 &lpc_kcs {
 	kcs1: kcs1@0 {
 		status = "okay";

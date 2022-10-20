@@ -270,6 +270,15 @@
 				};
 			};
 
+			peci: peci-controller@100000 {
+				compatible = "nuvoton,npcm845-peci";
+				reg = <0x100000 0x1000>;
+				interrupts = <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>;
+				clocks = <&clk NPCM8XX_CLK_APB3>;
+				nuvoton,sysgcr = <&gcr>;
+				status = "disabled";
+			};
+
 			pspi: spi@201000 {
 				compatible = "nuvoton,npcm845-pspi";
 				reg = <0x201000 0x1000>;
