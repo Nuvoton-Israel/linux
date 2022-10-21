@@ -435,6 +435,44 @@
 				syscon = <&gcr>;
 			};
 
+			tmps: tmps@188000 {
+				compatible = "nuvoton,npcm845-thermal";
+				interrupts = <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>;
+				clocks = <&clk NPCM8XX_CLK_APB4>;
+				reg = <0x188000 0x5C>;
+				#thermal-sensor-cells = <1>;
+			};
+
+			sgpio1: sgpio@101000 {
+				clocks = <&clk NPCM8XX_CLK_APB3>;
+				compatible = "nuvoton,npcm845-sgpio";
+				interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+				gpio-controller;
+				#gpio-cells = <2>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&iox1_pins>;
+				bus-frequency = <16000000>;
+				nin_gpios = <64>;
+				nout_gpios = <64>;
+				reg = <0x101000 0x200>;
+				status = "disabled";
+			};
+
+			sgpio2: sgpio@102000 {
+				clocks = <&clk NPCM8XX_CLK_APB3>;
+				compatible = "nuvoton,npcm845-sgpio";
+				interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>;
+				gpio-controller;
+				#gpio-cells = <2>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&iox2_pins>;
+				bus-frequency = <16000000>;
+				nin_gpios = <64>;
+				nout_gpios = <64>;
+				reg = <0x102000 0x200>;
+				status = "disabled";
+			};
+
 			pwm_fan:pwm-fan-controller@103000 {
 				compatible = "nuvoton,npcm845-pwm-fan";
 				reg = <0x103000 0x3000>,
@@ -839,6 +877,33 @@
 				interrupts = <GIC_SPI 154 IRQ_TYPE_LEVEL_HIGH>;
 				nuvoton,sys-mgr = <&gcr>;
 				status = "disabled";
+			};
+		};
+	};
+
+	thermal-zones {
+		cpu0_thermal: cpu0-thermal {
+			polling-delay-passive = <250>;
+			polling-delay = <1000>;
+			thermal-sensors = <&tmps 0>;
+			trips {
+				cpu0_alert0: trip-point0 {
+					temperature = <90000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+			};
+		};
+		cpu1_thermal: cpu1-thermal {
+			polling-delay-passive = <250>;
+			polling-delay = <1000>;
+			thermal-sensors = <&tmps 1>;
+			trips {
+				cpu1_alert0: trip-point0 {
+					temperature = <90000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
 			};
 		};
 	};
