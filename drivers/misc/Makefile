@@ -64,3 +64,5 @@ obj-$(CONFIG_VCPU_STALL_DETECTOR)	+= vcpu_stall_detector.o
 obj-$(CONFIG_NPCM_LPC_BPC)	+= npcm7xx-lpc-bpc.o
 obj-$(CONFIG_NPCM_PCI_MBOX)	+= npcm7xx-pci-mbox.o
 obj-$(CONFIG_NPCM8XX_JTAG_MASTER)	+= npcm8xx-jtag-master.o
+obj-$(CONFIG_NPCM750_VCD)	+= npcm750_vcd.o
+obj-$(CONFIG_NPCM750_ECE)	+= npcm750_ece.o
