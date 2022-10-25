@@ -347,7 +347,8 @@ static int npcm_adc_read_raw(struct iio_dev *indio_dev,
 		ret = npcm_adc_read(info, val, chan->channel);
 		mutex_unlock(&info->lock);
 		if (ret) {
-			dev_err(info->dev, "NPCM ADC read failed\n");
+			if (ret != -ERESTARTSYS)
+				dev_err(info->dev, "NPCM ADC read failed\n");
 			return ret;
 		}
 
