@@ -3,6 +3,22 @@
 
 / {
 	pinctrl: pinctrl@f0800000 {
+		pin4_slew: pin4_slew {
+			pins = "GPIO4/IOX2_DI/SMB1D_SDA";
+			slew-rate = <1>;
+		};
+		pin5_slew: pin5_slew {
+			pins = "GPIO5/IOX2_LD/SMB1D_SCL";
+			slew-rate = <1>;
+		};
+		pin6_slew: pin6_slew {
+			pins = "GPIO6/IOX2_CK/SMB2D_SDA";
+			slew-rate = <1>;
+		};
+		pin7_slew: pin7_slew {
+			pins = "GPIO7/IOX2_D0/SMB2D_SCL";
+			slew-rate = <1>;
+		};
 		pin33_slew: pin33-slew {
 			pins = "I3C4_SCL";
 			slew-rate = <1>;

@@ -61,6 +61,11 @@
 		phy1: ethernet-phy@1 {
 		};
 	};
+	iio-hwmon {
+		compatible = "iio-hwmon";
+		io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>,
+			<&adc 4>, <&adc 5>, <&adc 6>, <&adc 7>;
+	};
 };
 
 &gmac0 {
@@ -391,6 +396,10 @@
 			&jtag2_pins
 			&lpc_pins
 			&spix_pins
+			&pin4_slew
+			&pin5_slew
+			&pin6_slew
+			&pin7_slew
 			&pin108_slew
 			&pin109_slew
 			&pin240_slew
