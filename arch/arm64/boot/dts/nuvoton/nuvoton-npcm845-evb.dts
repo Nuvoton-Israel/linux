@@ -66,6 +66,18 @@
 		io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>,
 			<&adc 4>, <&adc 5>, <&adc 6>, <&adc 7>;
 	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		video_memory: framebuffer@0x33400000 {
+			compatible = "shared-dma-pool";
+			reg = <0x0 0x33400000 0x0 0x01800000>;
+			reusable;
+			linux,cma-default;
+		};
+	};
 };
 
 &gmac0 {
@@ -100,6 +112,11 @@
 
 &mc {
 	status = "okay";
+};
+
+&video {
+	status = "okay";
+	memory-region = <&video_memory>;
 };
 
 &tmps {
