@@ -98,6 +98,10 @@
 	status = "okay";
 };
 
+&mc {
+	status = "okay";
+};
+
 &tmps {
 	status = "okay";
 };
