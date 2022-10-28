@@ -490,7 +490,7 @@
 			serial4: serial@4000 {
 				compatible = "nuvoton,npcm845-uart";
 				reg = <0x4000 0x1000>;
-				clocks = <&clk NPCM8XX_CLK_UART>;
+				clocks = <&clk NPCM8XX_CLK_UART2>;
 				interrupts = <GIC_SPI 196 IRQ_TYPE_LEVEL_HIGH>;
 				reg-shift = <2>;
 				status = "disabled";
@@ -499,7 +499,7 @@
 			serial5: serial@5000 {
 				compatible = "nuvoton,npcm845-uart";
 				reg = <0x5000 0x1000>;
-				clocks = <&clk NPCM8XX_CLK_UART>;
+				clocks = <&clk NPCM8XX_CLK_UART2>;
 				interrupts = <GIC_SPI 197 IRQ_TYPE_LEVEL_HIGH>;
 				reg-shift = <2>;
 				status = "disabled";
@@ -508,7 +508,7 @@
 			serial6: serial@6000 {
 				compatible = "nuvoton,npcm845-uart";
 				reg = <0x6000 0x1000>;
-				clocks = <&clk NPCM8XX_CLK_UART>;
+				clocks = <&clk NPCM8XX_CLK_UART2>;
 				interrupts = <GIC_SPI 198 IRQ_TYPE_LEVEL_HIGH>;
 				reg-shift = <2>;
 				status = "disabled";
