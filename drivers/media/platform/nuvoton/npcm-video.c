@@ -1155,8 +1155,7 @@ static void npcm_video_clear_gmmap(struct npcm_video *video)
 			baseptr = ioremap_wc(ADDR_GMMAP_2GB, GMMAP_LENGTH);
 			break;
 		}
-	}
-	else if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm845-video")) {
+	} else if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm845-video")) {
 		regmap_read(gcr, INTCR4, &intcr);
 		gmmap = FIELD_GET(INTCR4_GMMAP, intcr);
 
@@ -1383,7 +1382,7 @@ static int npcm_video_enum_input(struct file *file, void *fh,
 	if (inp->index)
 		return -EINVAL;
 
-	strlcpy(inp->name, "Host VGA capture", sizeof(inp->name));
+	strscpy(inp->name, "Host VGA capture", sizeof(inp->name));
 	inp->type = V4L2_INPUT_TYPE_CAMERA;
 	inp->capabilities = V4L2_IN_CAP_DV_TIMINGS;
 	inp->status = video->v4l2_input_status;
@@ -2075,7 +2074,7 @@ static const struct of_device_id npcm_video_match[] = {
 	{},
 };
 
-MODULE_DEVICE_TABLE(of, npcm_video_match)
+MODULE_DEVICE_TABLE(of, npcm_video_match);
 
 static struct platform_driver npcm_video_driver = {
 	.driver = {
@@ -2091,4 +2090,4 @@ module_platform_driver(npcm_video_driver);
 MODULE_AUTHOR("Joseph Liu<kwliu@nuvoton.com>");
 MODULE_AUTHOR("Marvin Lin<kflin@nuvoton.com>");
 MODULE_DESCRIPTION("Driver for Nuvoton NPCM Video Capture/Encode Engine");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
