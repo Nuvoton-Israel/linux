@@ -1360,7 +1360,7 @@ static int npcm_video_enum_format(struct file *file, void *fh,
 	if (f->index)
 		return -EINVAL;
 
-	f->pixelformat = V4L2_PIX_FMT_RGB565;
+	f->pixelformat = V4L2_PIX_FMT_HEXTILE;
 
 	return 0;
 }
@@ -1451,7 +1451,7 @@ static int npcm_video_enum_framesizes(struct file *file, void *fh,
 	if (fsize->index)
 		return -EINVAL;
 
-	if (fsize->pixel_format != V4L2_PIX_FMT_RGB565)
+	if (fsize->pixel_format != V4L2_PIX_FMT_HEXTILE)
 		return -EINVAL;
 
 	fsize->discrete.width = video->pix_fmt.width;
@@ -1473,7 +1473,7 @@ static int npcm_video_enum_frameintervals(struct file *file, void *fh,
 	    fival->height != video->detected_timings.height)
 		return -EINVAL;
 
-	if (fival->pixel_format != V4L2_PIX_FMT_RGB565)
+	if (fival->pixel_format != V4L2_PIX_FMT_HEXTILE)
 		return -EINVAL;
 
 	fival->type = V4L2_FRMIVAL_TYPE_CONTINUOUS;
@@ -1850,7 +1850,7 @@ static int npcm_video_setup_video(struct npcm_video *video)
 	struct vb2_queue *vbq = &video->queue;
 	int rc;
 
-	video->pix_fmt.pixelformat = V4L2_PIX_FMT_RGB565;
+	video->pix_fmt.pixelformat = V4L2_PIX_FMT_HEXTILE;
 	video->pix_fmt.field = V4L2_FIELD_NONE;
 	video->pix_fmt.colorspace = V4L2_COLORSPACE_SRGB;
 	video->v4l2_input_status = V4L2_IN_ST_NO_SIGNAL;
