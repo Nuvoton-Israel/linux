@@ -425,6 +425,12 @@ static int npcm_adc_probe(struct platform_device *pdev)
 	div = div >> NPCM_ADCCON_DIV_SHIFT;
 	info->adc_sample_hz = clk_get_rate(info->adc_clk) / ((div + 1) * 2);
 
+	ret = clk_prepare_enable(info->adc_clk);
+	if (ret) {
+		dev_warn(&pdev->dev, "failed to enable the clock\n");
+		goto err_disable_clk;
+	}
+
 	irq = platform_get_irq(pdev, 0);
 	if (irq <= 0) {
 		ret = -EINVAL;

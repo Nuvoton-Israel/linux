@@ -28,6 +28,12 @@
 			reg = <0x0 0xf0801000 0x0 0xC4>;
 		};
 
+		fuse:fuse@f0189000 {
+			compatible = "nuvoton,npcm845-fuse", "syscon",
+				"simple-mfd";
+			reg = <0x0 0xf0189000 0x0 0x1000>;
+		};
+
 		gic: interrupt-controller@dfff9000 {
 			compatible = "arm,gic-400";
 			reg = <0x0 0xdfff9000 0x0 0x1000>,
@@ -378,6 +384,7 @@
 				interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk NPCM8XX_CLK_ADC>;
 				resets = <&rstc 0x20 27>;
+				syscon = <&fuse>;
 				status = "disabled";
 			};
 
