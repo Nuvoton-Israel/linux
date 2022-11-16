@@ -244,6 +244,8 @@ struct stmmac_priv {
 
 	/* Receive Side Scaling */
 	struct stmmac_rss rss;
+
+	struct ncsi_dev *ncsidev;
 };
 
 enum stmmac_state {
