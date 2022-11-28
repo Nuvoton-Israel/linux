@@ -24,6 +24,7 @@ struct npcm_adc_info {
 	u32 max_val;
 	u32 const_r1;
 	u32 const_r2;
+	u32 calib_addr;
 };
 
 struct npcm_adc {
@@ -92,30 +93,31 @@ struct npcm_adc {
 #define NPCM_FUSE_FCTL_RDST		BIT(1)
 
 /* ADC Calibration Definition */
-#define FUSE_CALIB_ADDR		24
 #define FUSE_CALIB_SIZE		8
 #define DATA_CALIB_SIZE		4
 #define FUSE_READ_SLEEP		500
 #define FUSE_READ_TIMEOUT	1000000
 
 static const struct npcm_adc_info npxm7xx_adc_info = {
-	.data_mask = GENMASK(9, 0), 
+	.data_mask = GENMASK(9, 0),
 	.internal_vref = 2048,
 	.res_bits = 10,
 	.min_val = 0,
 	.max_val = 1023,
 	.const_r1 = 512,
-	.const_r2 = 768
+	.const_r2 = 768,
+	.calib_addr = 24
 };
 
 static const struct npcm_adc_info npxm8xx_adc_info = {
-	.data_mask = GENMASK(11, 0), 
+	.data_mask = GENMASK(11, 0),
 	.internal_vref = 1229,
 	.res_bits = 12,
 	.min_val = 0,
 	.max_val = 4095,
 	.const_r1 = 1024,
-	.const_r2 = 3072
+	.const_r2 = 3072,
+	.calib_addr = 40
 };
 
 #define NPCM_ADC_CHAN(ch) {					\
@@ -218,14 +220,14 @@ static int npcm_read_nibble_parity(u8 *block_ECC, u8 *ADC_calib)
 }
 
 static int npcm_fuse_calibration_read(struct platform_device *pdev,
-					 struct npcm_adc *info)
+				      struct npcm_adc *info)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct regmap *fuse_regmap;
 	ssize_t bytes_read = 0;
 	u8 read_buf[8];
 	u32 ADC_calib;
-	u32 addr = FUSE_CALIB_ADDR;
+	u32 addr = info->data->calib_addr;
 
 	fuse_regmap = syscon_regmap_lookup_by_phandle(np, "syscon");
 	if (IS_ERR(fuse_regmap)) {
@@ -235,7 +237,7 @@ static int npcm_fuse_calibration_read(struct platform_device *pdev,
 
 	while (bytes_read < FUSE_CALIB_SIZE) {
 		npcm_fuse_read(fuse_regmap, addr,
-				  &read_buf[bytes_read]);
+			       &read_buf[bytes_read]);
 		bytes_read++;
 		addr++;
 	}
