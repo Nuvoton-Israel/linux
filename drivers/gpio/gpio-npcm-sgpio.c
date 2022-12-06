@@ -171,11 +171,9 @@ static void irqd_to_npcm_sgpio_data(struct irq_data *d,
 	*bit = GPIO_BIT(*offset);
 }
 
-static int npcm_sgpio_init_valid_mask(struct gpio_chip *gc,
-				      unsigned long *valid_mask, unsigned int ngpios)
+static int npcm_sgpio_init_port(struct npcm_sgpio *gpio)
 {
-	struct npcm_sgpio *gpio = gpiochip_get_data(gc);
-	u8 in_port, out_port, set_port;
+	u8 in_port, out_port, set_port, reg;
 
 	in_port = gpio->nin_sgpio / 8;
 	if (gpio->nin_sgpio % 8 > 0)
@@ -190,7 +188,12 @@ static int npcm_sgpio_init_valid_mask(struct gpio_chip *gc,
 	set_port = ((out_port & 0xf) << 4) | (in_port & 0xf);
 	iowrite8(set_port, gpio->base + IOXCFG2);
 
-	return 0;
+	reg = ioread8(gpio->base + IOXCFG2);
+	if (reg == set_port)
+		return 0;
+	else
+		return -EINVAL;
+
 }
 
 static int npcm_sgpio_dir_in(struct gpio_chip *gc, unsigned int offset)
@@ -598,7 +601,6 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 	spin_lock_init(&gpio->lock);
 	gpio->chip.parent = &pdev->dev;
 	gpio->chip.ngpio = gpio->nin_sgpio + gpio->nout_sgpio;
-	gpio->chip.init_valid_mask = npcm_sgpio_init_valid_mask;
 	gpio->chip.direction_input = npcm_sgpio_dir_in;
 	gpio->chip.direction_output = npcm_sgpio_dir_out;
 	gpio->chip.get_direction = npcm_sgpio_get_direction;
@@ -610,6 +612,10 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 	gpio->chip.label = dev_name(&pdev->dev);
 	gpio->chip.base = -1;
 
+	rc = npcm_sgpio_init_port(gpio);
+	if (rc < 0)
+		return rc;
+
 	rc = npcm_sgpio_setup_irqs(gpio, pdev);
 	if (rc < 0)
 		return rc;
@@ -619,6 +625,8 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 		return rc;
 
 	npcm_sgpio_setup_enable(gpio, true);
+	printk("NPCM: SGPIO module is ready\n");
+
 	return 0;
 }
 
