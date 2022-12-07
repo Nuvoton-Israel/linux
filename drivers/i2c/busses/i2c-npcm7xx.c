@@ -449,8 +449,8 @@ struct npcm_i2c {
 	u64 rec_fail_cnt;
 	u64 nack_cnt;
 	u64 timeout_cnt;
-	bool ber_state;
 	u64 tx_complete_cnt;
+	bool ber_state;
 };
 
 static inline void npcm_i2c_select_bank(struct npcm_i2c *bus,
@@ -2350,6 +2350,8 @@ static int i2c_speed_set(void *data, u64 val)
 	if (ret)
 		return -EAGAIN;
 
+	npcm_i2c_int_enable(bus, true);
+
 	return 0;
 }
 DEFINE_DEBUGFS_ATTRIBUTE(i2c_clock_ops, i2c_speed_get, i2c_speed_set, "%llu\n");
@@ -2369,9 +2371,8 @@ static void npcm_i2c_init_debugfs(struct platform_device *pdev,
 	debugfs_create_u64("rec_succ_cnt", 0444, d, &bus->rec_succ_cnt);
 	debugfs_create_u64("rec_fail_cnt", 0444, d, &bus->rec_fail_cnt);
 	debugfs_create_u64("timeout_cnt", 0444, d, &bus->timeout_cnt);
-	debugfs_create_file("i2c_speed", 0644, d, bus, &i2c_clock_ops);
 	debugfs_create_u64("tx_complete_cnt", 0444, d, &bus->tx_complete_cnt);
-
+	debugfs_create_file("i2c_speed", 0644, d, bus, &i2c_clock_ops);
 	bus->debugfs = d;
 }
 
