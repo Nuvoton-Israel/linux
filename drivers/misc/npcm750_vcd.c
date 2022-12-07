@@ -954,9 +954,6 @@ static int npcm750_vcd_get_resolution(struct npcm750_vcd *priv)
 				mdelay(GET_RES_VALID_TIMEOUT);
 		}
 
-		/* Update video information */
-		npcm750_vcd_update_info(priv);
-
 		if (!vaild) {
 			dev_dbg(priv->dev, "invalid resolution %d x %d\n",
 				npcm750_vcd_hres(priv), npcm750_vcd_vres(priv));
@@ -964,6 +961,9 @@ static int npcm750_vcd_get_resolution(struct npcm750_vcd *priv)
 				npcm750_vcd_claer_gmmap(priv);
 			return -1;
 		}
+
+		/* Update video information */
+		npcm750_vcd_update_info(priv);
 
 		/* setup resolution change detect register*/
 		npcm750_vcd_detect_video_mode(priv);
