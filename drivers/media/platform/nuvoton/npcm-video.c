@@ -38,6 +38,7 @@
 #include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-dma-contig.h>
+#include <uapi/linux/npcm-video.h>
 
 #define DEVICE_NAME			"npcm-video"
 
@@ -708,6 +709,26 @@ static int npcm_video_get_rect_list(struct npcm_video *video,
 	} while (tile_cnt < info.tile_size);
 
 	return ret;
+}
+
+static unsigned int npcm_video_get_rect_count(struct npcm_video *video)
+{
+	struct list_head *head, *pos, *nx;
+	struct rect_list *tmp;
+	unsigned int count;
+
+	if (video->list && video->rect) {
+		count = video->rect[video->vb_index];
+		head = &video->list[video->vb_index];
+
+		list_for_each_safe(pos, nx, head) {
+			tmp = list_entry(pos, struct rect_list, list);
+			list_del(&tmp->list);
+			kfree(tmp);
+		}
+	}
+
+	return count;
 }
 
 static u8 npcm_video_is_mga(struct npcm_video *video)
@@ -1486,46 +1507,6 @@ static int npcm_video_enum_frameintervals(struct file *file, void *fh,
 	return 0;
 }
 
-static int npcm_video_get_vid_overlay(struct file *file, void *fh,
-				      struct v4l2_format *fmt)
-{
-	struct npcm_video *video = video_drvdata(file);
-	struct v4l2_window *win = &fmt->fmt.win;
-	struct list_head *head, *pos, *nx;
-	struct rect_list *entry, *tmp;
-	struct v4l2_rect *rect;
-
-	if (video->list && video->rect) {
-		win->clipcount = video->rect[video->vb_index];
-		head = &video->list[video->vb_index];
-
-		entry = list_first_entry_or_null(head, struct rect_list, list);
-		if (entry) {
-			rect = &entry->clip.c;
-
-			win->w.top = rect->top;
-			win->w.left = rect->left;
-			win->w.width = rect->width;
-			win->w.height = rect->height;
-
-			list_del(&entry->list);
-			kfree(entry);
-			if (video->rect[video->vb_index])
-				video->rect[video->vb_index]--;
-		}
-
-		list_for_each_safe(pos, nx, head) {
-			tmp = list_entry(pos, struct rect_list, list);
-			if (tmp) {
-				list_del(&tmp->list);
-				kfree(tmp);
-			}
-		}
-	}
-
-	return 0;
-}
-
 static int npcm_video_set_dv_timings(struct file *file, void *fh,
 				     struct v4l2_dv_timings *timings)
 {
@@ -1628,7 +1609,6 @@ static const struct v4l2_ioctl_ops npcm_video_ioctls = {
 
 	.vidioc_g_parm = npcm_video_get_parm,
 	.vidioc_s_parm = npcm_video_set_parm,
-	.vidioc_g_fmt_vid_overlay = npcm_video_get_vid_overlay,
 	.vidioc_enum_framesizes = npcm_video_enum_framesizes,
 	.vidioc_enum_frameintervals = npcm_video_enum_frameintervals,
 
@@ -1649,12 +1629,29 @@ static int npcm_video_set_ctrl(struct v4l2_ctrl *ctrl)
 						ctrl_handler);
 
 	switch (ctrl->id) {
-	case V4L2_CID_DETECT_MD_MODE:
-		if (ctrl->val == V4L2_DETECT_MD_MODE_GLOBAL)
+	case V4L2_CID_NPCM_CAPTURE_MODE:
+		if (ctrl->val == V4L2_NPCM_CAPTURE_MODE_COMPLETE)
 			video->ctrl_cmd = VCD_CMD_OPERATION_CAPTURE;
-		else
+		else if (ctrl->val == V4L2_NPCM_CAPTURE_MODE_DIFF)
 			video->ctrl_cmd = VCD_CMD_OPERATION_COMPARE;
-	break;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int npcm_video_get_volatile_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct npcm_video *video = container_of(ctrl->handler,
+						struct npcm_video,
+						ctrl_handler);
+
+	switch (ctrl->id) {
+	case V4L2_CID_NPCM_RECT_COUNT:
+		ctrl->val = npcm_video_get_rect_count(video);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -1664,6 +1661,30 @@ static int npcm_video_set_ctrl(struct v4l2_ctrl *ctrl)
 
 static const struct v4l2_ctrl_ops npcm_video_ctrl_ops = {
 	.s_ctrl = npcm_video_set_ctrl,
+	.g_volatile_ctrl = npcm_video_get_volatile_ctrl,
+};
+
+static const struct v4l2_ctrl_config npcm_ctrl_capture_mode = {
+	.ops = &npcm_video_ctrl_ops,
+	.id = V4L2_CID_NPCM_CAPTURE_MODE,
+	.name = "NPCM Video Capture Mode",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.min = 0,
+	.max = V4L2_NPCM_CAPTURE_MODE_DIFF,
+	.step = 1,
+	.def = 0,
+};
+
+static const struct v4l2_ctrl_config npcm_ctrl_rect_count = {
+	.ops = &npcm_video_ctrl_ops,
+	.id = V4L2_CID_NPCM_RECT_COUNT,
+	.name = "NPCM Compressed Hextile Rectangle Count",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.flags = V4L2_CTRL_FLAG_VOLATILE,
+	.min = 0,
+	.max = (MAX_WIDTH / RECT_W) * (MAX_HEIGHT / RECT_H),
+	.step = 1,
+	.def = 0,
 };
 
 static int npcm_video_open(struct file *file)
@@ -1860,12 +1881,10 @@ static int npcm_video_setup_video(struct npcm_video *video)
 		return rc;
 	}
 
-	v4l2_ctrl_handler_init(&video->ctrl_handler, 10);
-
-	v4l2_ctrl_new_std_menu(&video->ctrl_handler, &npcm_video_ctrl_ops,
-			       V4L2_CID_DETECT_MD_MODE,
-			       V4L2_DETECT_MD_MODE_REGION_GRID, 0,
-			       V4L2_DETECT_MD_MODE_GLOBAL);
+	v4l2_ctrl_handler_init(&video->ctrl_handler, 2);
+	v4l2_ctrl_new_custom(&video->ctrl_handler, &npcm_ctrl_capture_mode,
+			     NULL);
+	v4l2_ctrl_new_custom(&video->ctrl_handler, &npcm_ctrl_rect_count, NULL);
 
 	if (video->ctrl_handler.error) {
 		dev_err(video->dev, "Failed to init controls: %d\n",
