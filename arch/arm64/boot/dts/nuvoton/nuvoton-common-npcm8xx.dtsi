@@ -19,7 +19,8 @@
 		ranges;
 
 		gcr: system-controller@f0800000 {
-			compatible = "nuvoton,npcm845-gcr", "syscon";
+			compatible = "nuvoton,npcm845-gcr", "syscon",
+				"simple-mfd";
 			reg = <0x0 0xf0800000 0x0 0x1000>;
 		};
 
