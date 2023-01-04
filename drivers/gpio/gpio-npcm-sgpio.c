@@ -200,10 +200,7 @@ static int npcm_sgpio_dir_in(struct gpio_chip *gc, unsigned int offset)
 {
 	struct npcm_sgpio *gpio = gpiochip_get_data(gc);
 
-	if (offset < gpio->nout_sgpio)
-		return -EINVAL;
-
-	return 0;
+	return offset < gpio->nout_sgpio ? -EINVAL : 0;
 }
 
 static int npcm_sgpio_dir_out(struct gpio_chip *gc, unsigned int offset, int val)
@@ -292,19 +289,19 @@ static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio,
 				const struct npcm_clk_cfg *clk_cfg, u32 sgpio_freq)
 {
 	unsigned long apb_freq;
-	u32 sgpio_clk_div;
+	u32 val;
 	u8 tmp;
 	int i;
 
 	apb_freq = clk_get_rate(gpio->pclk);
-	sgpio_clk_div = (apb_freq / sgpio_freq);
-	if ((apb_freq % sgpio_freq) != 0)
-		sgpio_clk_div += 1;
-
 	tmp = ioread8(gpio->base + IOXCFG1) & ~IOXCFG1_SFT_CLK;
 
 	for (i = 0; i < clk_cfg->cfg_opt; i++) {
-		if (sgpio_clk_div >= clk_cfg->SFT_CLK[i]) {
+		val = apb_freq / clk_cfg->SFT_CLK[i];
+		if ((sgpio_freq < val) && (i !=0) ) {
+			iowrite8(clk_cfg->CLK_SEL[i-1] | tmp, gpio->base + IOXCFG1);
+			return 0;
+		} else if (i == (clk_cfg->cfg_opt-1) && (sgpio_freq > val)) {
 			iowrite8(clk_cfg->CLK_SEL[i] | tmp, gpio->base + IOXCFG1);
 			return 0;
 		}
@@ -562,12 +559,12 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 	if (!clk_cfg)
 		return -EINVAL;
 
-	rc = device_property_read_u32(&pdev->dev, "nin_gpios", &nin_gpios);
+	rc = device_property_read_u32(&pdev->dev, "nuvoton,input-ngpios", &nin_gpios);
 	if (rc < 0) {
 		dev_err(&pdev->dev, "Could not read ngpios property\n");
 		return -EINVAL;
 	}
-	rc = device_property_read_u32(&pdev->dev, "nout_gpios", &nout_gpios);
+	rc = device_property_read_u32(&pdev->dev, "nuvoton,output-ngpios", &nout_gpios);
 	if (rc < 0) {
 		dev_err(&pdev->dev, "Could not read ngpios property\n");
 		return -EINVAL;
