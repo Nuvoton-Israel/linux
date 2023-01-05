@@ -128,9 +128,9 @@
 };
 
 &sgpio2 {
-	bus-frequency = <16000000>;
-	nin_gpios = <8>;
-	nout_gpios = <8>;
+	bus-frequency = <8000000>;
+	nuvoton,input-ngpios = <8>;
+	nuvoton,output-ngpios = <8>;
 	gpio-line-names="s1","s2","s3","s4","s5","s6","s7","s8";
 	status = "okay";
 };
