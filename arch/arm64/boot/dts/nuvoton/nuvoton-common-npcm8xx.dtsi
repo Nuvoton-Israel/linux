@@ -73,6 +73,23 @@
 			reg = <0x0 0xf0801000 0x0 0x1000>;
 		};
 
+		pcie: pcie@e1000000 {
+			compatible = "nuvoton,npcm845-pcie";
+			device_type = "pci";
+			reg = <0x0 0xE1000000 0x0 0x1000>,
+				<0x0 0xE8000000 0x0 0x1000>;
+			bus-range = <0x0 0xF>;
+			#address-cells = <3>;
+			#size-cells = <2>;
+			#interrupt-cells = <1>;
+			ranges = <0x01000000 0 0xe9000000 0x0 0xe9000000 0 0x01000000
+				0x02000000 0 0xea000000 0x0 0xea000000 0 0x04000000>;
+			resets = <&rstc 0x34 0x15>;
+			interrupts = <GIC_SPI 127 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-map-mask = <0 0 0 7>;
+			interrupt-map = <0 0 0 1 &gic GIC_SPI 127 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
 		ehci1: usb@f0828100 {
 			compatible = "nuvoton,npcm750-ehci";
 			reg = <0x0 0xf0828100 0x0 0x1000>;

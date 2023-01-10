@@ -279,6 +279,10 @@
 	status = "okay";
 };
 
+&pcie {
+	status = "okay";
+};
+
 &pcimbox {
 	status = "okay";
 };
