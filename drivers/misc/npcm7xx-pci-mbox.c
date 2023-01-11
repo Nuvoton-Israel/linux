@@ -268,6 +268,7 @@ static int npcm7xx_mbox_remove(struct platform_device *pdev)
 
 static const struct of_device_id npcm7xx_mbox_match[] = {
 	{ .compatible = "nuvoton,npcm750-pci-mbox" },
+	{ .compatible = "nuvoton,npcm845-pci-mbox" },
 	{ },
 };
 

@@ -233,6 +233,7 @@ static int npcm7xx_kcs_remove(struct platform_device *pdev)
 
 static const struct of_device_id npcm_kcs_bmc_match[] = {
 	{ .compatible = "nuvoton,npcm750-kcs-bmc" },
+	{ .compatible = "nuvoton,npcm845-kcs-bmc" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, npcm_kcs_bmc_match);
