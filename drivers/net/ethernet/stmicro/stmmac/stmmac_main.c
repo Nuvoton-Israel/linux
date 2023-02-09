@@ -4799,8 +4799,8 @@ static const struct net_device_ops stmmac_netdev_ops = {
 	.ndo_poll_controller = stmmac_poll_controller,
 #endif
 	.ndo_set_mac_address = stmmac_set_mac_address,
-	.ndo_vlan_rx_add_vid = stmmac_vlan_rx_add_vid,
-	.ndo_vlan_rx_kill_vid = stmmac_vlan_rx_kill_vid,
+	.ndo_vlan_rx_add_vid = ncsi_vlan_rx_add_vid,
+	.ndo_vlan_rx_kill_vid = ncsi_vlan_rx_kill_vid,
 };
 
 static void stmmac_reset_subtask(struct stmmac_priv *priv)
@@ -5122,6 +5122,9 @@ int stmmac_dvr_probe(struct device *device,
 		priv->sph = true;
 		dev_info(priv->device, "SPH feature enabled\n");
 	}
+
+	if (priv->plat->use_ncsi)
+		netdev->hw_features |= NETIF_F_HW_VLAN_CTAG_FILTER;
 
 	/* The current IP register MAC_HW_Feature1[ADDR64] only define
 	 * 32/40/64 bit width, but some SOC support others like i.MX8MP
