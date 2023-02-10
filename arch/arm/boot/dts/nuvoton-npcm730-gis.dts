@@ -8,7 +8,7 @@
 #include <dt-bindings/gpio/gpio.h>
 
 / {
-	model = "Quanta GIS Board (Device Tree v01.14)";
+	model = "Quanta GIS Board (Device Tree v01.17)";
 	compatible = "nuvoton,npcm750";
 
 	aliases {
@@ -201,11 +201,13 @@
 	status = "okay";
 };
 
-&emc0 {
-	phy-mode = "rmii";
-	use-ncsi;
-	status = "okay";
-};
+ &emc0 {
+ 	status = "okay";
+	fixed-link {
+		speed = <100>;
+		full-duplex;
+	};
+ };
 
 &mc {
 	status = "okay";
@@ -275,8 +277,8 @@
 				label = "image-descriptor";
 				reg = <0xf0000 0x10000>;
 			};
-			titan-s-update@100000 {
-				label = "titan-s-update";
+			hoth-update@100000 {
+				label = "hoth-update";
 				reg = <0x100000 0x100000>;
 			};
 			kernel@200000 {
@@ -291,8 +293,8 @@
 				label = "rwfs";
 				reg = <0x3cf0000 0x300000>;
 			};
-			titan-s-mailbox@3ff0000 {
-				label = "titan-s-mailbox";
+			hoth-mailbox@3ff0000 {
+				label = "hoth-mailbox";
 				reg = <0x3ff0000 0x10000>;
 			};
 		};
@@ -318,6 +320,20 @@
 		reg = <1>;
 		spi-max-frequency = <20000000>;
 		spi-rx-bus-width = <2>;
+		label = "bios-secondary";
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			bios-secondary-zero@0 {
+				label = "bios-secondary-0";
+				reg = <0x0000000 0x4000000>;
+			};
+			bios-secondary-one@4000000 {
+				label = "bios-secondary-1";
+				reg = <0x4000000 0x4000000>;
+			};
+		};
 	};
 };
 
@@ -477,6 +493,10 @@
 			#size-cells = <0>;
 			reg = <2>;
 			pcie-slot = &pcie2;
+			lm90@4a {
+				compatible = "national,lm90";
+				reg = <0x4a>;
+			};
 		};
 
 		i2c_slot3: i2c@3 {
@@ -998,7 +1018,7 @@
 &gpio1 {
 	gpio-line-names =
 	/*32-63*/	"","","","","","","CPU_CATERR","",
-			"","","","","","","","",
+			"CPU_MCERR","","","","","","","",
 			"","","","","","","","",
 			"","","","","","","","";
 };
