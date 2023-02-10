@@ -75,12 +75,12 @@
 			input-enable;
 		};
 		gpio24_pins: gpio24-pins {
-			pins = "GPIO24/IOXHDO";
+			pins = "GPIO24/HGPIO4/IOXHDO";
 			bias-disable;
 			input-enable;
 		};
 		gpio25_pins: gpio25-pins {
-			pins = "GPIO25/IOXHDI";
+			pins = "GPIO25/HGPIO5/IOXHDI";
 			bias-disable;
 			input-enable;
 		};
@@ -120,7 +120,7 @@
 			input-enable;
 		};
 		gpio60_pins: gpio60-pins {
-			pins = "GPIO60/SMB3DSCL";
+			pins = "GPIO60/HGPIO7/SMB3DSCL";
 			bias-disable;
 			input-enable;
 		};

@@ -9,7 +9,7 @@
 #include <dt-bindings/i2c/i2c.h>
 
 / {
-	model = "Quanta GSZ Board (Device Tree v01.09)";
+	model = "Quanta GSZ Board (Device Tree v01.10)";
 	compatible = "nuvoton,npcm750";
 
 	aliases {
@@ -107,11 +107,6 @@
 
 	gpio-keys {
 		compatible = "gpio-keys";
-		sata-present {
-			label = "sata-present";
-			gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
-			linux,code = <5>;
-		};
 		efuse-pg {
 			label = "efuse-pg";
 			gpios = <&gpio1 25 GPIO_ACTIVE_HIGH>;
@@ -670,10 +665,23 @@
 	pcie-slot = &pcie0;
 	mctp-controller;
 
-  mctp@10 {
-    compatible = "mctp-i2c-controller";
-    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
-  };
+	mctp@10 {
+		compatible = "mctp-i2c-controller";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+	};
+
+	gpio@21 {
+			compatible = "nxp,pca8574";
+			reg = <0x21>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-line-names = "", "", "", "", "", "PE0_J16_CABLE_PRSNT_N", "", "";
+			PE0_P5 {
+				gpios = <5 GPIO_ACTIVE_HIGH>;
+				input;
+				line-name = "PE0_J16_CABLE_PRSNT_N";
+			};
+	};
 
 	i2c-switch@77 {
 		compatible = "nxp,pca9548";
@@ -776,7 +784,7 @@
 				reg = <0x20>;
 				gpio-controller;
 				#gpio-cells = <2>;
-                               gpio-line-names = "PE0_ADP_R_PRSNT_N","PE1_ADP_R_PRSNT_N",
+				gpio-line-names = "PE0_ADP_R_PRSNT_N","PE1_ADP_R_PRSNT_N",
 				"PE2_ADP_R_PRSNT_N", "PE3_ADP_R_PRSNT_N", "PE4_ADP_R_PRSNT_N",
 				"PE5_ADP_R_PRSNT_N", "PE6_ADP_R_PRSNT_N", "PE7_ADP_R_PRSNT_N",
 					"", "", "", "", "", "", "", "";
@@ -844,10 +852,10 @@
 	pcie-slot = &pcie1;
 	mctp-controller;
 
-  mctp@10 {
-    compatible = "mctp-i2c-controller";
-    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
-  };
+	mctp@10 {
+		compatible = "mctp-i2c-controller";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+	};
 
 	i2c-switch@77 {
 		compatible = "nxp,pca9548";
@@ -890,10 +898,23 @@
 	pcie-slot = &pcie2;
 	mctp-controller;
 
-  mctp@10 {
-    compatible = "mctp-i2c-controller";
-    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
-  };
+	mctp@10 {
+		compatible = "mctp-i2c-controller";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+	};
+
+	gpio@21 {
+			compatible = "nxp,pca8574";
+			reg = <0x21>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-line-names = "", "", "", "", "", "PE2_J16_CABLE_PRSNT_N", "", "";
+			PE2_P5 {
+				gpios = <5 GPIO_ACTIVE_HIGH>;
+				input;
+				line-name = "PE2_J16_CABLE_PRSNT_N";
+			};
+	};
 
 	i2c-switch@77 {
 		compatible = "nxp,pca9548";
@@ -936,10 +957,10 @@
 	pcie-slot = &pcie3;
 	mctp-controller;
 
-  mctp@10 {
-    compatible = "mctp-i2c-controller";
-    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
-  };
+	mctp@10 {
+		compatible = "mctp-i2c-controller";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+	};
 
 	i2c-switch@77 {
 		compatible = "nxp,pca9548";
@@ -982,10 +1003,23 @@
 	pcie-slot = &pcie4;
 	mctp-controller;
 
-  mctp@10 {
-    compatible = "mctp-i2c-controller";
-    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
-  };
+	mctp@10 {
+		compatible = "mctp-i2c-controller";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+	};
+
+	gpio@21 {
+			compatible = "nxp,pca8574";
+			reg = <0x21>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-line-names = "", "", "", "", "", "PE4_J16_CABLE_PRSNT_N", "", "";
+			PE4_P5 {
+				gpios = <5 GPIO_ACTIVE_HIGH>;
+				input;
+				line-name = "PE4_J16_CABLE_PRSNT_N";
+			};
+	};
 
 	i2c-switch@77 {
 		compatible = "nxp,pca9548";
@@ -1028,10 +1062,10 @@
 	pcie-slot = &pcie5;
 	mctp-controller;
 
-  mctp@10 {
-    compatible = "mctp-i2c-controller";
-    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
-  };
+	mctp@10 {
+		compatible = "mctp-i2c-controller";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+	};
 
 	i2c-switch@77 {
 		compatible = "nxp,pca9548";
@@ -1074,10 +1108,23 @@
 	pcie-slot = &pcie6;
 	mctp-controller;
 
-  mctp@10 {
-    compatible = "mctp-i2c-controller";
-    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
-  };
+	mctp@10 {
+		compatible = "mctp-i2c-controller";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+	};
+
+	gpio@21 {
+			compatible = "nxp,pca8574";
+			reg = <0x21>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-line-names = "", "", "", "", "", "PE6_J16_CABLE_PRSNT_N", "", "";
+			PE6_P5 {
+				gpios = <5 GPIO_ACTIVE_HIGH>;
+				input;
+				line-name = "PE6_J16_CABLE_PRSNT_N";
+			};
+	};
 
 	i2c-switch@77 {
 		compatible = "nxp,pca9548";
@@ -1133,10 +1180,10 @@
 	pcie-slot = &pcie7;
 	mctp-controller;
 
-  mctp@10 {
-    compatible = "mctp-i2c-controller";
-    reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
-  };
+	mctp@10 {
+		compatible = "mctp-i2c-controller";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+	};
 
 	i2c-switch@77 {
 		compatible = "nxp,pca9548";
@@ -1397,7 +1444,7 @@
 
 &gpio0 {
 	gpio-line-names =
-	/*0-31*/	"","","","","","","RESET_OUT","POWER_OUT",
+	/*0-31*/	"","","","","","SATA_PRESENCE","RESET_OUT","POWER_OUT",
 			"","","","","SIO_POWER_GOOD","PS_PWROK","","",
 			"","","","","","","","",
 			"CPU1_THERMTRIP","CPU2_THERMTRIP","","","","","","";
