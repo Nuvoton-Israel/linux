@@ -12,8 +12,6 @@
 	compatible = "nuvoton,npcm750";
 
 	aliases {
-		ethernet0 = &emc0;
-		ethernet1 = &gmac0;
 		serial3 = &serial3;
 		udc9 = &udc9;
 		i2c1 = &i2c1;
