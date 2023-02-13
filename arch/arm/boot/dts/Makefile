@@ -355,6 +355,7 @@ dtb-$(CONFIG_ARCH_WPCM450) += \
 dtb-$(CONFIG_ARCH_NPCM7XX) += \
 	nuvoton-npcm730-gsj.dtb \
 	nuvoton-npcm730-gbs.dtb \
+	nuvoton-npcm730-gis.dtb \
 	nuvoton-npcm730-kudo.dtb \
 	nuvoton-npcm750-evb.dtb \
 	nuvoton-npcm750-runbmc-olympus.dtb
