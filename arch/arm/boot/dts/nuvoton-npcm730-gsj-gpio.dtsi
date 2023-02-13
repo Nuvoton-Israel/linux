@@ -99,12 +99,12 @@
 			drive-push-pull;
 		};
 		gpio24pp_pins: gpio24pp-pins {
-			pins = "GPIO24/IOXHDO";
+			pins = "GPIO24/HGPIO4/IOXHDO";
 			bias-disable;
 			drive-push-pull;
 		};
 		gpio25pp_pins: gpio25pp-pins {
-			pins = "GPIO25/IOXHDI";
+			pins = "GPIO25/HGPIO5/IOXHDI";
 			bias-disable;
 			drive-push-pull;
 		};
@@ -114,12 +114,12 @@
 			drive-open-drain;
 		};
 		gpio59pp_pins: gpio59pp-pins {
-			pins = "GPIO59/SMB3DSDA";
+			pins = "GPIO59/HGPIO6/SMB3DSDA";
 			bias-disable;
 			drive-push-pull;
 		};
 		gpio60_pins: gpio60-pins {
-			pins = "GPIO60/SMB3DSCL";
+			pins = "GPIO60/HGPIO7/SMB3DSCL";
 			bias-disable;
 			input-enable;
 		};
