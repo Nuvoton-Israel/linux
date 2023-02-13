@@ -10,7 +10,6 @@
 	compatible = "quanta,gbs-bmc","nuvoton,npcm730";
 
 	aliases {
-		ethernet1 = &gmac0;
 		serial0 = &serial0;
 		serial1 = &serial1;
 		serial2 = &serial2;
