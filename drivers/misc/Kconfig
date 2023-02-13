@@ -643,6 +643,11 @@ config MCHP_LAN966X_PCI
 	    - lan966x-serdes (PHY_LAN966X_SERDES)
 	    - lan966x-miim (MDIO_MSCC_MIIM)
 	    - lan966x-switch (LAN966X_SWITCH)
+config NPCM8XX_JTAG_MASTER
+	tristate "NPCM8xx JTAG Master driver"
+	depends on (ARCH_NPCM || COMPILE_TEST)
+	help
+	  NPCM8xx JTAG Master Interfaces.
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
