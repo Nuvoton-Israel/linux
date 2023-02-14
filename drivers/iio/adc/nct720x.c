@@ -204,7 +204,7 @@ static int nct720x_read_raw(struct iio_dev *indio_dev,
 			goto abort;
 		}
 
-		v2 = nct720x_read_reg(chip, REG_VIN[index]);
+		v2 = nct720x_read_reg(chip, REG_VOLT_LOW_BYTE);
 		if (v2 < 0) {
 			err = v2;
 			goto abort;
