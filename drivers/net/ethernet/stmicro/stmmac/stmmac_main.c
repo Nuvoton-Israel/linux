@@ -5130,7 +5130,7 @@ int stmmac_dvr_probe(struct device *device,
 	}
 
 	if (priv->plat->use_ncsi)
-		netdev->hw_features |= NETIF_F_HW_VLAN_CTAG_FILTER;
+		ndev->hw_features |= NETIF_F_HW_VLAN_CTAG_FILTER;
 
 	/* The current IP register MAC_HW_Feature1[ADDR64] only define
 	 * 32/40/64 bit width, but some SOC support others like i.MX8MP
