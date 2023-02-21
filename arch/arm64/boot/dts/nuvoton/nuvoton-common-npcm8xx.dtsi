@@ -92,14 +92,14 @@
 
 		ehci1: usb@f0828100 {
 			compatible = "nuvoton,npcm750-ehci";
-			reg = <0x0 0xf0828100 0x0 0x1000>;
+			reg = <0x0 0xf0828100 0x0 0xf00>;
 			interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
 
 		ehci2: usb@f082a100 {
 			compatible = "nuvoton,npcm750-ehci";
-			reg = <0x0 0xf082a100 0x0 0x1000>;
+			reg = <0x0 0xf082a100 0x0 0xf00>;
 			interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
