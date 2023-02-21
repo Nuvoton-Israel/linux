@@ -24,6 +24,7 @@ properties:
 required:
   - compatible
   - reg
+  - read-vin-data-size : number of data bits per read vin (either 8 or 16)
 
 additionalProperties: false
 
@@ -36,5 +37,6 @@ examples:
         nct7202@1d {
             compatible = "nuvoton,nct7202";
             reg = <0x1d>;
+            read-vin-data-size = <8>;
         };
     };

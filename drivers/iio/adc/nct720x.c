@@ -79,6 +79,7 @@ struct nct720x_chip_info {
 	struct mutex		access_lock;	/* for multi-byte read and write operations */
 	int vin_max;				/* number of VIN channels */
 	u32 vin_mask;
+	bool use_read_byte_vin;
 };
 
 static const struct iio_event_spec nct720x_events[] = {
@@ -86,12 +87,12 @@ static const struct iio_event_spec nct720x_events[] = {
 		.type = IIO_EV_TYPE_THRESH,
 		.dir = IIO_EV_DIR_RISING,
 		.mask_separate = BIT(IIO_EV_INFO_VALUE) |
-						 BIT(IIO_EV_INFO_ENABLE),
+				 BIT(IIO_EV_INFO_ENABLE),
 	}, {
 		.type = IIO_EV_TYPE_THRESH,
 		.dir = IIO_EV_DIR_FALLING,
 		.mask_separate = BIT(IIO_EV_INFO_VALUE) |
-						 BIT(IIO_EV_INFO_ENABLE),
+				 BIT(IIO_EV_INFO_ENABLE),
 	},
 };
 
@@ -140,12 +141,20 @@ static const struct iio_chan_spec nct720x_channels[] = {
 	NCT720X_VOLTAGE_CHANNEL_DIFF(11, 12, 11),
 };
 
-/* Read 1-byte register. Returns unsigned reg or -ERRNO on error. */
+/* Read 1-byte register. Returns unsigned byte data or -ERRNO on error. */
 static int nct720x_read_reg(struct nct720x_chip_info *chip, u8 reg)
 {
 	struct i2c_client *client = chip->client;
 
 	return i2c_smbus_read_byte_data(client, reg);
+}
+
+/* Read 1-byte register. Returns unsigned word data or -ERRNO on error. */
+static int nct720x_read_word_swapped_reg(struct nct720x_chip_info *chip, u8 reg)
+{
+	struct i2c_client *client = chip->client;
+
+	return i2c_smbus_read_word_swapped(client, reg);
 }
 
 /*
@@ -198,20 +207,32 @@ static int nct720x_read_raw(struct iio_dev *indio_dev,
 	switch (mask) {
 	case IIO_CHAN_INFO_PROCESSED:
 		mutex_lock(&chip->access_lock);
-		v1 = nct720x_read_reg(chip, REG_VIN[index]);
-		if (v1 < 0) {
-			err = v1;
-			goto abort;
-		}
+		if (chip->use_read_byte_vin) {
+			/* MNTVIN Low Byte together with MNTVIN High Byte
+			   forms the 13-bit count value. If MNTVIN High
+			   Byte readout is read successively, the
+			   NCT7201/NCT7202 will latch the MNTVIN Low Byte
+			   for next read.
+			 */
+			v1 = nct720x_read_reg(chip, REG_VIN[index]);
+			if (v1 < 0) {
+				err = v1;
+				goto abort;
+			}
 
-		v2 = nct720x_read_reg(chip, REG_VOLT_LOW_BYTE);
-		if (v2 < 0) {
-			err = v2;
-			goto abort;
+			v2 = nct720x_read_reg(chip, REG_VOLT_LOW_BYTE);
+			if (v2 < 0) {
+				err = v2;
+				goto abort;
+			}
+			volt = (v1 << 8) | v2;	/* Convert back to 16-bit value */
+		} else {
+			/* NCT7201/NCT7202 also supports read word-size data */
+			volt = nct720x_read_word_swapped_reg(chip, REG_VIN[index]);
 		}
 
 		/* Voltage(V) = 13bitCountValue * 0.0004995 */
-		volt = ((v1 << 5) | (v2 >> 3)) * NCT720X_IN_SCALING;
+		volt = (volt >> 3) * NCT720X_IN_SCALING;
 		*val = volt / 10000;
 		mutex_unlock(&chip->access_lock);
 		return IIO_VAL_INT;
@@ -239,38 +260,53 @@ static int nct720x_read_event_value(struct iio_dev *indio_dev,
 
 	if (info == IIO_EV_INFO_VALUE) {
 		if (dir == IIO_EV_DIR_FALLING) {
-			mutex_lock(&chip->access_lock);
-			v1 = nct720x_read_reg(chip, REG_VIN_LOW_LIMIT[index]);
-			if (v1 < 0) {
-				err = v1;
-				goto abort;
-			}
+			if (chip->use_read_byte_vin) {
+				/* Low limit VIN Low Byte together with Low limit VIN High Byte
+				   forms the 13-bit count value */
+				mutex_lock(&chip->access_lock);
+				v1 = nct720x_read_reg(chip, REG_VIN_LOW_LIMIT[index]);
+				if (v1 < 0) {
+					err = v1;
+					goto abort;
+				}
 
-			v2 = nct720x_read_reg(chip, REG_VIN_LOW_LIMIT_LSB[index]);
-			if (v2 < 0) {
-				err = v2;
-				goto abort;
+				v2 = nct720x_read_reg(chip, REG_VIN_LOW_LIMIT_LSB[index]);
+				if (v2 < 0) {
+					err = v2;
+					goto abort;
+				}
+				mutex_unlock(&chip->access_lock);
+				volt = (v1 << 8) | v2;	/* Convert back to 16-bit value */
+			} else {
+				/* NCT7201/NCT7202 also supports read word-size data */
+				volt = nct720x_read_word_swapped_reg(chip, REG_VIN_LOW_LIMIT[index]);
 			}
-			mutex_unlock(&chip->access_lock);
 		} else {
-			mutex_lock(&chip->access_lock);
-			v1 = nct720x_read_reg(chip, REG_VIN_HIGH_LIMIT[index]);
-			if (v1 < 0) {
-				err = v1;
-				goto abort;
-			}
+			if (chip->use_read_byte_vin) {
+				/* High limit VIN Low Byte together with high limit VIN High Byte
+				   forms the 13-bit count value */
+				mutex_lock(&chip->access_lock);
+				v1 = nct720x_read_reg(chip, REG_VIN_HIGH_LIMIT[index]);
+				if (v1 < 0) {
+					err = v1;
+					goto abort;
+				}
 
-			v2 = nct720x_read_reg(chip, REG_VIN_HIGH_LIMIT_LSB[index]);
-			if (v2 < 0) {
-				err = v2;
-				goto abort;
+				v2 = nct720x_read_reg(chip, REG_VIN_HIGH_LIMIT_LSB[index]);
+				if (v2 < 0) {
+					err = v2;
+					goto abort;
+				}
+				mutex_unlock(&chip->access_lock);
+				volt = (v1 << 8) | v2;	/* Convert back to 16-bit value */
+			} else {
+				/* NCT7201/NCT7202 also supports read word-size data */
+				volt = nct720x_read_word_swapped_reg(chip, REG_VIN_HIGH_LIMIT[index]);
 			}
-			mutex_unlock(&chip->access_lock);
 		}
 	}
-
 	/* Voltage(V) = 13bitCountValue * 0.0004995 */
-	volt = ((v1 << 5) | (v2 >> 3)) * NCT720X_IN_SCALING;
+	volt = (volt >> 3) * NCT720X_IN_SCALING;
 	*val = volt / 10000;
 
 	return IIO_VAL_INT;
@@ -393,7 +429,7 @@ static int nct720x_detect(struct i2c_client *client,
 	struct i2c_adapter *adapter = client->adapter;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA |
-				     I2C_FUNC_SMBUS_WRITE_BYTE_DATA))
+				     I2C_FUNC_SMBUS_WORD_DATA))
 		return -ENODEV;
 
 	/* Determine the chip type. */
@@ -472,6 +508,7 @@ static int nct720x_probe(struct i2c_client *client,
 	struct nct720x_chip_info *chip;
 	struct iio_dev *indio_dev;
 	int ret;
+	u32 tmp;
 
 	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*chip));
 	if (!indio_dev)
@@ -484,6 +521,21 @@ static int nct720x_probe(struct i2c_client *client,
 		chip->type = i2c_match_id(nct720x_id, client)->driver_data;
 
 	chip->vin_max = (chip->type == nct7201) ? NCT7201_VIN_MAX : NCT7202_VIN_MAX;
+
+	ret = of_property_read_u32(client->dev.of_node, "read-vin-data-size", &tmp);
+	if (ret < 0) {
+		pr_err("read-vin-data-size property not found\n");
+		return ret;
+	}
+
+	if (tmp == 8) {
+		chip->use_read_byte_vin = true;
+	} else if (tmp == 16) {
+		chip->use_read_byte_vin = false;
+	} else {
+		pr_err("invalid read-vin-data-size (%d)\n", tmp);
+		return -EINVAL;
+	}
 
 	mutex_init(&chip->access_lock);
 
