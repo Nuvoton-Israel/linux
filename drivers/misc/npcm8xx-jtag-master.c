@@ -791,6 +791,7 @@ static int npcm_jtm_probe(struct platform_device *pdev)
 {
 	struct npcm_jtm *priv;
 	unsigned long clk_hz;
+	u32 val;
 	int irq;
 	int ret;
 
@@ -846,6 +847,11 @@ static int npcm_jtm_probe(struct platform_device *pdev)
 
 	priv->freq = NPCM_JTM_DEFAULT_RATE;
 	npcm_jtm_set_baudrate(priv, NPCM_JTM_DEFAULT_RATE);
+
+	/* Deassert TRST for normal operation */
+	val = readl(priv->base + JTM_CTL);
+	val |= JTM_CTL_TRST;
+	writel(val, priv->base + JTM_CTL);
 
 	ret = jtag_register_device(priv);
 	if (ret) {
