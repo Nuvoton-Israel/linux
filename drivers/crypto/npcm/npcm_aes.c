@@ -565,6 +565,7 @@ static void AES_CryptData(u32 size, u32 *dataIn, u32 *dataOut, bool dma_en)
 	u8 *dataIn_byte = (u8 *)dataIn;
 	u8 *dataOut_byte = (u8 *)dataOut;
 	u32 gdma_timeout, ctrl;
+	volatile u8 wau8;
 
 	aes_print(KERN_NOTICE  "\t\t\t*NPCM-AES: AES_CryptData: size %d\n", size);
 
@@ -634,6 +635,16 @@ static void AES_CryptData(u32 size, u32 *dataIn, u32 *dataOut, bool dma_en)
 
 		//scatterwalk_map_and_copy(dma_to_buf, req->src, 0, req->cryptlen, 0);
 		memcpy(dma_to_buf, dataIn_byte, size);
+		/* 
+		 * ECC DDR to CMA WA
+		 * miss synchronization between the MC and the DDR from
+		 * different ports can cause missing write to the DDR,
+		 * barrier and reading from the last written data ensure
+		 * the write to the DDR.
+		 */
+		asm volatile("dmb sy" ::: "memory");
+		wau8 = dma_to_buf[size-1];
+		asm volatile("dmb sy" ::: "memory");
 
 		iowrite32(dma_to_addr_data, NPCM_GDMA_REG_SRCB(gdma_aes_base, 0));
 		iowrite32(0xF0858500, NPCM_GDMA_REG_DSTB(gdma_aes_base, 0));
