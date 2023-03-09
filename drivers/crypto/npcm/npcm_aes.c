@@ -75,6 +75,7 @@ static struct device *dev_aes;
 #define GDMA_CTRL_GDMA_CTL_BLOCK_MODE		BIT(11)
 #define GDMA_CTRL_ONE_WORD_BIT_LOCATION		BIT(13)
 #define GDMA_CTRL_SOFTREQ			BIT(16)
+#define GDMA_CTRL_TC				BIT(18)
 
 #ifdef SET_REG_FIELD
 #undef SET_REG_FIELD
@@ -649,19 +650,19 @@ static void AES_CryptData(u32 size, u32 *dataIn, u32 *dataOut, bool dma_en)
 		aes_print("** size/16 3 GDMA 0x%X \n", ioread32(NPCM_GDMA_REG_TCNT(gdma_aes_base, 1)));
 
 		iowrite32(GDMA_CTRL_GDMAEN | GDMA_CTRL_GDMAMS0_XREQ | GDMA_CTRL_DAFIX |
-			  GDMA_CTRL_BURST_MODE_BIT_LOACATION | GDMA_CTRL_GDMA_CTL_BLOCK_MODE |
-			  GDMA_CTRL_ONE_WORD_BIT_LOCATION | GDMA_CTRL_SOFTREQ,
+			  GDMA_CTRL_BURST_MODE_BIT_LOACATION |
+			  GDMA_CTRL_ONE_WORD_BIT_LOCATION,
 			  NPCM_GDMA_REG_CTL(gdma_aes_base, 0));
 		iowrite32(GDMA_CTRL_GDMAEN | GDMA_CTRL_GDMAMS1_XREQ | GDMA_CTRL_SAFIX |
-			  GDMA_CTRL_BURST_MODE_BIT_LOACATION | GDMA_CTRL_GDMA_CTL_BLOCK_MODE |
-			  GDMA_CTRL_ONE_WORD_BIT_LOCATION | GDMA_CTRL_SOFTREQ,
+			  GDMA_CTRL_BURST_MODE_BIT_LOACATION |
+			  GDMA_CTRL_ONE_WORD_BIT_LOCATION,
 			  NPCM_GDMA_REG_CTL(gdma_aes_base, 1));
 
 		gdma_timeout = 0;
 		do {
 			ctrl = ioread32(NPCM_GDMA_REG_CTL(gdma_aes_base, 0));
 			gdma_timeout++;
-		} while ((ctrl & GDMA_CTRL_SOFTREQ) && (gdma_timeout < GDMA_TIMEOUT));
+		} while (((ctrl & GDMA_CTRL_TC) == 0) && (gdma_timeout < GDMA_TIMEOUT));
 
 		if (gdma_timeout >= GDMA_TIMEOUT)
 			pr_info(" GDMA Tx failed\n");
@@ -670,18 +671,18 @@ static void AES_CryptData(u32 size, u32 *dataIn, u32 *dataOut, bool dma_en)
 		do {
 			ctrl = ioread32(NPCM_GDMA_REG_CTL(gdma_aes_base, 1));
 			gdma_timeout++;
-		} while ((ctrl & GDMA_CTRL_SOFTREQ) && (gdma_timeout < GDMA_TIMEOUT));
+		} while (((ctrl & GDMA_CTRL_TC) == 0) && (gdma_timeout < GDMA_TIMEOUT));
 
 		if (gdma_timeout >= GDMA_TIMEOUT)
 			pr_info(" GDMA Rx failed\n");
 
 		iowrite32(GDMA_CTRL_GDMAMS0_XREQ | GDMA_CTRL_DAFIX |
-			  GDMA_CTRL_BURST_MODE_BIT_LOACATION | GDMA_CTRL_GDMA_CTL_BLOCK_MODE |
-			  GDMA_CTRL_ONE_WORD_BIT_LOCATION | GDMA_CTRL_SOFTREQ,
+			  GDMA_CTRL_BURST_MODE_BIT_LOACATION |
+			  GDMA_CTRL_ONE_WORD_BIT_LOCATION,
 			  NPCM_GDMA_REG_CTL(gdma_aes_base, 0));
 		iowrite32(GDMA_CTRL_GDMAMS1_XREQ | GDMA_CTRL_SAFIX |
-			  GDMA_CTRL_BURST_MODE_BIT_LOACATION | GDMA_CTRL_GDMA_CTL_BLOCK_MODE |
-			  GDMA_CTRL_ONE_WORD_BIT_LOCATION | GDMA_CTRL_SOFTREQ,
+			  GDMA_CTRL_BURST_MODE_BIT_LOACATION |
+			  GDMA_CTRL_ONE_WORD_BIT_LOCATION,
 			  NPCM_GDMA_REG_CTL(gdma_aes_base, 1));
 
 		aes_print_hex_dump("\t in =>", (void *)dma_to_buf, size);
@@ -1476,6 +1477,12 @@ static int npcm_aes_probe(struct platform_device *pdev)
 	 */
 	if (aes_dev)
 		return -EBUSY;
+
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+	if (ret) {
+		dev_err(dev, "Failed to set 64 bit dma mask %d", ret);
+		return -ENODEV;
+	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
