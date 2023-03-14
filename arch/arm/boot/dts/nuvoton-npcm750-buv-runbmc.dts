@@ -584,8 +584,12 @@
 	status = "okay";
 };
 
-&video {
+&vcd {
 	memory-region = <&video_memory>;
+	status = "okay";
+};
+
+&ece {
 	status = "okay";
 };
 
