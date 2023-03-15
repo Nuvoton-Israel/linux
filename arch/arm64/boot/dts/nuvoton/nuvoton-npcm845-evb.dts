@@ -648,9 +648,13 @@
 			&pin243_slew>;
 };
 
-&video {
+&vcd {
 	status = "okay";
 	memory-region = <&video_memory>;
+};
+
+&ece {
+	status = "okay";
 };
 
 &tip_mbox {

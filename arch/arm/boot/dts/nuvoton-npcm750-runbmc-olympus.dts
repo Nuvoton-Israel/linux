@@ -47,6 +47,19 @@
 		reg = <0 0x40000000>;
 	};
 
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		video_memory: framebuffer@0x1b000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x1b000000 0x01800000>;
+			reusable;
+			linux,cma-default;
+		};
+	};
+
 	iio-hwmon {
 		compatible = "iio-hwmon";
 		io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>,
@@ -936,6 +949,15 @@
 };
 
 &spi1 {
+	status = "okay";
+};
+
+&vcd {
+	memory-region = <&video_memory>;
+	status = "okay";
+};
+
+&ece {
 	status = "okay";
 };
 
