@@ -291,16 +291,21 @@
 			interrupts = <0 23 4>;
 		};
 
-		video: video@f0810000 {
-			compatible = "nuvoton,npcm750-video";
-			reg = <0xf0810000 0x10000>, <0xf0820000 0x2000>;
-			reg-names = "vcd", "ece";
+		vcd: vcd@f0810000 {
+			compatible = "nuvoton,npcm750-vcd";
+			reg = <0xf0810000 0x10000>;
 			interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>;
-			resets = <&rstc NPCM7XX_RESET_IPSRST2 NPCM7XX_RESET_VCD>,
-				 <&rstc NPCM7XX_RESET_IPSRST2 NPCM7XX_RESET_ECE>;
-			reset-names = "vcd", "ece";
-			gcr-syscon = <&gcr>;
-			gfxi-syscon = <&gfxi>;
+			resets = <&rstc NPCM7XX_RESET_IPSRST2 NPCM7XX_RESET_VCD>;
+			nuvoton,sysgcr = <&gcr>;
+			nuvoton,sysgfxi = <&gfxi>;
+			nuvoton,ece = <&ece>;
+			status = "disabled";
+		};
+
+		ece: video-codec@f0820000 {
+			compatible = "nuvoton,npcm750-ece";
+			reg = <0xf0820000 0x2000>;
+			resets = <&rstc NPCM7XX_RESET_IPSRST2 NPCM7XX_RESET_ECE>;
 			status = "disabled";
 		};
 

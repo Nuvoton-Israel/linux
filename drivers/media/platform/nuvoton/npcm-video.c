@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for Video Capture/Differentiation Engine (VCD) and Encoding
  * Compression Engine (ECE) present on Nuvoton NPCM SoCs.
@@ -20,6 +20,7 @@
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/of_platform.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
@@ -39,9 +40,9 @@
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-dma-contig.h>
 #include <uapi/linux/npcm-video.h>
+#include "npcm-regs.h"
 
 #define DEVICE_NAME			"npcm-video"
-
 #define MAX_FRAME_RATE			60
 #define MAX_WIDTH			1920
 #define MAX_HEIGHT			1200
@@ -52,169 +53,6 @@
 #define RECT_W				16
 #define RECT_H				16
 #define BITMAP_SIZE			32
-
-#define VCD_MODULE_NAME			"vcd"
-#define ECE_MODULE_NAME			"ece"
-
-/* VCD Registers */
-#define VCD_DIFF_TBL			0x0000
-#define VCD_FBA_ADR			0x8000
-#define VCD_FBB_ADR			0x8004
-
-#define VCD_FB_LP			0x8008
-#define  VCD_FBA_LP			GENMASK(15, 0)
-#define  VCD_FBB_LP			GENMASK(31, 16)
-
-#define VCD_CAP_RES			0x800c
-#define  VCD_CAP_RES_VERT_RES		GENMASK(10, 0)
-#define  VCD_CAP_RES_HOR_RES		GENMASK(26, 16)
-
-#define VCD_MODE			0x8014
-#define  VCD_MODE_VCDE			BIT(0)
-#define  VCD_MODE_CM565			BIT(1)
-#define  VCD_MODE_IDBC			BIT(3)
-#define  VCD_MODE_COLOR_CNVRT		GENMASK(5, 4)
-#define   VCD_MODE_COLOR_CNVRT_NO_CNVRT	0
-#define   VCD_MODE_COLOR_CNVRT_RGB_222	1
-#define   VCD_MODE_COLOR_CNVRT_666_MODE	2
-#define   VCD_MODE_COLOR_CNVRT_RGB_888	3
-#define  VCD_MODE_KVM_BW_SET		BIT(16)
-
-#define VCD_CMD				0x8018
-#define  VCD_CMD_GO			BIT(0)
-#define  VCD_CMD_RST			BIT(1)
-#define  VCD_CMD_OPERATION		GENMASK(6, 4)
-#define   VCD_CMD_OPERATION_CAPTURE	0
-#define   VCD_CMD_OPERATION_COMPARE	2
-
-#define	VCD_STAT			0x801c
-#define	 VCD_STAT_DONE			BIT(0)
-#define	 VCD_STAT_IFOT			BIT(2)
-#define	 VCD_STAT_IFOR			BIT(3)
-#define	 VCD_STAT_BUSY			BIT(30)
-#define	VCD_STAT_CLEAR			0x3fff
-
-#define VCD_INTE			0x8020
-#define  VCD_INTE_DONE_IE		BIT(0)
-#define  VCD_INTE_IFOT_IE		BIT(2)
-#define  VCD_INTE_IFOR_IE		BIT(3)
-
-#define VCD_RCHG			0x8028
-#define VCD_RCHG_TIM_PRSCL		GENMASK(12, 9)
-
-#define VCD_FIFO			0x805c
-#define  VCD_FIFO_TH			0x100350ff
-
-#define VCD_MAX_SRC_BUFFER_SIZE		0x500000 /* 1920 x 1200 x 2 bpp */
-#define VCD_KVM_BW_PCLK			120000000UL
-#define VCD_BUSY_TIMEOUT_US		300000
-
-/* ECE Registers */
-#define ECE_DDA_CTRL			0x0000
-#define  ECE_DDA_CTRL_ECEEN		BIT(0)
-#define  ECE_DDA_CTRL_INTEN		BIT(8)
-
-#define ECE_DDA_STS			0x0004
-#define  ECE_DDA_STS_CDREADY		BIT(8)
-#define  ECE_DDA_STS_ACDRDY		BIT(10)
-
-#define ECE_FBR_BA			0x0008
-#define ECE_ED_BA			0x000c
-#define ECE_RECT_XY			0x0010
-
-#define ECE_RECT_DIMEN			0x0014
-#define  ECE_RECT_DIMEN_WR		GENMASK(10, 0)
-#define  ECE_RECT_DIMEN_WLTR		GENMASK(14, 11)
-#define  ECE_RECT_DIMEN_HR		GENMASK(26, 16)
-#define  ECE_RECT_DIMEN_HLTR		GENMASK(30, 27)
-
-#define ECE_RESOL			0x001c
-#define  ECE_RESOL_FB_LP_512		0
-#define  ECE_RESOL_FB_LP_1024		1
-#define  ECE_RESOL_FB_LP_2048		2
-#define  ECE_RESOL_FB_LP_2560		3
-#define  ECE_RESOL_FB_LP_4096		4
-
-#define ECE_HEX_CTRL			0x0040
-#define  ECE_HEX_CTRL_ENCDIS		BIT(0)
-#define  ECE_HEX_CTRL_ENC_GAP		GENMASK(12, 8)
-
-#define ECE_HEX_RECT_OFFSET		0x0048
-#define  ECE_HEX_RECT_OFFSET_MASK	GENMASK(22, 0)
-
-#define ECE_TILE_W			16
-#define ECE_TILE_H			16
-#define ECE_POLL_TIMEOUT_US		300000
-
-/* GCR Registers */
-#define INTCR				0x3c
-#define  INTCR_GFXIFDIS			GENMASK(9, 8)
-#define  INTCR_DEHS			BIT(27)
-
-#define INTCR2				0x60
-#define  INTCR2_GIRST2			BIT(2)
-#define  INTCR2_GIHCRST			BIT(5)
-#define  INTCR2_GIVCRST			BIT(6)
-
-#define INTCR3				0x9c
-#define  INTCR3_GMMAP			GENMASK(10, 8)
-#define   INTCR3_GMMAP_128MB		0
-#define   INTCR3_GMMAP_256MB		1
-#define   INTCR3_GMMAP_512MB		2
-#define   INTCR3_GMMAP_1GB		3
-#define   INTCR3_GMMAP_2GB		4
-
-#define INTCR4				0xc0
-#define  INTCR4_GMMAP			GENMASK(22, 16)
-#define  INTCR4_GMMAP_512MB		0x1f
-#define  INTCR4_GMMAP_512MB_ECC		0x1b
-#define  INTCR4_GMMAP_1GB		0x3f
-#define  INTCR4_GMMAP_1GB_ECC		0x37
-#define  INTCR4_GMMAP_2GB		0x7f
-#define  INTCR4_GMMAP_2GB_ECC		0x6f
-
-#define ADDR_GMMAP_128MB		0x07000000
-#define ADDR_GMMAP_256MB		0x0f000000
-#define ADDR_GMMAP_512MB		0x1f000000
-#define ADDR_GMMAP_512MB_ECC		0x1b000000
-#define ADDR_GMMAP_1GB			0x3f000000
-#define ADDR_GMMAP_1GB_ECC		0x37000000
-#define ADDR_GMMAP_2GB			0x7f000000
-#define ADDR_GMMAP_2GB_ECC		0x6f000000
-
-#define GMMAP_LENGTH			0xc00000 /* Total 16MB, but 4MB preserved*/
-
-#define MFSEL1				0x0c
-#define  MFSEL1_DVH1SEL			BIT(27)
-
-/* GFXI Register */
-#define DISPST				0x00
-#define  DISPST_HSCROFF			BIT(1)
-#define  DISPST_MGAMODE			BIT(7)
-
-#define HVCNTL				0x10
-#define  HVCNTL_MASK			GENMASK(7, 0)
-
-#define HVCNTH				0x14
-#define  HVCNTH_MASK			GENMASK(2, 0)
-
-#define VVCNTL				0x20
-#define  VVCNTL_MASK			GENMASK(7, 0)
-
-#define VVCNTH				0x24
-#define  VVCNTH_MASK			GENMASK(2, 0)
-
-#define GPLLINDIV			0x40
-#define  GPLLINDIV_MASK			GENMASK(5, 0)
-#define  GPLLINDIV_GPLLFBDV8		BIT(7)
-
-#define GPLLFBDIV			0x44
-#define  GPLLFBDIV_MASK			GENMASK(7, 0)
-
-#define GPLLST				0x48
-#define  GPLLST_PLLOTDIV1		GENMASK(2, 0)
-#define  GPLLST_PLLOTDIV2		GENMASK(5, 3)
-#define  GPLLST_GPLLFBDV109		GENMASK(7, 6)
 
 struct npcm_video_addr {
 	size_t size;
@@ -270,13 +108,13 @@ struct npcm_video {
 	struct v4l2_pix_format pix_fmt;
 	struct v4l2_bt_timings active_timings;
 	struct v4l2_bt_timings detected_timings;
-	u32 v4l2_input_status;
+	unsigned int v4l2_input_status;
 	struct vb2_queue queue;
 	struct video_device vdev;
-	struct mutex video_lock;	/* v4l2 and videobuf2 lock */
+	struct mutex video_lock; /* v4l2 and videobuf2 lock */
 
 	struct list_head buffers;
-	spinlock_t lock;		/* buffer list lock */
+	spinlock_t lock; /* buffer list lock */
 	unsigned long flags;
 	unsigned int sequence;
 
@@ -287,14 +125,14 @@ struct npcm_video {
 
 	unsigned int frame_rate;
 	unsigned int vb_index;
-	u32 bytesperline;
-	u8 bytesperpixel;
-	u32 rect_cnt;
-	u8 num_buffers;
+	unsigned int bytesperline;
+	unsigned int bytesperpixel;
+	unsigned int rect_cnt;
+	unsigned int num_buffers;
 	struct list_head *list;
-	u32 *rect;
-	int ctrl_cmd;
-	int op_cmd;
+	unsigned int *rect;
+	unsigned int ctrl_cmd;
+	unsigned int op_cmd;
 };
 
 #define to_npcm_video(x) container_of((x), struct npcm_video, v4l2_dev)
@@ -318,8 +156,7 @@ static const struct v4l2_dv_timings_cap npcm_video_timings_cap = {
 
 static DECLARE_BITMAP(bitmap, BITMAP_SIZE);
 
-static void npcm_video_ece_prepend_rect_header(u8 *addr, u16 x, u16 y, u16 w,
-					       u16 h)
+static void npcm_video_ece_prepend_rect_header(void *addr, u16 x, u16 y, u16 w, u16 h)
 {
 	__be16 x_pos = cpu_to_be16(x);
 	__be16 y_pos = cpu_to_be16(y);
@@ -335,15 +172,15 @@ static void npcm_video_ece_prepend_rect_header(u8 *addr, u16 x, u16 y, u16 w,
 }
 
 static unsigned int npcm_video_ece_get_ed_size(struct npcm_video *video,
-					       u32 offset, void *addr)
+					       unsigned int offset, void *addr)
 {
 	struct regmap *ece = video->ece.regmap;
-	u32 size, gap, val;
+	unsigned int size, gap, val;
 	int ret;
 
 	ret = regmap_read_poll_timeout(ece, ECE_DDA_STS, val,
-				       (val & ECE_DDA_STS_CDREADY),
-				       0, ECE_POLL_TIMEOUT_US);
+				       (val & ECE_DDA_STS_CDREADY), 0,
+				       ECE_POLL_TIMEOUT_US);
 
 	if (ret) {
 		dev_warn(video->dev, "Wait for ECE_DDA_STS_CDREADY timeout\n");
@@ -351,7 +188,6 @@ static unsigned int npcm_video_ece_get_ed_size(struct npcm_video *video,
 	}
 
 	size = readl(addr + offset);
-
 	regmap_read(ece, ECE_HEX_CTRL, &val);
 	gap = FIELD_GET(ECE_HEX_CTRL_ENC_GAP, val);
 
@@ -361,22 +197,18 @@ static unsigned int npcm_video_ece_get_ed_size(struct npcm_video *video,
 	return size + gap;
 }
 
-static void npcm_video_ece_enc_rect(struct npcm_video *video, u32 r_off_x,
-				    u32 r_off_y, u32 r_w, u32 r_h)
+static void npcm_video_ece_enc_rect(struct npcm_video *video,
+				    unsigned int r_off_x, unsigned int r_off_y,
+				    unsigned int r_w, unsigned int r_h)
 {
 	struct regmap *ece = video->ece.regmap;
-	u32 rect_offset = (r_off_y * video->bytesperline) + (r_off_x * 2);
-	u32 temp;
-	u32 w_tile;
-	u32 h_tile;
-	u32 w_size = ECE_TILE_W;
-	u32 h_size = ECE_TILE_H;
+	unsigned int rect_offset = (r_off_y * video->bytesperline) + (r_off_x * 2);
+	unsigned int w_size = ECE_TILE_W, h_size = ECE_TILE_H;
+	unsigned int temp, w_tile, h_tile;
 
 	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_ECEEN, 0);
-	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_ECEEN,
-			   ECE_DDA_CTRL_ECEEN);
-	regmap_write(ece, ECE_DDA_STS, ECE_DDA_STS_CDREADY |
-		     ECE_DDA_STS_ACDRDY);
+	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_ECEEN, ECE_DDA_CTRL_ECEEN);
+	regmap_write(ece, ECE_DDA_STS, ECE_DDA_STS_CDREADY | ECE_DDA_STS_ACDRDY);
 	regmap_write(ece, ECE_RECT_XY, rect_offset);
 
 	w_tile = r_w / ECE_TILE_W;
@@ -386,7 +218,6 @@ static void npcm_video_ece_enc_rect(struct npcm_video *video, u32 r_off_x,
 		w_tile += 1;
 		w_size = r_w % ECE_TILE_W;
 	}
-
 	if (r_h % ECE_TILE_H || !h_tile) {
 		h_tile += 1;
 		h_size = r_h % ECE_TILE_H;
@@ -400,10 +231,10 @@ static void npcm_video_ece_enc_rect(struct npcm_video *video, u32 r_off_x,
 	regmap_write(ece, ECE_RECT_DIMEN, temp);
 }
 
-static u32 npcm_video_ece_read_rect_offset(struct npcm_video *video)
+static unsigned int npcm_video_ece_read_rect_offset(struct npcm_video *video)
 {
 	struct regmap *ece = video->ece.regmap;
-	u32 offset;
+	unsigned int offset;
 
 	regmap_read(ece, ECE_HEX_RECT_OFFSET, &offset);
 	return FIELD_GET(ECE_HEX_RECT_OFFSET_MASK, offset);
@@ -413,10 +244,10 @@ static u32 npcm_video_ece_read_rect_offset(struct npcm_video *video)
  * Set the line pitch (in bytes) for the frame buffers.
  * Can be on of those values: 512, 1024, 2048, 2560 or 4096 bytes.
  */
-static void npcm_video_ece_set_lp(struct npcm_video *video, u32 pitch)
+static void npcm_video_ece_set_lp(struct npcm_video *video, unsigned int pitch)
 {
-	u32 lp;
 	struct regmap *ece = video->ece.regmap;
+	unsigned int lp;
 
 	switch (pitch) {
 	case 512:
@@ -441,21 +272,23 @@ static void npcm_video_ece_set_lp(struct npcm_video *video, u32 pitch)
 	regmap_write(ece, ECE_RESOL, lp);
 }
 
-static void npcm_video_ece_set_fb_addr(struct npcm_video *video, u32 buffer)
+static inline void npcm_video_ece_set_fb_addr(struct npcm_video *video,
+					      unsigned int buffer)
 {
 	struct regmap *ece = video->ece.regmap;
 
 	regmap_write(ece, ECE_FBR_BA, buffer);
 }
 
-static void npcm_video_ece_set_enc_dba(struct npcm_video *video, u32 addr)
+static inline void npcm_video_ece_set_enc_dba(struct npcm_video *video,
+					      unsigned int addr)
 {
 	struct regmap *ece = video->ece.regmap;
 
 	regmap_write(ece, ECE_ED_BA, addr);
 }
 
-static void npcm_video_ece_clear_rect_offset(struct npcm_video *video)
+static inline void npcm_video_ece_clear_rect_offset(struct npcm_video *video)
 {
 	struct regmap *ece = video->ece.regmap;
 
@@ -467,10 +300,8 @@ static void npcm_video_ece_ctrl_reset(struct npcm_video *video)
 	struct regmap *ece = video->ece.regmap;
 
 	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_ECEEN, 0);
-	regmap_update_bits(ece, ECE_HEX_CTRL, ECE_HEX_CTRL_ENCDIS,
-			   ECE_HEX_CTRL_ENCDIS);
-	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_ECEEN,
-			   ECE_DDA_CTRL_ECEEN);
+	regmap_update_bits(ece, ECE_HEX_CTRL, ECE_HEX_CTRL_ENCDIS, ECE_HEX_CTRL_ENCDIS);
+	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_ECEEN, ECE_DDA_CTRL_ECEEN);
 	regmap_update_bits(ece, ECE_HEX_CTRL, ECE_HEX_CTRL_ENCDIS, 0);
 
 	npcm_video_ece_clear_rect_offset(video);
@@ -488,25 +319,20 @@ static void npcm_video_ece_ip_reset(struct npcm_video *video)
 	usleep_range(10, 20);
 }
 
-static int npcm_video_ece_init(struct npcm_video *video)
+static inline void npcm_video_ece_init(struct npcm_video *video)
 {
 	npcm_video_ece_ip_reset(video);
 	npcm_video_ece_ctrl_reset(video);
-
-	return 0;
 }
 
-static int npcm_video_ece_stop(struct npcm_video *video)
+static void npcm_video_ece_stop(struct npcm_video *video)
 {
 	struct regmap *ece = video->ece.regmap;
 
 	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_ECEEN, 0);
 	regmap_update_bits(ece, ECE_DDA_CTRL, ECE_DDA_CTRL_INTEN, 0);
-	regmap_update_bits(ece, ECE_HEX_CTRL, ECE_HEX_CTRL_ENCDIS,
-			   ECE_HEX_CTRL_ENCDIS);
+	regmap_update_bits(ece, ECE_HEX_CTRL, ECE_HEX_CTRL_ENCDIS, ECE_HEX_CTRL_ENCDIS);
 	npcm_video_ece_clear_rect_offset(video);
-
-	return 0;
 }
 
 static bool npcm_video_alloc_buf(struct npcm_video *video,
@@ -515,9 +341,7 @@ static bool npcm_video_alloc_buf(struct npcm_video *video,
 	if (size > VCD_MAX_SRC_BUFFER_SIZE)
 		size = VCD_MAX_SRC_BUFFER_SIZE;
 
-	addr->virt = dma_alloc_coherent(video->dev, size, &addr->dma,
-					GFP_KERNEL);
-
+	addr->virt = dma_alloc_coherent(video->dev, size, &addr->dma, GFP_KERNEL);
 	if (!addr->virt)
 		return false;
 
@@ -544,16 +368,15 @@ static void npcm_video_free_diff_table(struct npcm_video *video)
 		head = &video->list[i];
 		list_for_each_safe(pos, nx, head) {
 			tmp = list_entry(pos, struct rect_list, list);
-			if (tmp) {
-				list_del(&tmp->list);
-				kfree(tmp);
-			}
+			list_del(&tmp->list);
+			kfree(tmp);
 		}
 	}
 }
 
-static int npcm_video_add_rect(struct npcm_video *video, unsigned int index,
-			       u32 x, u32 y, u32 w, u32 h)
+static unsigned int npcm_video_add_rect(struct npcm_video *video, unsigned int index,
+					unsigned int x, unsigned int y,
+					unsigned int w, unsigned int h)
 {
 	struct list_head *head = &video->list[index];
 	struct rect_list *list = NULL;
@@ -577,10 +400,8 @@ static void npcm_video_merge_rect(struct npcm_video *video,
 				  struct rect_list_info *info)
 {
 	struct list_head *head = info->head;
-	struct rect_list *list = info->list;
-	struct rect_list *first = info->first;
-	struct v4l2_rect *r = &list->clip.c;
-	struct v4l2_rect *f = &first->clip.c;
+	struct rect_list *list = info->list, *first = info->first;
+	struct v4l2_rect *r = &list->clip.c, *f = &first->clip.c;
 
 	if (!first) {
 		first = list;
@@ -635,13 +456,14 @@ static struct rect_list *npcm_video_new_rect(struct npcm_video *video,
 }
 
 static int npcm_video_find_rect(struct npcm_video *video,
-				struct rect_list_info *info,
-				unsigned int offset)
+				struct rect_list_info *info, unsigned int offset)
 {
 	if (offset < info->tile_perline) {
 		info->list = npcm_video_new_rect(video, offset, info->index);
-		if (!info->list)
+		if (!info->list) {
+			dev_err(video->dev, "Failed to allocate rect_list\n");
 			return -ENOMEM;
+		}
 
 		npcm_video_merge_rect(video, info);
 	}
@@ -651,10 +473,9 @@ static int npcm_video_find_rect(struct npcm_video *video,
 static int npcm_video_build_table(struct npcm_video *video,
 				  struct rect_list_info *info)
 {
-	int ret;
-	unsigned int j, bit;
-	u32 value;
 	struct regmap *vcd = video->vcd_regmap;
+	unsigned int j, bit, value;
+	int ret;
 
 	for (j = 0; j < info->offset_perline; j += 4) {
 		regmap_read(vcd, VCD_DIFF_TBL + (j + info->index), &value);
@@ -663,7 +484,7 @@ static int npcm_video_build_table(struct npcm_video *video,
 
 		for_each_set_bit(bit, bitmap, BITMAP_SIZE) {
 			ret = npcm_video_find_rect(video, info, bit + (j << 3));
-			if (ret < 0)
+			if (ret)
 				return ret;
 		}
 	}
@@ -671,13 +492,12 @@ static int npcm_video_build_table(struct npcm_video *video,
 	return info->tile_perline;
 }
 
-static int npcm_video_get_rect_list(struct npcm_video *video,
-				    unsigned int index)
+static void npcm_video_get_rect_list(struct npcm_video *video, unsigned int index)
 {
 	struct v4l2_bt_timings *act = &video->active_timings;
 	struct rect_list_info info;
+	unsigned int tile_cnt = 0, mod;
 	int ret = 0;
-	unsigned int mod, tile_cnt = 0;
 
 	memset(&info, 0, sizeof(struct rect_list_info));
 	info.head = &video->list[index];
@@ -704,59 +524,37 @@ static int npcm_video_get_rect_list(struct npcm_video *video,
 	do {
 		ret = npcm_video_build_table(video, &info);
 		if (ret < 0)
-			return ret;
+			return;
+
 		tile_cnt += ret;
 	} while (tile_cnt < info.tile_size);
-
-	return ret;
 }
 
-static unsigned int npcm_video_get_rect_count(struct npcm_video *video)
-{
-	struct list_head *head, *pos, *nx;
-	struct rect_list *tmp;
-	unsigned int count;
-
-	if (video->list && video->rect) {
-		count = video->rect[video->vb_index];
-		head = &video->list[video->vb_index];
-
-		list_for_each_safe(pos, nx, head) {
-			tmp = list_entry(pos, struct rect_list, list);
-			list_del(&tmp->list);
-			kfree(tmp);
-		}
-	}
-
-	return count;
-}
-
-static u8 npcm_video_is_mga(struct npcm_video *video)
+static unsigned int npcm_video_is_mga(struct npcm_video *video)
 {
 	struct regmap *gfxi = video->gfx_regmap;
-	u32 dispst;
+	unsigned int dispst;
 
 	regmap_read(gfxi, DISPST, &dispst);
 	return ((dispst & DISPST_MGAMODE) == DISPST_MGAMODE);
 }
 
-static u32 npcm_video_hres(struct npcm_video *video)
+static unsigned int npcm_video_hres(struct npcm_video *video)
 {
 	struct regmap *gfxi = video->gfx_regmap;
-	u32 hvcnth, hvcntl, apb_hor_res;
+	unsigned int hvcnth, hvcntl, apb_hor_res;
 
 	regmap_read(gfxi, HVCNTH, &hvcnth);
 	regmap_read(gfxi, HVCNTL, &hvcntl);
-	apb_hor_res = (((hvcnth & HVCNTH_MASK) << 8) +
-		       (hvcntl & HVCNTL_MASK) + 1);
+	apb_hor_res = (((hvcnth & HVCNTH_MASK) << 8) + (hvcntl & HVCNTL_MASK) + 1);
 
 	return apb_hor_res;
 }
 
-static u32 npcm_video_vres(struct npcm_video *video)
+static unsigned int npcm_video_vres(struct npcm_video *video)
 {
 	struct regmap *gfxi = video->gfx_regmap;
-	u32 vvcnth, vvcntl, apb_ver_res;
+	unsigned int vvcnth, vvcntl, apb_ver_res;
 
 	regmap_read(gfxi, VVCNTH, &vvcnth);
 	regmap_read(gfxi, VVCNTL, &vvcntl);
@@ -766,11 +564,11 @@ static u32 npcm_video_vres(struct npcm_video *video)
 	return apb_ver_res;
 }
 
-static int npcm_video_capres(struct npcm_video *video, u32 hor_res,
-			     u32 vert_res)
+static int npcm_video_capres(struct npcm_video *video, unsigned int hor_res,
+			     unsigned int vert_res)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	u32 res, cap_res;
+	unsigned int res, cap_res;
 
 	if (hor_res > MAX_WIDTH || vert_res > MAX_HEIGHT)
 		return -EINVAL;
@@ -802,64 +600,51 @@ static void npcm_video_vcd_ip_reset(struct npcm_video *video)
 static void npcm_video_vcd_state_machine_reset(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	u32 stat;
+	unsigned int stat;
 	int ret;
 
 	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_VCDE, 0);
-
 	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_IDBC, 0);
-
 	regmap_update_bits(vcd, VCD_CMD, VCD_CMD_RST, VCD_CMD_RST);
 
-	ret = regmap_read_poll_timeout(vcd, VCD_STAT, stat,
-				       (stat & VCD_STAT_DONE), 0,
-				       ECE_POLL_TIMEOUT_US);
-
+	ret = regmap_read_poll_timeout(vcd, VCD_STAT, stat, (stat & VCD_STAT_DONE),
+				       0, ECE_POLL_TIMEOUT_US);
 	if (ret) {
 		dev_warn(video->dev, "Wait for VCD_STAT_DONE timeout\n");
 		return;
 	}
 
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
-
 	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_VCDE, VCD_MODE_VCDE);
-
 	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_IDBC, VCD_MODE_IDBC);
 }
 
-static int npcm_video_gfx_reset(struct npcm_video *video)
+static void npcm_video_gfx_reset(struct npcm_video *video)
 {
 	struct regmap *gcr = video->gcr_regmap;
 
 	regmap_update_bits(gcr, INTCR2, INTCR2_GIRST2, INTCR2_GIRST2);
-
 	npcm_video_vcd_state_machine_reset(video);
-
 	regmap_update_bits(gcr, INTCR2, INTCR2_GIRST2, 0);
-
-	return 0;
 }
 
-static void npcm_video_kvm_bw(struct npcm_video *video, u8 bandwidth)
+static void npcm_video_kvm_bw(struct npcm_video *video, bool set_bw)
 {
 	struct regmap *vcd = video->vcd_regmap;
 
-	if (!npcm_video_is_mga(video))
-		bandwidth = 1;
-
-	if (bandwidth)
+	if (set_bw || !npcm_video_is_mga(video))
 		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_KVM_BW_SET,
 				   VCD_MODE_KVM_BW_SET);
 	else
 		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_KVM_BW_SET, 0);
 }
 
-static u32 npcm_video_pclk(struct npcm_video *video)
+static unsigned int npcm_video_pclk(struct npcm_video *video)
 {
 	struct regmap *gfxi = video->gfx_regmap;
-	u32 tmp, pllfbdiv, pllinotdiv, gpllfbdiv;
-	u8 gpllfbdv109, gpllfbdv8, gpllindiv;
-	u8 gpllst_pllotdiv1, gpllst_pllotdiv2;
+	unsigned int tmp, pllfbdiv, pllinotdiv, gpllfbdiv;
+	unsigned int gpllfbdv109, gpllfbdv8, gpllindiv;
+	unsigned int gpllst_pllotdiv1, gpllst_pllotdiv2;
 
 	regmap_read(gfxi, GPLLST, &tmp);
 	gpllfbdv109 = FIELD_GET(GPLLST_GPLLFBDV109, tmp);
@@ -881,13 +666,12 @@ static u32 npcm_video_pclk(struct npcm_video *video)
 	return ((pllfbdiv * 25000) / pllinotdiv) * 1000;
 }
 
-static int npcm_video_get_bpp(struct npcm_video *video)
+static unsigned int npcm_video_get_bpp(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	u32 mode, color_cnvr;
+	unsigned int mode, color_cnvr;
 
 	regmap_read(vcd, VCD_MODE, &mode);
-
 	color_cnvr = FIELD_GET(VCD_MODE_COLOR_CNVRT, mode);
 
 	switch (color_cnvr) {
@@ -906,10 +690,10 @@ static int npcm_video_get_bpp(struct npcm_video *video)
  * Pitch must be a power of 2, >= linebytes,
  * at least 512, and no more than 4096.
  */
-static void npcm_video_set_linepitch(struct npcm_video *video, u32 linebytes)
+static void npcm_video_set_linepitch(struct npcm_video *video, unsigned int linebytes)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	u32 pitch = MIN_LP;
+	unsigned int pitch = MIN_LP;
 
 	while ((pitch < linebytes) && (pitch < MAX_LP))
 		pitch *= 2;
@@ -918,37 +702,32 @@ static void npcm_video_set_linepitch(struct npcm_video *video, u32 linebytes)
 		     FIELD_PREP(VCD_FBB_LP, pitch));
 }
 
-static u32 npcm_video_get_linepitch(struct npcm_video *video)
+static unsigned int npcm_video_get_linepitch(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	u32 linepitch;
+	unsigned int linepitch;
 
 	regmap_read(vcd, VCD_FB_LP, &linepitch);
-
 	return FIELD_GET(VCD_FBA_LP, linepitch);
 }
 
-static int npcm_video_command(struct npcm_video *video, u32 value)
+static void npcm_video_command(struct npcm_video *video, unsigned int value)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	u32 cmd;
+	unsigned int cmd;
 
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
-
 	regmap_read(vcd, VCD_CMD, &cmd);
 	cmd |= FIELD_PREP(VCD_CMD_OPERATION, value);
 
 	regmap_write(vcd, VCD_CMD, cmd);
 	regmap_update_bits(vcd, VCD_CMD, VCD_CMD_GO, VCD_CMD_GO);
 	video->op_cmd = value;
-
-	return 0;
 }
 
-static int npcm_video_init_reg(struct npcm_video *video)
+static void npcm_video_init_reg(struct npcm_video *video)
 {
-	struct regmap *gcr = video->gcr_regmap;
-	struct regmap *vcd = video->vcd_regmap;
+	struct regmap *gcr = video->gcr_regmap, *vcd = video->vcd_regmap;
 
 	/* Selects Data Enable */
 	regmap_update_bits(gcr, INTCR, INTCR_DEHS, 0);
@@ -974,18 +753,15 @@ static int npcm_video_init_reg(struct npcm_video *video)
 	regmap_update_bits(vcd, VCD_MODE, 0xffffffff,
 			   VCD_MODE_VCDE | VCD_MODE_CM565 |
 			   VCD_MODE_IDBC | VCD_MODE_KVM_BW_SET);
-
 	regmap_write(vcd, VCD_RCHG, FIELD_PREP(VCD_RCHG_TIM_PRSCL, 0xf));
-
-	return 0;
 }
 
 static int npcm_video_start_frame(struct npcm_video *video)
 {
-	unsigned long flags;
 	struct npcm_video_buffer *buf;
 	struct regmap *vcd = video->vcd_regmap;
-	u32 val;
+	unsigned long flags;
+	unsigned int val;
 	int ret;
 
 	if (video->v4l2_input_status) {
@@ -993,10 +769,8 @@ static int npcm_video_start_frame(struct npcm_video *video)
 		return 0;
 	}
 
-	ret = regmap_read_poll_timeout(vcd, VCD_STAT, val,
-				       !(val & VCD_STAT_BUSY), 1000,
-				       VCD_BUSY_TIMEOUT_US);
-
+	ret = regmap_read_poll_timeout(vcd, VCD_STAT, val, !(val & VCD_STAT_BUSY),
+				       1000, VCD_BUSY_TIMEOUT_US);
 	if (ret) {
 		dev_err(video->dev, "Wait for VCD_STAT_BUSY timeout\n");
 		return -EBUSY;
@@ -1015,11 +789,9 @@ static int npcm_video_start_frame(struct npcm_video *video)
 	spin_unlock_irqrestore(&video->lock, flags);
 
 	npcm_video_vcd_state_machine_reset(video);
-
 	regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
 			   VCD_INTE_IFOR_IE, VCD_INTE_DONE_IE |
 			   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE);
-
 	npcm_video_command(video, video->ctrl_cmd);
 
 	return 0;
@@ -1028,21 +800,21 @@ static int npcm_video_start_frame(struct npcm_video *video)
 static void npcm_video_bufs_done(struct npcm_video *video,
 				 enum vb2_buffer_state state)
 {
-	unsigned long flags;
 	struct npcm_video_buffer *buf;
+	unsigned long flags;
 
 	spin_lock_irqsave(&video->lock, flags);
 	list_for_each_entry(buf, &video->buffers, link)
 		vb2_buffer_done(&buf->vb.vb2_buf, state);
+
 	INIT_LIST_HEAD(&video->buffers);
 	spin_unlock_irqrestore(&video->lock, flags);
 }
 
-static void npcm_video_get_diff_rect(struct npcm_video *video,
-				     unsigned int index)
+static void npcm_video_get_diff_rect(struct npcm_video *video, unsigned int index)
 {
-	u32 width = video->active_timings.width;
-	u32 height = video->active_timings.height;
+	unsigned int width = video->active_timings.width;
+	unsigned int height = video->active_timings.height;
 
 	if (video->op_cmd != VCD_CMD_OPERATION_CAPTURE) {
 		video->rect_cnt = 0;
@@ -1054,108 +826,13 @@ static void npcm_video_get_diff_rect(struct npcm_video *video,
 	}
 }
 
-static irqreturn_t npcm_video_irq(int irq, void *arg)
-{
-	struct npcm_video *video = arg;
-	struct regmap *vcd = video->vcd_regmap;
-	struct npcm_video_buffer *buf;
-	struct rect_list *rect_list;
-	struct v4l2_rect *rect;
-	u32 status, ed_offset;
-	void *addr;
-	dma_addr_t vb_dma_addr;
-	unsigned int index, ed_size, total_size;
-
-	regmap_read(vcd, VCD_STAT, &status);
-	dev_dbg(video->dev, "VCD irq status 0x%x\n", status);
-
-	regmap_write(vcd, VCD_INTE, 0);
-	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
-
-	if (test_bit(VIDEO_STOPPED, &video->flags) ||
-	    !test_bit(VIDEO_STREAMING, &video->flags)) {
-		clear_bit(VIDEO_FRAME_INPRG, &video->flags);
-		return IRQ_NONE;
-	}
-
-	if (status & VCD_STAT_DONE) {
-		spin_lock(&video->lock);
-		buf = list_first_entry_or_null(&video->buffers,
-					       struct npcm_video_buffer,
-					       link);
-
-		if (!buf) {
-			spin_unlock(&video->lock);
-			clear_bit(VIDEO_FRAME_INPRG, &video->flags);
-			return IRQ_NONE;
-		}
-
-		addr = vb2_plane_vaddr(&buf->vb.vb2_buf, 0);
-		vb_dma_addr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
-		index = buf->vb.vb2_buf.index;
-
-		npcm_video_ece_ctrl_reset(video);
-		npcm_video_ece_clear_rect_offset(video);
-
-		npcm_video_ece_set_fb_addr(video, video->src.dma);
-
-		/* Set base address of encoded data to video buffer */
-		npcm_video_ece_set_enc_dba(video, vb_dma_addr);
-
-		npcm_video_ece_set_lp(video, video->bytesperline);
-		npcm_video_get_diff_rect(video, index);
-
-		total_size = 0;
-
-		list_for_each_entry(rect_list, &video->list[index], list) {
-			rect = &rect_list->clip.c;
-			ed_offset = npcm_video_ece_read_rect_offset(video);
-
-			npcm_video_ece_enc_rect(video, rect->left,
-						rect->top, rect->width,
-						rect->height);
-			ed_size = npcm_video_ece_get_ed_size(video,
-							     ed_offset,
-							     addr);
-
-			npcm_video_ece_prepend_rect_header(addr + ed_offset,
-							   rect->left,
-							   rect->top,
-							   rect->width,
-							   rect->height);
-
-			total_size += ed_size;
-		}
-
-		vb2_set_plane_payload(&buf->vb.vb2_buf, 0, total_size);
-		buf->vb.vb2_buf.timestamp = ktime_get_ns();
-		buf->vb.sequence = video->sequence++;
-		buf->vb.field = V4L2_FIELD_NONE;
-		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
-		list_del(&buf->link);
-
-		spin_unlock(&video->lock);
-
-		clear_bit(VIDEO_FRAME_INPRG, &video->flags);
-	}
-
-	if (status & VCD_STAT_IFOR || status & VCD_STAT_IFOT) {
-		dev_warn(video->dev, "VCD FIFO overrun or over thresholds\n");
-		npcm_video_vcd_ip_reset(video);
-		npcm_video_gfx_reset(video);
-		npcm_video_start_frame(video);
-	}
-
-	return IRQ_HANDLED;
-}
-
 static void npcm_video_clear_gmmap(struct npcm_video *video)
 {
 	struct regmap *gcr = video->gcr_regmap;
-	u32 intcr, gmmap;
-	void __iomem *baseptr;
+	unsigned int intcr, gmmap;
+	void __iomem *baseptr = NULL;
 
-	if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm750-video")) {
+	if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm750-vcd")) {
 		regmap_read(gcr, INTCR3, &intcr);
 		gmmap = FIELD_GET(INTCR3_GMMAP, intcr);
 
@@ -1176,7 +853,7 @@ static void npcm_video_clear_gmmap(struct npcm_video *video)
 			baseptr = ioremap_wc(ADDR_GMMAP_2GB, GMMAP_LENGTH);
 			break;
 		}
-	} else if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm845-video")) {
+	} else if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm845-vcd")) {
 		regmap_read(gcr, INTCR4, &intcr);
 		gmmap = FIELD_GET(INTCR4_GMMAP, intcr);
 
@@ -1202,8 +879,10 @@ static void npcm_video_clear_gmmap(struct npcm_video *video)
 		}
 	}
 
-	memset(baseptr, 0, GMMAP_LENGTH);
-	iounmap(baseptr);
+	if (baseptr) {
+		memset(baseptr, 0, GMMAP_LENGTH);
+		iounmap(baseptr);
+	}
 }
 
 static void npcm_video_get_resolution(struct npcm_video *video)
@@ -1211,16 +890,14 @@ static void npcm_video_get_resolution(struct npcm_video *video)
 	struct v4l2_bt_timings *act = &video->active_timings;
 	struct v4l2_bt_timings *det = &video->detected_timings;
 	struct regmap *gfxi;
-	u32 dispst;
+	unsigned int dispst;
 
 	video->v4l2_input_status = 0;
-
 	det->width = npcm_video_hres(video);
 	det->height = npcm_video_vres(video);
 
 	if (act->width != det->width || act->height != det->height) {
 		dev_dbg(video->dev, "Resolution changed\n");
-
 		npcm_video_bufs_done(video, VB2_BUF_STATE_ERROR);
 
 		if (npcm_video_hres(video) > 0 && npcm_video_vres(video) > 0) {
@@ -1257,29 +934,28 @@ static void npcm_video_get_resolution(struct npcm_video *video)
 		video->v4l2_input_status);
 }
 
-static void npcm_video_set_resolution(struct npcm_video *video)
+static int npcm_video_set_resolution(struct npcm_video *video)
 {
 	struct v4l2_bt_timings *act = &video->active_timings;
 	struct regmap *vcd = video->vcd_regmap;
-	u32 mode;
+	unsigned int mode;
 
 	/* Set video frame physical address */
 	regmap_write(vcd, VCD_FBA_ADR, video->src.dma);
 	regmap_write(vcd, VCD_FBB_ADR, video->src.dma);
 
-	npcm_video_capres(video, act->width, act->height);
+	if (npcm_video_capres(video, act->width, act->height)) {
+		dev_err(video->dev, "Failed to set VCD_CAP_RES\n");
+		return -EINVAL;
+	}
 
 	video->bytesperpixel = npcm_video_get_bpp(video);
 	npcm_video_set_linepitch(video, act->width * video->bytesperpixel);
-
 	video->bytesperline = npcm_video_get_linepitch(video);
 
 	npcm_video_kvm_bw(video, act->pixelclock > VCD_KVM_BW_PCLK);
-
 	npcm_video_gfx_reset(video);
-
 	regmap_read(vcd, VCD_MODE, &mode);
-
 	clear_bit(VIDEO_FRAME_INPRG, &video->flags);
 
 	dev_dbg(video->dev, "VCD mode = 0x%x, %s mode\n", mode,
@@ -1289,29 +965,31 @@ static void npcm_video_set_resolution(struct npcm_video *video)
 		"Digital mode: %d x %d x %d, pixelclock %lld, bytesperline %d\n",
 		act->width, act->height, video->bytesperpixel, act->pixelclock,
 		video->bytesperline);
+
+	return 0;
 }
 
-static int npcm_video_start(struct npcm_video *video)
+static void npcm_video_start(struct npcm_video *video)
 {
-	int rc;
-
-	rc = npcm_video_init_reg(video);
-	if (rc)
-		return rc;
-
+	npcm_video_init_reg(video);
 	npcm_video_get_resolution(video);
-
 	video->active_timings = video->detected_timings;
-
 	video->max_buffer_size = VCD_MAX_SRC_BUFFER_SIZE;
-	if (!npcm_video_alloc_buf(video, &video->src, video->max_buffer_size))
-		return -ENOMEM;
 
-	npcm_video_set_resolution(video);
+	if (!npcm_video_alloc_buf(video, &video->src, video->max_buffer_size)) {
+		dev_err(video->dev, "Failed to allocate VCD buffer\n");
+		return;
+	}
+
+	if (npcm_video_set_resolution(video)) {
+		dev_err(video->dev, "Failed to set resolution\n");
+		return;
+	}
 
 	video->pix_fmt.width = video->active_timings.width;
 	video->pix_fmt.height = video->active_timings.height;
-	video->pix_fmt.sizeimage = video->max_buffer_size;
+	video->pix_fmt.sizeimage = video->pix_fmt.width * video->pix_fmt.height *
+				   video->bytesperpixel;
 	video->pix_fmt.bytesperline = video->bytesperline;
 
 	if (atomic_inc_return(&video->ece.clients) == 1) {
@@ -1322,14 +1000,12 @@ static int npcm_video_start(struct npcm_video *video)
 		dev_dbg(video->dev, "ECE open: client %d\n",
 			atomic_read(&video->ece.clients));
 	}
-
-	return 0;
 }
 
 static void npcm_video_stop(struct npcm_video *video)
 {
-	unsigned long flags;
 	struct regmap *vcd = video->vcd_regmap;
+	unsigned long flags;
 
 	spin_lock_irqsave(&video->lock, flags);
 	set_bit(VIDEO_STOPPED, &video->flags);
@@ -1348,7 +1024,6 @@ static void npcm_video_stop(struct npcm_video *video)
 
 	kfree(video->list);
 	video->list = NULL;
-
 	kfree(video->rect);
 	video->rect = NULL;
 
@@ -1363,13 +1038,95 @@ static void npcm_video_stop(struct npcm_video *video)
 	}
 }
 
+static irqreturn_t npcm_video_irq(int irq, void *arg)
+{
+	struct npcm_video *video = arg;
+	struct regmap *vcd = video->vcd_regmap;
+	struct npcm_video_buffer *buf;
+	struct rect_list *rect_list;
+	struct v4l2_rect *rect;
+	unsigned int index, ed_size, total_size, status, ed_offset;
+	dma_addr_t vb_dma_addr;
+	void *addr;
+
+	regmap_read(vcd, VCD_STAT, &status);
+	dev_dbg(video->dev, "VCD irq status 0x%x\n", status);
+
+	regmap_write(vcd, VCD_INTE, 0);
+	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
+
+	if (test_bit(VIDEO_STOPPED, &video->flags) ||
+	    !test_bit(VIDEO_STREAMING, &video->flags)) {
+		clear_bit(VIDEO_FRAME_INPRG, &video->flags);
+		return IRQ_NONE;
+	}
+
+	if (status & VCD_STAT_DONE) {
+		spin_lock(&video->lock);
+		buf = list_first_entry_or_null(&video->buffers,
+					       struct npcm_video_buffer, link);
+		if (!buf) {
+			spin_unlock(&video->lock);
+			clear_bit(VIDEO_FRAME_INPRG, &video->flags);
+			return IRQ_NONE;
+		}
+
+		addr = vb2_plane_vaddr(&buf->vb.vb2_buf, 0);
+		vb_dma_addr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
+		index = buf->vb.vb2_buf.index;
+
+		npcm_video_ece_ctrl_reset(video);
+		npcm_video_ece_clear_rect_offset(video);
+		npcm_video_ece_set_fb_addr(video, video->src.dma);
+
+		/* Set base address of encoded data to video buffer */
+		npcm_video_ece_set_enc_dba(video, vb_dma_addr);
+
+		npcm_video_ece_set_lp(video, video->bytesperline);
+		npcm_video_get_diff_rect(video, index);
+
+		total_size = 0;
+		list_for_each_entry(rect_list, &video->list[index], list) {
+			rect = &rect_list->clip.c;
+			ed_offset = npcm_video_ece_read_rect_offset(video);
+			npcm_video_ece_enc_rect(video, rect->left, rect->top,
+						rect->width, rect->height);
+
+			ed_size = npcm_video_ece_get_ed_size(video, ed_offset, addr);
+			npcm_video_ece_prepend_rect_header(addr + ed_offset,
+							   rect->left, rect->top,
+							   rect->width, rect->height);
+			total_size += ed_size;
+		}
+
+		vb2_set_plane_payload(&buf->vb.vb2_buf, 0, total_size);
+		buf->vb.vb2_buf.timestamp = ktime_get_ns();
+		buf->vb.sequence = video->sequence++;
+		buf->vb.field = V4L2_FIELD_NONE;
+
+		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+		list_del(&buf->link);
+		spin_unlock(&video->lock);
+		clear_bit(VIDEO_FRAME_INPRG, &video->flags);
+	}
+
+	if (status & VCD_STAT_IFOR || status & VCD_STAT_IFOT) {
+		dev_warn(video->dev, "VCD FIFO overrun or over thresholds\n");
+		npcm_video_stop(video);
+		npcm_video_start(video);
+		if (npcm_video_start_frame(video))
+			dev_warn(video->dev, "Failed to recover from FIFO overrun\n");
+	}
+
+	return IRQ_HANDLED;
+}
+
 static int npcm_video_querycap(struct file *file, void *fh,
 			       struct v4l2_capability *cap)
 {
 	strscpy(cap->driver, DEVICE_NAME, sizeof(cap->driver));
 	strscpy(cap->card, "NPCM Video Engine", sizeof(cap->card));
-	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s",
-		 DEVICE_NAME);
+	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s", DEVICE_NAME);
 
 	return 0;
 }
@@ -1381,7 +1138,6 @@ static int npcm_video_enum_format(struct file *file, void *fh,
 		return -EINVAL;
 
 	f->pixelformat = V4L2_PIX_FMT_HEXTILE;
-
 	return 0;
 }
 
@@ -1391,7 +1147,6 @@ static int npcm_video_get_format(struct file *file, void *fh,
 	struct npcm_video *video = video_drvdata(file);
 
 	f->fmt.pix = video->pix_fmt;
-
 	return 0;
 }
 
@@ -1463,54 +1218,11 @@ static int npcm_video_set_parm(struct file *file, void *fh,
 	return 0;
 }
 
-static int npcm_video_enum_framesizes(struct file *file, void *fh,
-				      struct v4l2_frmsizeenum *fsize)
-{
-	struct npcm_video *video = video_drvdata(file);
-
-	if (fsize->index)
-		return -EINVAL;
-
-	if (fsize->pixel_format != V4L2_PIX_FMT_HEXTILE)
-		return -EINVAL;
-
-	fsize->discrete.width = video->pix_fmt.width;
-	fsize->discrete.height = video->pix_fmt.height;
-	fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
-
-	return 0;
-}
-
-static int npcm_video_enum_frameintervals(struct file *file, void *fh,
-					  struct v4l2_frmivalenum *fival)
-{
-	struct npcm_video *video = video_drvdata(file);
-
-	if (fival->index)
-		return -EINVAL;
-
-	if (fival->width != video->detected_timings.width ||
-	    fival->height != video->detected_timings.height)
-		return -EINVAL;
-
-	if (fival->pixel_format != V4L2_PIX_FMT_HEXTILE)
-		return -EINVAL;
-
-	fival->type = V4L2_FRMIVAL_TYPE_CONTINUOUS;
-
-	fival->stepwise.min.denominator = MAX_FRAME_RATE;
-	fival->stepwise.min.numerator = 1;
-	fival->stepwise.max.denominator = 1;
-	fival->stepwise.max.numerator = 1;
-	fival->stepwise.step = fival->stepwise.max;
-
-	return 0;
-}
-
 static int npcm_video_set_dv_timings(struct file *file, void *fh,
 				     struct v4l2_dv_timings *timings)
 {
 	struct npcm_video *video = video_drvdata(file);
+	int rc;
 
 	if (timings->bt.width == video->active_timings.width &&
 	    timings->bt.height == video->active_timings.height)
@@ -1522,14 +1234,15 @@ static int npcm_video_set_dv_timings(struct file *file, void *fh,
 	}
 
 	video->active_timings = timings->bt;
-
-	npcm_video_set_resolution(video);
+	rc = npcm_video_set_resolution(video);
+	if (rc)
+		return rc;
 
 	video->pix_fmt.width = timings->bt.width;
 	video->pix_fmt.height = timings->bt.height;
-	video->pix_fmt.sizeimage = video->max_buffer_size;
+	video->pix_fmt.sizeimage = timings->bt.width * timings->bt.height *
+				   video->bytesperpixel;
 	video->pix_fmt.bytesperline = video->bytesperline;
-
 	timings->type = V4L2_DV_BT_656_1120;
 
 	return 0;
@@ -1552,7 +1265,6 @@ static int npcm_video_query_dv_timings(struct file *file, void *fh,
 	struct npcm_video *video = video_drvdata(file);
 
 	npcm_video_get_resolution(video);
-
 	timings->type = V4L2_DV_BT_656_1120;
 	timings->bt = video->detected_timings;
 
@@ -1609,8 +1321,6 @@ static const struct v4l2_ioctl_ops npcm_video_ioctls = {
 
 	.vidioc_g_parm = npcm_video_get_parm,
 	.vidioc_s_parm = npcm_video_set_parm,
-	.vidioc_enum_framesizes = npcm_video_enum_framesizes,
-	.vidioc_enum_frameintervals = npcm_video_enum_frameintervals,
 
 	.vidioc_s_dv_timings = npcm_video_set_dv_timings,
 	.vidioc_g_dv_timings = npcm_video_get_dv_timings,
@@ -1624,8 +1334,7 @@ static const struct v4l2_ioctl_ops npcm_video_ioctls = {
 
 static int npcm_video_set_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct npcm_video *video = container_of(ctrl->handler,
-						struct npcm_video,
+	struct npcm_video *video = container_of(ctrl->handler, struct npcm_video,
 						ctrl_handler);
 
 	switch (ctrl->id) {
@@ -1644,13 +1353,12 @@ static int npcm_video_set_ctrl(struct v4l2_ctrl *ctrl)
 
 static int npcm_video_get_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct npcm_video *video = container_of(ctrl->handler,
-						struct npcm_video,
+	struct npcm_video *video = container_of(ctrl->handler, struct npcm_video,
 						ctrl_handler);
 
 	switch (ctrl->id) {
 	case V4L2_CID_NPCM_RECT_COUNT:
-		ctrl->val = npcm_video_get_rect_count(video);
+		ctrl->val = video->rect[video->vb_index];
 		break;
 	default:
 		return -EINVAL;
@@ -1689,11 +1397,10 @@ static const struct v4l2_ctrl_config npcm_ctrl_rect_count = {
 
 static int npcm_video_open(struct file *file)
 {
-	int rc;
 	struct npcm_video *video = video_drvdata(file);
+	int rc;
 
 	mutex_lock(&video->video_lock);
-
 	rc = v4l2_fh_open(file);
 	if (rc) {
 		mutex_unlock(&video->video_lock);
@@ -1704,24 +1411,21 @@ static int npcm_video_open(struct file *file)
 		npcm_video_start(video);
 
 	mutex_unlock(&video->video_lock);
-
 	return 0;
 }
 
 static int npcm_video_release(struct file *file)
 {
-	int rc;
 	struct npcm_video *video = video_drvdata(file);
+	int rc;
 
 	mutex_lock(&video->video_lock);
-
 	if (v4l2_fh_is_singular_file(file))
 		npcm_video_stop(video);
 
 	rc = _vb2_fop_release(file, NULL);
 
 	mutex_unlock(&video->video_lock);
-
 	return rc;
 }
 
@@ -1735,10 +1439,8 @@ static const struct v4l2_file_operations npcm_video_v4l2_fops = {
 	.release = npcm_video_release,
 };
 
-static int npcm_video_queue_setup(struct vb2_queue *q,
-				  unsigned int *num_buffers,
-				  unsigned int *num_planes,
-				  unsigned int sizes[],
+static int npcm_video_queue_setup(struct vb2_queue *q, unsigned int *num_buffers,
+				  unsigned int *num_planes, unsigned int sizes[],
 				  struct device *alloc_devs[])
 {
 	struct npcm_video *video = vb2_get_drv_priv(q);
@@ -1758,6 +1460,8 @@ static int npcm_video_queue_setup(struct vb2_queue *q,
 	video->rect = NULL;
 
 	video->rect = kcalloc(*num_buffers, sizeof(*video->rect), GFP_KERNEL);
+	if (!video->rect)
+		return -ENOMEM;
 
 	if (video->list) {
 		npcm_video_free_diff_table(video);
@@ -1766,12 +1470,15 @@ static int npcm_video_queue_setup(struct vb2_queue *q,
 	}
 
 	video->list = kzalloc(sizeof(*video->list) * *num_buffers, GFP_KERNEL);
+	if (!video->list) {
+		kfree(video->rect);
+		return -ENOMEM;
+	}
 
 	for (i = 0; i < *num_buffers; i++)
 		INIT_LIST_HEAD(&video->list[i]);
 
 	video->num_buffers = *num_buffers;
-
 	return 0;
 }
 
@@ -1787,11 +1494,10 @@ static int npcm_video_buf_prepare(struct vb2_buffer *vb)
 
 static int npcm_video_start_streaming(struct vb2_queue *q, unsigned int count)
 {
-	int rc;
 	struct npcm_video *video = vb2_get_drv_priv(q);
+	int rc;
 
 	video->sequence = 0;
-
 	rc = npcm_video_start_frame(video);
 	if (rc) {
 		npcm_video_bufs_done(video, VB2_BUF_STATE_QUEUED);
@@ -1808,13 +1514,10 @@ static void npcm_video_stop_streaming(struct vb2_queue *q)
 	struct regmap *vcd = video->vcd_regmap;
 
 	clear_bit(VIDEO_STREAMING, &video->flags);
-
 	regmap_write(vcd, VCD_INTE, 0);
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 	npcm_video_gfx_reset(video);
-
 	npcm_video_bufs_done(video, VB2_BUF_STATE_ERROR);
-
 	video->ctrl_cmd = VCD_CMD_OPERATION_CAPTURE;
 }
 
@@ -1833,21 +1536,24 @@ static void npcm_video_buf_queue(struct vb2_buffer *vb)
 static void npcm_video_buf_finish(struct vb2_buffer *vb)
 {
 	struct npcm_video *video = vb2_get_drv_priv(vb->vb2_queue);
-	struct regmap *vcd = video->vcd_regmap;
-	u32 val;
-	int ret;
+	struct list_head *head, *pos, *nx;
+	struct rect_list *tmp;
 
-	ret = regmap_read_poll_timeout(vcd, VCD_STAT, val,
-				       !(val & VCD_STAT_BUSY), 1000,
-				       VCD_BUSY_TIMEOUT_US);
-
-	if (ret) {
-		dev_warn(video->dev, "Wait for VCD_STAT_BUSY timeout\n");
-		return;
+	/*
+	 * When a video buffer is dequeued, free associated rect_list and
+	 * capture next frame.
+	 */
+	head = &video->list[video->vb_index];
+	list_for_each_safe(pos, nx, head) {
+		tmp = list_entry(pos, struct rect_list, list);
+		list_del(&tmp->list);
+		kfree(tmp);
 	}
 
-	/* Capture next frame when a video buffer is dequeued */
-	npcm_video_start_frame(video);
+	if (npcm_video_start_frame(video)) {
+		dev_err(video->dev, "Failed to capture next frame\n");
+		return;
+	}
 
 	video->vb_index = vb->index;
 }
@@ -1882,22 +1588,15 @@ static int npcm_video_setup_video(struct npcm_video *video)
 	}
 
 	v4l2_ctrl_handler_init(&video->ctrl_handler, 2);
-	v4l2_ctrl_new_custom(&video->ctrl_handler, &npcm_ctrl_capture_mode,
-			     NULL);
+	v4l2_ctrl_new_custom(&video->ctrl_handler, &npcm_ctrl_capture_mode, NULL);
 	v4l2_ctrl_new_custom(&video->ctrl_handler, &npcm_ctrl_rect_count, NULL);
-
 	if (video->ctrl_handler.error) {
 		dev_err(video->dev, "Failed to init controls: %d\n",
 			video->ctrl_handler.error);
 
 		rc = video->ctrl_handler.error;
-
-		v4l2_ctrl_handler_free(&video->ctrl_handler);
-		v4l2_device_unregister(v4l2_dev);
-
-		return rc;
+		goto rel_ctrl_handler;
 	}
-
 	v4l2_dev->ctrl_handler = &video->ctrl_handler;
 
 	vbq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -1913,13 +1612,9 @@ static int npcm_video_setup_video(struct npcm_video *video)
 
 	rc = vb2_queue_init(vbq);
 	if (rc) {
-		v4l2_ctrl_handler_free(&video->ctrl_handler);
-		v4l2_device_unregister(v4l2_dev);
-
 		dev_err(video->dev, "Failed to init vb2 queue\n");
-		return rc;
+		goto rel_ctrl_handler;
 	}
-
 	vdev->queue = vbq;
 	vdev->fops = &npcm_video_v4l2_fops;
 	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
@@ -1935,38 +1630,40 @@ static int npcm_video_setup_video(struct npcm_video *video)
 	video_set_drvdata(vdev, video);
 	rc = video_register_device(vdev, VFL_TYPE_VIDEO, 0);
 	if (rc) {
-		vb2_queue_release(vbq);
-		v4l2_ctrl_handler_free(&video->ctrl_handler);
-		v4l2_device_unregister(v4l2_dev);
-
 		dev_err(video->dev, "Failed to register video device\n");
-		return rc;
+		goto rel_vb_queue;
 	}
 
 	return 0;
+
+rel_vb_queue:
+	vb2_queue_release(vbq);
+rel_ctrl_handler:
+	v4l2_ctrl_handler_free(&video->ctrl_handler);
+	v4l2_device_unregister(v4l2_dev);
+
+	return rc;
 }
 
 static int npcm_video_init(struct npcm_video *video)
 {
-	int irq;
-	int rc;
 	struct device *dev = video->dev;
+	int irq, rc;
 
 	irq = irq_of_parse_and_map(dev->of_node, 0);
 	if (!irq) {
-		dev_err(dev, "Unable to find VCD IRQ\n");
+		dev_err(dev, "Failed to find VCD IRQ\n");
 		return -ENODEV;
 	}
 
 	rc = devm_request_threaded_irq(dev, irq, NULL, npcm_video_irq,
 				       IRQF_ONESHOT, DEVICE_NAME, video);
 	if (rc < 0) {
-		dev_err(dev, "Unable to request IRQ %d\n", irq);
+		dev_err(dev, "Failed to request IRQ %d\n", irq);
 		return rc;
 	}
 
 	of_reserved_mem_device_init(dev);
-
 	rc = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (rc) {
 		dev_err(dev, "Failed to set DMA mask\n");
@@ -1992,9 +1689,11 @@ static const struct regmap_config npcm_video_ece_regmap_cfg = {
 
 static int npcm_video_probe(struct platform_device *pdev)
 {
+	struct npcm_video *video = kzalloc(sizeof(*video), GFP_KERNEL);
+	struct device_node *ece_node;
+	struct platform_device *ece_pdev;
 	int rc;
 	void __iomem *regs;
-	struct npcm_video *video = kzalloc(sizeof(*video), GFP_KERNEL);
 
 	if (!video)
 		return -ENOMEM;
@@ -2005,51 +1704,64 @@ static int npcm_video_probe(struct platform_device *pdev)
 	mutex_init(&video->video_lock);
 	INIT_LIST_HEAD(&video->buffers);
 
-	regs = devm_platform_ioremap_resource_byname(pdev, VCD_MODULE_NAME);
+	regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(regs)) {
-		dev_err(&pdev->dev, "Failed to find VCD reg-names in DTS!\n");
+		dev_err(&pdev->dev, "Failed to parse VCD reg in DTS\n");
 		return PTR_ERR(regs);
 	}
 
 	video->vcd_regmap = devm_regmap_init_mmio(&pdev->dev, regs,
 						  &npcm_video_regmap_cfg);
 	if (IS_ERR(video->vcd_regmap)) {
-		dev_err(&pdev->dev, "Failed to initialize VCD regmap!\n");
+		dev_err(&pdev->dev, "Failed to initialize VCD regmap\n");
 		return PTR_ERR(video->vcd_regmap);
 	}
 
-	regs = devm_platform_ioremap_resource_byname(pdev, ECE_MODULE_NAME);
+	ece_node = of_parse_phandle(video->dev->of_node, "nuvoton,ece", 0);
+	if (IS_ERR(ece_node)) {
+		dev_err(&pdev->dev, "Failed to get ECE phandle in DTS\n");
+		return PTR_ERR(ece_node);
+	}
+
+	ece_pdev = of_find_device_by_node(ece_node);
+	of_node_put(ece_node);
+	if (IS_ERR(ece_pdev)) {
+		dev_err(&pdev->dev, "Failed to find ECE device\n");
+		return PTR_ERR(ece_pdev);
+	}
+
+	regs = devm_platform_ioremap_resource(ece_pdev, 0);
 	if (IS_ERR(regs)) {
-		dev_err(&pdev->dev, "Failed to find ECE reg-names in DTS!\n");
+		dev_err(&pdev->dev, "Failed to parse ECE reg in DTS\n");
 		return PTR_ERR(regs);
 	}
 
 	video->ece.regmap = devm_regmap_init_mmio(&pdev->dev, regs,
 						  &npcm_video_ece_regmap_cfg);
 	if (IS_ERR(video->ece.regmap)) {
-		dev_err(&pdev->dev, "Failed to initialize ECE regmap!\n");
+		dev_err(&pdev->dev, "Failed to initialize ECE regmap\n");
 		return PTR_ERR(video->ece.regmap);
 	}
 
-	video->reset = devm_reset_control_get(&pdev->dev, VCD_MODULE_NAME);
+	video->reset = devm_reset_control_get(&pdev->dev, NULL);
 	if (IS_ERR(video->reset)) {
-		dev_err(&pdev->dev, "Failed to find VCD reset-names in DTS!\n");
+		dev_err(&pdev->dev, "Failed to get VCD reset control in DTS\n");
 		return PTR_ERR(video->reset);
 	}
 
-	video->ece.reset = devm_reset_control_get(&pdev->dev, ECE_MODULE_NAME);
+	video->ece.reset = devm_reset_control_get(&ece_pdev->dev, NULL);
 	if (IS_ERR(video->ece.reset)) {
-		dev_err(&pdev->dev, "Failed to find ECE reset-names in DTS!\n");
+		dev_err(&pdev->dev, "Failed to get ECE reset control in DTS\n");
 		return PTR_ERR(video->ece.reset);
 	}
 
-	video->gcr_regmap =
-		syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "gcr-syscon");
+	video->gcr_regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
+							    "nuvoton,sysgcr");
 	if (IS_ERR(video->gcr_regmap))
 		return PTR_ERR(video->gcr_regmap);
 
-	video->gfx_regmap =
-		syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "gfxi-syscon");
+	video->gfx_regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
+							    "nuvoton,sysgfxi");
 	if (IS_ERR(video->gfx_regmap))
 		return PTR_ERR(video->gfx_regmap);
 
@@ -2062,7 +1774,6 @@ static int npcm_video_probe(struct platform_device *pdev)
 		return rc;
 
 	dev_info(video->dev, "NPCM video driver probed\n");
-
 	return 0;
 }
 
@@ -2073,23 +1784,18 @@ static int npcm_video_remove(struct platform_device *pdev)
 	struct npcm_video *video = to_npcm_video(v4l2_dev);
 
 	video_unregister_device(&video->vdev);
-
 	vb2_queue_release(&video->queue);
-
 	v4l2_ctrl_handler_free(&video->ctrl_handler);
-
 	v4l2_device_unregister(v4l2_dev);
-
 	npcm_video_ece_stop(video);
-
 	of_reserved_mem_device_release(dev);
 
 	return 0;
 }
 
 static const struct of_device_id npcm_video_match[] = {
-	{ .compatible = "nuvoton,npcm750-video" },
-	{ .compatible = "nuvoton,npcm845-video" },
+	{ .compatible = "nuvoton,npcm750-vcd" },
+	{ .compatible = "nuvoton,npcm845-vcd" },
 	{},
 };
 
@@ -2106,7 +1812,7 @@ static struct platform_driver npcm_video_driver = {
 
 module_platform_driver(npcm_video_driver);
 
-MODULE_AUTHOR("Joseph Liu<kwliu@nuvoton.com>");
-MODULE_AUTHOR("Marvin Lin<kflin@nuvoton.com>");
+MODULE_AUTHOR("Joseph Liu <kwliu@nuvoton.com>");
+MODULE_AUTHOR("Marvin Lin <kflin@nuvoton.com>");
 MODULE_DESCRIPTION("Driver for Nuvoton NPCM Video Capture/Encode Engine");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
