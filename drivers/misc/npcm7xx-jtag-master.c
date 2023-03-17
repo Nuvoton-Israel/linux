@@ -808,13 +808,13 @@ err:
 	return ret;
 }
 
-static int npcm7xx_jtag_remove(struct spi_device  *spi)
+static void npcm7xx_jtag_remove(struct spi_device  *spi)
 {
 	struct jtag_info *jtag = spi_get_drvdata(spi);
 	int i;
 
 	if (!jtag)
-		return 0;
+		return;
 
 	misc_deregister(&jtag->miscdev);
 	kfree(jtag->miscdev.name);
@@ -824,8 +824,6 @@ static int npcm7xx_jtag_remove(struct spi_device  *spi)
 	}
 	kfree(jtag);
 	ida_simple_remove(&jtag_ida, jtag->id);
-
-	return 0;
 }
 
 static const struct of_device_id npcm7xx_jtag_of_match[] = {
