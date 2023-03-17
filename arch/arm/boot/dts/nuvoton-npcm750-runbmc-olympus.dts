@@ -14,11 +14,23 @@
 	compatible = "nuvoton,npcm750";
 
 	aliases {
+		ethernet0 = &emc0;
 		ethernet1 = &gmac0;
 		serial0 = &serial0;
 		serial1 = &serial1;
 		serial2 = &serial2;
 		serial3 = &serial3;
+		udc0 = &udc0;
+		udc1 = &udc1;
+		udc2 = &udc2;
+		udc3 = &udc3;
+		udc4 = &udc4;
+		udc5 = &udc5;
+		udc6 = &udc6;
+		udc7 = &udc7;
+		udc8 = &udc8;
+		udc9 = &udc9;
+		emmc0 = &sdhci0;
 		i2c0 = &i2c0;
 		i2c1 = &i2c1;
 		i2c2 = &i2c2;
@@ -71,6 +83,7 @@
 		heartbeat {
 		label = "heartbeat";
 			gpios = <&gpio3 14 1>;
+			linux,default-trigger = "timer";
 		};
 
 		identify {
@@ -78,6 +91,25 @@
 			gpios = <&gpio3 15 1>;
 		};
 	};
+
+	led_ctrl {
+		compatible = "cpt, led";
+		status = "okay";
+		gpio125-en = <&gpio3 29 1>;
+	};
+
+	mcu_flash {
+		compatible = "nuvoton,npcm750-mcu-flash";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		dev-num = <0>;    /* /dev/mcu0 */
+		smb-offset = <6>; /* SMBSEL offset of MFSEL3 */
+		mcu-gpios = <&gpio6 30 GPIO_ACTIVE_HIGH>,     /* GPIO222/PROG_CLK, Output */
+			<&gpio6 31 GPIO_ACTIVE_HIGH>,     /* GPIO223/PROG_MOSI Output */
+			<&gpio1 6 GPIO_ACTIVE_HIGH>,      /* GPIO38/PROG_MISO, Input  */
+			<&gpio1 5 GPIO_ACTIVE_HIGH>;       /* GPIO37/RESET#, Output    */
+    };
 
 	jtag {
 		compatible = "nuvoton,npcm750-jtag";
@@ -120,18 +152,17 @@
 		reg = <0>;
 		spi-rx-bus-width = <2>;
 
-		partitions {
+		partitions@80000000 {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;
 			#size-cells = <1>;
 			bmc@0{
 				label = "bmc";
-				reg = <0x000000 0x2000000>;
+				reg = <0x000000 0x4000000>;
 			};
 			u-boot@0 {
 				label = "u-boot";
-				reg = <0x0000000 0x80000>;
-				read-only;
+				reg = <0x0000000 0xc0000>;
 			};
 			u-boot-env@100000{
 				label = "u-boot-env";
@@ -143,11 +174,11 @@
 			};
 			rofs@800000 {
 				label = "rofs";
-				reg = <0x800000 0x1500000>;
+				reg = <0x800000 0x3500000>;
 			};
 			rwfs@1d00000 {
 				label = "rwfs";
-				reg = <0x1d00000 0x300000>;
+				reg = <0x3d00000 0x300000>;
 			};
 		};
 	};
@@ -159,7 +190,7 @@
 		reg = <1>;
 		npcm,fiu-rx-bus-width = <2>;
 
-		partitions {
+		partitions@88000000 {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;
 			#size-cells = <1>;
@@ -186,17 +217,13 @@
 		reg = <0>;
 		spi-rx-bus-width = <2>;
 
-		partitions {
+		partitions@A0000000 {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;
 			#size-cells = <1>;
-			system1@0 {
-				label = "spi3-system1";
-				reg = <0x0 0x800000>;
-			};
-			system2@800000 {
-				label = "spi3-system2";
-				reg = <0x800000 0x0>;
+			bios@0 {
+				label = "bios";
+				reg = <0x0 0x2000000>;
 			};
 		};
 	};
@@ -215,6 +242,12 @@
 &gmac0 {
 	phy-mode = "rgmii-id";
 	snps,eee-force-disable;
+	status = "okay";
+};
+
+&emc0 {
+	phy-mode = "rmii";
+	use-ncsi;
 	status = "okay";
 };
 
@@ -333,9 +366,10 @@
 &i2c5 {
 	status = "okay";
 
-	i2c-slave-mqueue@10 {
-		compatible = "i2c-slave-mqueue";
-		reg = <(I2C_OWN_SLAVE_ADDRESS | 0x10)>;
+	ipmb@40000010 {
+		compatible = "ipmb-dev";
+		reg = <0x40000010>;
+		i2c-protocol;
 	};
 };
 
@@ -428,6 +462,8 @@
 
 		gpio-controller;
 		#gpio-cells = <2>;
+		gpio-line-names="","","","","","","","",
+						"","","SIO_POWER_GOOD","","","","","";
 	};
 };
 
@@ -639,6 +675,10 @@
 		gpio-controller;
 		#gpio-cells = <2>;
 		reset-gpios = <&gpio5 28 GPIO_ACTIVE_LOW>;
+		interrupt-parent = <&gpio5>;
+		interrupts = <29 IRQ_TYPE_LEVEL_LOW>;
+		gpio-line-names="","","","POWER_OUT","RESET_OUT","","","",
+						"","","","","","","POST_COMPLETE","";
 		G2A_P0_0 {
 			gpio-hog;
 			gpios = <0 0>;
@@ -657,18 +697,7 @@
 			input;
 			line-name = "RST_BMC_RTCRST";
 		};
-		G2A_P0_3 {
-			gpio-hog;
-			gpios = <3 0>;
-			output-high;
-			line-name = "FM_BMC_PWRBTN_OUT_N";
-		};
-		G2A_P0_4 {
-			gpio-hog;
-			gpios = <4 0>;
-			output-high;
-			line-name = "RST_BMC_SYSRST_BTN_OUT_N";
-		};
+
 		G2A_P0_5 {
 			gpio-hog;
 			gpios = <5 0>;
@@ -723,12 +752,7 @@
 			input;
 			line-name = "FM_SOL_UART_CH_SEL";
 		};
-		G2A_P1_6 {
-			gpio-hog;
-			gpios = <14 0>;
-			input;
-			line-name = "FM_BIOS_POST_CMPLT_N";
-		};
+
 	};
 
 	pca9539_g2b: pca9539-g2b@75 {
@@ -736,6 +760,12 @@
 		reg = <0x75>;
 		gpio-controller;
 		#gpio-cells = <2>;
+		interrupt-parent = <&gpio5>;
+		interrupts = <29 IRQ_TYPE_LEVEL_LOW>;
+		#interrupt-cells = <2>;
+		interrupt-controller;
+		gpio-line-names="","","","","","","","",
+						"","","","","","","","";
 		G2B_P0_0 {
 			gpio-hog;
 			gpios = <0 0>;
@@ -898,11 +928,94 @@
 	};
 };
 
+&peci0 {
+	cmd-timeout-ms = <1000>;
+	npcm,pull-down = <0>;
+	npcm,host-neg-bit-rate = <15>;
+	status = "okay";
+
+	intel-peci-dimmtemp@30 {
+		compatible = "intel,peci-client";
+		reg = <0x30>;
+	};
+	intel-peci-dimmtemp@31 {
+		compatible = "intel,peci-client";
+		reg = <0x31>;
+	};
+};
+
 &ehci1 {
 	status = "okay";
 };
 
+&ohci1 {
+	status = "okay";
+};
+
+&udc0 {
+	status = "okay";
+};
+
+&udc1 {
+	status = "okay";
+};
+
+&udc2 {
+	status = "okay";
+};
+
+&udc3 {
+	status = "okay";
+};
+
+&udc4 {
+	status = "okay";
+};
+
+&udc5 {
+	status = "okay";
+};
+
+&udc6 {
+	status = "okay";
+};
+
+&udc7 {
+	status = "okay";
+};
+
+&udc8 {
+	status = "okay";
+};
+
+&udc9 {
+	status = "okay";
+};
+
+&aes {
+	status = "okay";
+};
+
+&sha {
+	status = "okay";
+};
+
+
+&sdhci0 {
+	status = "okay";
+};
+
+&pcimbox {
+	status = "okay";
+};
+
+&video {
+	memory-region = <&video_memory>;
+	status = "okay";
+};
+
 &watchdog1 {
+	nuvoton,ext1-reset-type = "wd1";
 	status = "okay";
 };
 
@@ -931,6 +1044,10 @@
 	status = "okay";
 };
 
+&otp {
+	status = "okay";
+};
+
 &kcs1 {
 	status = "okay";
 };
@@ -943,13 +1060,38 @@
 	status = "okay";
 };
 
+&lpc_bpc {
+	monitor-ports = <0x80>;
+	status = "okay";
+};
+
 &spi0 {
 	cs-gpios = <&gpio6 11 GPIO_ACTIVE_LOW>;
 	status = "okay";
 };
 
 &spi1 {
+	cs-gpios = <&gpio6 0 GPIO_ACTIVE_HIGH>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&gpio17_pins &gpio18o_pins
+				&gpio19ol_pins>;
 	status = "okay";
+	jtag_master {
+		compatible = "nuvoton,npcm750-jtag-master";
+		spi-max-frequency = <25000000>;
+		reg = <0>;
+
+		pinctrl-names = "pspi", "gpio";
+		pinctrl-0 = <&pspi2_pins>;
+		pinctrl-1 = <&gpio17_pins &gpio18o_pins
+				&gpio19ol_pins>;
+
+		tck-gpios = <&gpio0 19 GPIO_ACTIVE_HIGH>;
+		tdi-gpios = <&gpio0 18 GPIO_ACTIVE_HIGH>;
+		tdo-gpios = <&gpio0 17 GPIO_ACTIVE_HIGH>;
+		tms-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
 };
 
 &vcd {
@@ -1071,4 +1213,58 @@
 			&wdog1_pins
 			&wdog2_pins
 			>;
+		gpio0: gpio@f0010000 {
+			/* TCK_MUX_SEL=gpio22 */
+			gpio-line-names =
+			/*0-31*/
+			"","","","","","","","",
+			"","","","","","","","",
+			"","","","","","","TCK_MUX_SEL","",
+			"","","","","","","","";
+		};
+		gpio1: gpio@f0011000 {
+			/* XDP_PRST_N=gpio59 */
+			gpio-line-names =
+			/*32-63*/
+			"","","","","","","","",
+			"","","","","","","","",
+			"","","","","","","","",
+			"","","","XDP_PRST_N","","","","";
+		};
+		gpio2: gpio@f0012000 {
+			/* PREQ_N=gpio78, PRDY_N=gpio79, PLTRST_N=gpio95 */
+			gpio-line-names =
+			/*64-95*/
+			"","","","","","","","",
+			"","","","","","","PREQ_N","PRDY_N",
+			"","","","POWER_BUTTON","","","","",
+			"","","","","","","","PLTRST_N";
+		};
+		gpio4: gpio@f0014000 {
+			/* PWR_DEBUG_N=gpio153, RSMRST_N=gpio155 */
+			gpio-line-names =
+			/*128-159*/
+			"","","","","","","","",
+			"","PS_PWROK","","","","","","",
+			"","RESET_BUTTON","","","","","","",
+			"","PWR_DEBUG_N","","RSMRST_N","","","","";
+		};
+		gpio5: gpio@f0015000 {
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			gpio-line-names =
+				"","","","","","","","",
+				"","","","","","","","",
+				"","","","","","","","",
+				"","","","","","","","";
+		};
+		gpio7: gpio@f0017000 {
+			/* SYSPWROK=gpio229, DEBUG_EN_N=gpio231 */
+			gpio-line-names =
+				/*224-255*/
+				"","","","","","SYSPWROK","","DEBUG_EN_N",
+				"","","","","","","","",
+				"","","","","","","","",
+				"","","","","","","","";
+		};
 };
