@@ -43,6 +43,11 @@
 		};
 	};
 
+	udc0_phy: usb-phy {
+		compatible = "usb-nop-xceiv";
+		#phy-cells = <0>;
+	};
+
 	ahb {
 		gmac1: eth@f0804000 {
 			device_type = "network";
@@ -64,9 +69,12 @@
 			reg = <0xf0830000 0x1000
 			       0xfffd0000 0x800>;
 			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc1:udc@f0831000 {
@@ -74,9 +82,12 @@
 			reg = <0xf0831000 0x1000
 			       0xfffd0800 0x800>;
 			interrupts = <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc2: udc@f0832000 {
@@ -84,9 +95,12 @@
 			reg = <0xf0832000 0x1000
 			       0xfffd1000 0x800>;
 			interrupts = <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc3: udc@f0833000 {
@@ -94,9 +108,12 @@
 			reg = <0xf0833000 0x1000
 			       0xfffd1800 0x800>;
 			interrupts = <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc4: udc@f0834000 {
@@ -104,9 +121,12 @@
 			reg = <0xf0834000 0x1000
 			       0xfffd2000 0x800>;
 			interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc5: udc@f0835000 {
@@ -114,9 +134,12 @@
 			reg = <0xf0835000 0x1000
 			       0xfffd2800 0x800>;
 			interrupts = <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc6: udc@f0836000 {
@@ -124,9 +147,12 @@
 			reg = <0xf0836000 0x1000
 			       0xfffd3000 0x800>;
 			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc7: udc@f0837000 {
@@ -134,9 +160,12 @@
 			reg = <0xf0837000 0x1000
 			       0xfffd3800 0x800>;
 			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc8: udc@f0838000 {
@@ -144,9 +173,12 @@
 			reg = <0xf0838000 0x1000
 			       0xfffd4000 0x800>;
 			interrupts = <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 
 		udc9: udc@f0839000 {
@@ -154,9 +186,12 @@
 			reg = <0xf0839000 0x1000
 			       0xfffd4800 0x800>;
 			interrupts = <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
-			status = "disabled";
 			clocks = <&clk NPCM7XX_CLK_SU>;
 			clock-names = "clk_usb_bridge";
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
 		};
 	};
 };
