@@ -285,7 +285,7 @@ static int npcm_adc_read(struct npcm_adc *info, int *val, u8 channel)
 
 	ret = wait_event_interruptible_timeout(info->wq, info->int_status,
 					       msecs_to_jiffies(10));
-	if (ret == 0) {
+	if (ret <= 0) {
 		regtemp = ioread32(info->regs + NPCM_ADCCON);
 		if (regtemp & NPCM_ADCCON_ADC_CONV) {
 			/* if conversion failed - reset ADC module */
@@ -299,10 +299,12 @@ static int npcm_adc_read(struct npcm_adc *info, int *val, u8 channel)
 				  info->regs + NPCM_ADCCON);
 			dev_err(info->dev, "RESET ADC Complete\n");
 		}
-		return -ETIMEDOUT;
-	}
-	if (ret < 0)
+
+		if (ret == 0)
+			return -ETIMEDOUT;
+
 		return ret;
+	}
 
 	*val = ioread32(info->regs + NPCM_ADCDATA);
 	*val &= info->data->data_mask;
