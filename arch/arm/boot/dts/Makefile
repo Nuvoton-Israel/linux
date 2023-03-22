@@ -393,7 +393,8 @@ dtb-$(CONFIG_ARCH_NPCM7XX) += \
 	nuvoton-npcm730-gbs.dtb \
 	nuvoton-npcm730-kudo.dtb \
 	nuvoton-npcm750-evb.dtb \
-	nuvoton-npcm750-runbmc-olympus.dtb
+	nuvoton-npcm750-runbmc-olympus.dtb \
+	nuvoton-npcm750-buv-runbmc.dtb
 dtb-$(CONFIG_MACH_MESON6) += \
 	meson6-atv1200.dtb
 dtb-$(CONFIG_MACH_MESON8) += \
