@@ -264,8 +264,8 @@ static irqreturn_t npcm_adc_isr(int irq, void *data)
 	regtemp = ioread32(info->regs + NPCM_ADCCON);
 	if (regtemp & NPCM_ADCCON_ADC_INT_ST) {
 		iowrite32(regtemp, info->regs + NPCM_ADCCON);
-		wake_up_interruptible(&info->wq);
 		info->int_status = true;
+		wake_up(&info->wq);
 	}
 
 	return IRQ_HANDLED;
@@ -283,9 +283,9 @@ static int npcm_adc_read(struct npcm_adc *info, int *val, u8 channel)
 	iowrite32(regtemp | NPCM_ADCCON_CH(channel) |
 		  NPCM_ADCCON_ADC_CONV, info->regs + NPCM_ADCCON);
 
-	ret = wait_event_interruptible_timeout(info->wq, info->int_status,
-					       msecs_to_jiffies(10));
-	if (ret <= 0) {
+	ret = wait_event_timeout(info->wq, info->int_status,
+				 msecs_to_jiffies(10));
+	if ((ret == 0) && (info->int_status == false)) {
 		regtemp = ioread32(info->regs + NPCM_ADCCON);
 		if (regtemp & NPCM_ADCCON_ADC_CONV) {
 			/* if conversion failed - reset ADC module */
@@ -300,11 +300,11 @@ static int npcm_adc_read(struct npcm_adc *info, int *val, u8 channel)
 			dev_err(info->dev, "RESET ADC Complete\n");
 		}
 
-		if (ret == 0)
-			return -ETIMEDOUT;
-
-		return ret;
+		return -ETIMEDOUT;
 	}
+
+	if (ret < 0)
+		return ret;
 
 	*val = ioread32(info->regs + NPCM_ADCDATA);
 	*val &= info->data->data_mask;
