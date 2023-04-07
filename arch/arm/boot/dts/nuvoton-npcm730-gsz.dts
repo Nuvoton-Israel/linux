@@ -103,6 +103,28 @@
 		reg = <0 0x40000000>;
 	};
 
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		ramoops: ramoops@3cfe0000 {
+			/* Note: the ramoops feature require this memory
+			 * location to be perserved across reboots.
+			 * Nuvoton U-boot reserves the following portion from
+			 * top of RAM:
+			 *   32MB for VCD ECE DVC
+			 *   16MB graphics memory
+			 *   128KB protected for ramoops (see go/gbmcl/47872)
+			 * therefore the region that kernel can safely reserve
+			 * when using 1GB starts from:
+			 *   ((1024-32-16)*1024-128)*1024 = 0x3cfe0000 */
+			compatible = "ramoops";
+			reg = <0x3cfe0000 0x20000>; /* 128KB */
+			record-size = <0x20000>; /* 128KB */
+		};
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 		efuse-pg {
