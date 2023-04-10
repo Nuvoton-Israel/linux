@@ -1,0 +1,10 @@
+What:		/sys/bus/i2c/devices/*/slave-mqueue
+Date:		May 2019
+KernelVersion:	5.2
+Contact:	Eduardo Valentin <eduval@amazon.com>
+Description:
+		Reading to this file will return exactly one message,
+		when available, of the i2c-slave-mqueue device attached
+		to that bus. Userspace can also poll on this file to
+		get notified when new messages are available.
+Users:		i2c-slave-mqueue driver
