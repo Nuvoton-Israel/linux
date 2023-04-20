@@ -205,6 +205,6 @@ struct plat_stmmacenet_data {
 	bool vlan_fail_q_en;
 	u8 vlan_fail_q;
 	unsigned int eee_usecs_rate;
-	bool arbel_rev_a;
+	bool sph_disable;
 };
 #endif
