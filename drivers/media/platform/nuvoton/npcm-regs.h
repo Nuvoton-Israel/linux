@@ -38,6 +38,8 @@
 #define	 VCD_STAT_DONE			BIT(0)
 #define	 VCD_STAT_IFOT			BIT(2)
 #define	 VCD_STAT_IFOR			BIT(3)
+#define	 VCD_STAT_VHT_CHG		BIT(5)
+#define	 VCD_STAT_HAC_CHG		BIT(8)
 #define	 VCD_STAT_BUSY			BIT(30)
 #define	VCD_STAT_CLEAR			0x3fff
 
@@ -45,9 +47,24 @@
 #define  VCD_INTE_DONE_IE		BIT(0)
 #define  VCD_INTE_IFOT_IE		BIT(2)
 #define  VCD_INTE_IFOR_IE		BIT(3)
+#define  VCD_INTE_VHT_IE		BIT(5)
+#define  VCD_INTE_HAC_IE		BIT(8)
 
 #define VCD_RCHG			0x8028
-#define VCD_RCHG_TIM_PRSCL		GENMASK(12, 9)
+#define  VCD_RCHG_IG_CHG0		GENMASK(2, 0)
+#define  VCD_RCHG_TIM_PRSCL		GENMASK(12, 9)
+
+#define VCD_VER_HI_TIM			0x8044
+#define  VCD_VER_HI_TIME		GENMASK(23, 0)
+
+#define VCD_VER_HI_LST			0x8048
+#define  VCD_VER_HI_LAST		GENMASK(23, 0)
+
+#define VCD_HOR_AC_TIM			0x804c
+#define  VCD_HOR_AC_TIME		GENMASK(13, 0)
+
+#define VCD_HOR_AC_LST			0x8050
+#define  VCD_HOR_AC_LAST		GENMASK(13, 0)
 
 #define VCD_FIFO			0x805c
 #define  VCD_FIFO_TH			0x100350ff
