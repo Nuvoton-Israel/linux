@@ -455,6 +455,7 @@ static void AES_LoadKeyByIndex(
     u8          index,
     NPCM_AES_KEY_SIZE_T size
     ) {
+#ifdef CONFIG_NPCM750_OTP
 	CRYPTO_TIMEOUT(AES_IS_BUSY(), SECOND_TIMEOUT)
 
 	aes_print(KERN_NOTICE  "\t\t\t*NPCM-AES: AES_LoadKeyByIndex: index %d -> size %d\n", index, size);
@@ -465,6 +466,9 @@ static void AES_LoadKeyByIndex(
 
 	/* key is loaded using the aes_cryptokey input port */
 	AES_LOAD_KEY();
+#else
+	aes_print(KERN_NOTICE  "\t\t\t*NPCM-AES: AES_LoadKeyByIndex: OTP not supported\n");
+#endif
 }
 
 /*---------------------------------------------------------------------------------------------------------*/
