@@ -1553,7 +1553,7 @@ err_region:
 	return ret;
 }
 
-static int __exit npcm_aes_remove(struct platform_device *pdev)
+static int npcm_aes_remove(struct platform_device *pdev)
 {
 	struct resource *res = dev_get_drvdata(&pdev->dev);
 
