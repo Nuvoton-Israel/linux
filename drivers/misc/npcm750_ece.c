@@ -31,69 +31,68 @@
 #include <linux/miscdevice.h>
 #include <linux/reset.h>
 
-#define ECE_VERSION "1.0.0"
+#define ECE_VERSION			"1.0.0"
+#define DEVICE_NAME			"nuvoton-ece"
 
-/* ECE Register */
-#define DDA_CTRL	0x0000
-#define  DDA_CTRL_ECEEN BIT(0)
-#define  DDA_CTRL_INTEN BIT(8)
-#define  DDA_CTRL_FIFO_NF_IE BIT(9)
-#define  DDA_CTRL_ACDRDY_IE BIT(10)
+#define ECE_BUFFER_SIZE			0x600000
+#define DEFAULT_WIDTH			640
+#define DEFAULT_HEIGHT			640
+#define DEFAULT_LP			2048
+#define ECE_MIN_LP			512
+#define ECE_MAX_LP			4096
+#define ECE_TILE_W			16
+#define ECE_TILE_H			16
+#define ECE_OP_TIMEOUT			msecs_to_jiffies(100)
 
-#define DDA_STS	0x0004
-#define  DDA_STS_FIFOSTSI GENMASK(2, 0)
-#define  DDA_STS_FIFOSTSE GENMASK(6, 4)
-#define  DDA_STS_CDREADY BIT(8)
-#define  DDA_STS_FIFO_NF BIT(9)
-#define  DDA_STS_ACDRDY BIT(10)
+/* ECE Registers */
+#define DDA_CTRL			0x0000
+#define  DDA_CTRL_ECEEN			BIT(0)
+#define  DDA_CTRL_INTEN			BIT(8)
+#define  DDA_CTRL_FIFO_NF_IE		BIT(9)
+#define  DDA_CTRL_ACDRDY_IE		BIT(10)
 
-#define FBR_BA	0x0008
-#define ED_BA	0x000C
-#define RECT_XY	0x0010
+#define DDA_STS				0x0004
+#define  DDA_STS_FIFOSTSI		GENMASK(2, 0)
+#define  DDA_STS_FIFOSTSE		GENMASK(6, 4)
+#define  DDA_STS_CDREADY		BIT(8)
+#define  DDA_STS_FIFO_NF		BIT(9)
+#define  DDA_STS_ACDRDY			BIT(10)
 
-#define RECT_DIMEN	0x0014
-#define	 RECT_DIMEN_HLTR_OFFSET	27
-#define	 RECT_DIMEN_HR_OFFSET	16
-#define	 RECT_DIMEN_WLTR_OFFSET	11
-#define	 RECT_DIMEN_WR_OFFSET	0
+#define FBR_BA				0x0008
+#define ED_BA				0x000c
+#define RECT_XY				0x0010
 
-#define RESOL	0x001C
-#define  RESOL_FB_LP_512	0
-#define  RESOL_FB_LP_1024	1
-#define  RESOL_FB_LP_2048	2
-#define  RESOL_FB_LP_2560	3
-#define  RESOL_FB_LP_4096	4
+#define RECT_DIMEN			0x0014
+#define	 RECT_DIMEN_HLTR_OFFSET		27
+#define	 RECT_DIMEN_HR_OFFSET		16
+#define	 RECT_DIMEN_WLTR_OFFSET		11
+#define	 RECT_DIMEN_WR_OFFSET		0
 
-#define HEX_CTRL	0x0040
-#define  HEX_CTRL_ENCDIS BIT(0)
-#define  HEX_CTRL_ENC_GAP 0x1f00
-#define  HEX_CTRL_ENC_GAP_OFFSET 8
-#define  HEX_CTRL_ENC_MIN_GAP_SIZE 4
+#define RESOL				0x001c
+#define  RESOL_FB_LP_512		0
+#define  RESOL_FB_LP_1024		1
+#define  RESOL_FB_LP_2048		2
+#define  RESOL_FB_LP_2560		3
+#define  RESOL_FB_LP_4096		4
 
-#define HEX_RECT_OFFSET 0x0048
+#define HEX_CTRL			0x0040
+#define  HEX_CTRL_ENCDIS		BIT(0)
+#define  HEX_CTRL_ENC_GAP		0x1f00
+#define  HEX_CTRL_ENC_GAP_OFFSET	8
+#define  HEX_CTRL_ENC_MIN_GAP_SIZE	4
 
-#define DEFAULT_WIDTH 640
-#define DEFAULT_HEIGHT 640
-#define DEFAULT_LP 2048
+#define HEX_RECT_OFFSET			0x0048
 
-#define ECE_MIN_LP	512
-#define ECE_MAX_LP	4096
-#define ECE_TILE_W	16
-#define ECE_TILE_H	16
-
-#define ECE_IOC_MAGIC 'k'
-#define ECE_IOCGETED _IOR(ECE_IOC_MAGIC, 1, struct ece_ioctl_cmd)
-#define ECE_IOCSETFB _IOW(ECE_IOC_MAGIC, 2, struct ece_ioctl_cmd)
-#define ECE_IOCSETLP _IOW(ECE_IOC_MAGIC, 3, struct ece_ioctl_cmd)
-#define ECE_IOCGET_OFFSET _IOR(ECE_IOC_MAGIC, 4, u32)
-#define ECE_IOCCLEAR_OFFSET _IO(ECE_IOC_MAGIC, 5)
-#define ECE_IOCENCADDR_RESET _IO(ECE_IOC_MAGIC, 6)
-#define ECE_RESET _IO(ECE_IOC_MAGIC, 7)
-#define ECE_IOC_MAXNR 7
-
-#define ECE_OP_TIMEOUT msecs_to_jiffies(100)
-
-#define DEVICE_NAME "nuvoton-ece"
+/* ioctls */
+#define ECE_IOC_MAGIC		'k'
+#define ECE_IOCGETED		_IOR(ECE_IOC_MAGIC, 1, struct ece_ioctl_cmd)
+#define ECE_IOCSETFB		_IOW(ECE_IOC_MAGIC, 2, struct ece_ioctl_cmd)
+#define ECE_IOCSETLP		_IOW(ECE_IOC_MAGIC, 3, struct ece_ioctl_cmd)
+#define ECE_IOCGET_OFFSET	_IOR(ECE_IOC_MAGIC, 4, u32)
+#define ECE_IOCCLEAR_OFFSET	_IO(ECE_IOC_MAGIC, 5)
+#define ECE_IOCENCADDR_RESET	_IO(ECE_IOC_MAGIC, 6)
+#define ECE_RESET		_IO(ECE_IOC_MAGIC, 7)
+#define ECE_IOC_MAXNR		7
 
 struct ece_ioctl_cmd {
 	u32 framebuf;
@@ -528,43 +527,7 @@ struct file_operations const npcm750_ece_fops = {
 static int npcm750_ece_device_create(struct npcm750_ece *priv)
 {
 	int ret = 0;
-	struct resource res;
 	struct device *dev = priv->dev;
-	struct device_node *node;
-
-	/* optional. */
-	node = of_parse_phandle(dev->of_node, "memory-region", 0);
-	if (node) {
-		ret = of_address_to_resource(node, 0, &res);
-		of_node_put(node);
-		if (ret) {
-			dev_err(dev, "Couldn't address to resource for reserved memory\n");
-			return -ENODEV;
-		}
-
-		priv->size = (u32)resource_size(&res);
-		priv->dma = (u32)res.start;
-	} else {
-		dev_err(dev, "Cannnot find memory-region\n");
-		return -ENODEV;
-	}
-
-	dev_info(dev, "Reserved ECE memory start 0x%x size 0x%x\n", priv->dma, priv->size);
-
-	if (!devm_request_mem_region(dev, priv->dma, priv->size, "ece_ram")) {
-		dev_err(dev, "can't reserve ece ram\n");
-		return -ENXIO;
-	}
-
-	priv->virt = devm_memremap(dev, priv->dma,
-					priv->size,
-					MEMREMAP_WC);
-	if (!priv->virt) {
-		dev_err(dev, "%s: cannot map ece memory region\n",
-			 __func__);
-		ret = -EIO;
-		goto err;
-	}
 
 	priv->irq = irq_of_parse_and_map(dev->of_node, 0);
 	if (!priv->irq) {
@@ -602,6 +565,16 @@ static int npcm750_ece_device_create(struct npcm750_ece *priv)
 
 err:
 	return ret;
+}
+
+static int npcm750_ece_alloc_buf(struct npcm750_ece *priv, size_t size)
+{
+	priv->virt = dma_alloc_coherent(priv->dev, size, &priv->dma, GFP_KERNEL);
+	if (!priv->virt)
+		return -ENOMEM;
+
+	priv->size = size;
+	return 0;
 }
 
 static const struct regmap_config npcm750_ece_regmap_cfg = {
@@ -647,8 +620,20 @@ static int npcm750_ece_probe(struct platform_device *pdev)
 
 	ret = npcm750_ece_device_create(priv);
 	if (ret) {
-		dev_err(dev, "%s: failed to create device\n",
+		dev_err(dev, "%s: Failed to create device\n",
 			__func__);
+		goto err;
+	}
+
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+	if (ret) {
+		dev_err(dev, "Failed to set DMA mask\n");
+		goto err;
+	}
+
+	ret = npcm750_ece_alloc_buf(priv, ECE_BUFFER_SIZE);
+	if (ret) {
+		dev_err(dev, "Failed to allocate ECE buffer\n");
 		goto err;
 	}
 
@@ -667,11 +652,10 @@ err:
 static int npcm750_ece_remove(struct platform_device *pdev)
 {
 	struct npcm750_ece *priv = platform_get_drvdata(pdev);
-	struct device *dev = priv->dev;
 
 	npcm750_ece_stop(priv);
 
-	devm_memunmap(dev, priv->virt);
+	dma_free_coherent(priv->dev, priv->size, priv->virt, priv->dma);
 
 	misc_deregister(&priv->miscdev);
 

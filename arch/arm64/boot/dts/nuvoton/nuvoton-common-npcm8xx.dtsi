@@ -205,6 +205,7 @@
 		ece: video-codec@f0820000 {
 			compatible = "nuvoton,npcm845-ece";
 			reg = <0x0 0xf0820000 0x0 0x2000>;
+			interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
 			resets = <&rstc 0x24 13>;
 			status = "disabled";
 		};

@@ -34,8 +34,267 @@
 #include <linux/miscdevice.h>
 #include <linux/reset.h>
 
-#define VCD_VERSION "1.0.0"
+#define VCD_VERSION			"1.0.0"
+#define DEVICE_NAME			"nuvoton-vcd"
 
+#define VCD_BUFFER_SIZE			0x500000 /* support up to 1920 x 1200 */
+#define RECT_TILE_W			16
+#define RECT_TILE_H			16
+#define VCD_INIT_WIDTH			640
+#define VCD_INIT_HIGHT			480
+#define VCD_MAX_WIDTH			2047
+#define VCD_MAX_HIGHT			1536
+#define VCD_MIN_LP			512
+#define VCD_MAX_LP			4096
+
+#define VCD_OP_TIMEOUT			msecs_to_jiffies(100)
+#define RESET_TIMEOUT			msecs_to_jiffies(100)
+#define GET_RES_RERTY			3
+#define GET_RES_TIMEOUT			300
+#define GET_RES_VALID_RERTY		3
+#define GET_RES_VALID_TIMEOUT		100
+
+/* VCD  Registers */
+#define VCD_DIFF_TBL			0x0000
+#define VCD_FBA_ADR			0x8000
+#define VCD_FBB_ADR			0x8004
+
+#define VCD_FB_LP			0x8008
+#define  VCD_FB_LP_MASK			0xffff
+#define  VCD_FBB_LP_OFFSET		16
+
+#define VCD_CAP_RES			0x800c
+#define  VCD_CAPRES_MASK		0x7ff
+
+#define VCD_DVO_DEL			0x8010
+#define  VCD_DVO_DEL_VERT_HOFF		GENMASK(31, 27)
+#define  VCD_DVO_DEL_MASK		0x7ff
+#define  VCD_DVO_DEL_VERT_HOFF_OFFSET	27
+#define  VCD_DVO_DEL_VSYNC_DEL_OFFSET	16
+#define  VCD_DVO_DEL_HSYNC_DEL_OFFSET	0
+
+#define VCD_MODE			0x8014
+#define  VCD_MODE_VCDE			BIT(0)
+#define  VCD_MODE_CM565			BIT(1)
+#define  VCD_MODE_IDBC			BIT(3)
+#define  VCD_MODE_COLOR_CNVRT		GENMASK(5, 4)
+#define  VCD_MODE_DAT_INV		BIT(6)
+#define  VCD_MODE_CLK_EDGE		BIT(8)
+#define  VCD_MODE_HS_EDGE		BIT(9)
+#define  VCD_MODE_VS_EDGE		BIT(10)
+#define  VCD_MODE_DE_HS			BIT(11)
+#define  VCD_MODE_KVM_BW_SET		BIT(16)
+#define  VCD_MODE_COLOR_NORM		0x0
+#define  VCD_MODE_COLOR_222		0x1
+#define  VCD_MODE_COLOR_666		0x2
+#define  VCD_MODE_COLOR_888		0x3
+#define  VCD_MODE_COLOR_CNVRT_OFFSET	4
+
+#define VCD_CMD				0x8018
+#define  VCD_CMD_GO			BIT(0)
+#define  VCD_CMD_RST			BIT(1)
+#define  VCD_CMD_OP_MASK		0x70
+#define  VCD_CMD_OP_OFFSET		4
+#define  VCD_CMD_OP_CAPTURE		0
+#define  VCD_CMD_OP_COMPARE_TWO		1
+#define  VCD_CMD_OP_COMPARE		2
+
+#define	VCD_STAT			0x801c
+#define	 VCD_STAT_IRQ			BIT(31)
+#define	 VCD_STAT_BUSY			BIT(30)
+#define	 VCD_STAT_BSD3			BIT(13)
+#define	 VCD_STAT_BSD2			BIT(12)
+#define	 VCD_STAT_HSYNC			BIT(11)
+#define	 VCD_STAT_VSYNC			BIT(10)
+#define	 VCD_STAT_HLC_CHG		BIT(9)
+#define	 VCD_STAT_HAC_CHG		BIT(8)
+#define	 VCD_STAT_HHT_CHG		BIT(7)
+#define	 VCD_STAT_HCT_CHG		BIT(6)
+#define	 VCD_STAT_VHT_CHG		BIT(5)
+#define	 VCD_STAT_VCT_CHG		BIT(4)
+#define	 VCD_STAT_IFOR			BIT(3)
+#define	 VCD_STAT_IFOT			BIT(2)
+#define	 VCD_STAT_BSD1			BIT(1)
+#define	 VCD_STAT_DONE			BIT(0)
+
+#define	VCD_STAT_CLEAR			0x3fff
+
+#define	VCD_STAT_CURR_LINE		0x7ff0000
+#define	 VCD_STAT_CURR_LINE_OFFSET	16
+
+#define VCD_INTE			0x8020
+#define  VCD_INTE_DONE_IE		BIT(0)
+#define  VCD_INTE_BSD_IE		BIT(1)
+#define  VCD_INTE_IFOT_IE		BIT(2)
+#define  VCD_INTE_IFOR_IE		BIT(3)
+#define  VCD_INTE_VCT_CHG_IE		BIT(4)
+#define  VCD_INTE_VHT_CHG_IE		BIT(5)
+#define  VCD_INTE_HCT_CHG_IE		BIT(6)
+#define  VCD_INTE_HHT_CHG_IE		BIT(7)
+#define  VCD_INTE_HAC_CHG_IE		BIT(8)
+#define  VCD_INTE_HLC_CHG_IE		BIT(9)
+#define  VCD_INTE_VSYNC_IE		BIT(10)
+#define  VCD_INTE_HSYNC_IE		BIT(11)
+#define  VCD_INTE_BSD2_IE		BIT(12)
+#define  VCD_INTE_BSD3_IE		BIT(13)
+
+#define VCD_RCHG			0x8028
+#define  VCD_RCHG_TIM_PRSCL_OFFSET	9
+#define  VCD_RCHG_TIM_PRSCL		GENMASK(12, 9)
+#define  VCD_RCHG_IG_CHG2		GENMASK(8, 6)
+#define  VCD_RCHG_IG_CHG1		GENMASK(5, 3)
+#define  VCD_RCHG_IG_CHG0		GENMASK(2, 0)
+
+#define VCD_HOR_CYC_TIM			0x802c
+#define  VCD_HOR_CYC_TIM_NEW		BIT(31)
+#define  VCD_HOR_CYC_TIM_HCT_DIF	BIT(30)
+#define  VCD_HOR_CYC_TIM_VALUE		GENMASK(11, 0)
+#define  VCD_HOR_AC_TIM_MASK		0x3fff
+
+#define VCD_HOR_CYC_LAST		0x8030
+#define  VCD_HOR_CYC_LAST_VALUE		GENMASK(11, 0)
+
+#define VCD_HOR_HI_TIM			0x8034
+#define  VCD_HOR_HI_TIM_NEW		BIT(31)
+#define  VCD_HOR_HI_TIM_HHT_DIF		BIT(30)
+#define  VCD_HOR_HI_TIM_VALUE		GENMASK(11, 0)
+
+#define VCD_HOR_HI_LAST			0x8038
+#define  VCD_HOR_HI_LAST_VALUE		GENMASK(11, 0)
+
+#define VCD_VER_CYC_TIM			0x803c
+#define  VCD_VER_CYC_TIM_NEW		BIT(31)
+#define  VCD_VER_CYC_TIM_VCT_DIF	BIT(30)
+#define  VCD_VER_CYC_TIM_VALUE		GENMASK(23, 0)
+
+#define VCD_VER_CYC_LAST		0x8040
+#define  VCD_VER_CYC_LAST_VALUE		GENMASK(23, 0)
+
+#define VCD_VER_HI_TIM			0x8044
+#define  VCD_VER_HI_TIM_NEW		BIT(31)
+#define  VCD_VER_HI_TIM_VHT_DIF		BIT(30)
+#define  VCD_VER_HI_TIM_VALUE		GENMASK(23, 0)
+
+#define VCD_VER_HI_LAST			0x8048
+#define  VCD_VER_HI_LAST_VALUE		GENMASK(23, 0)
+
+#define VCD_HOR_AC_TIM			0x804c
+#define  VCD_HOR_AC_TIM_NEW		BIT(31)
+#define  VCD_HOR_AC_TIM_HAC_DIF		BIT(30)
+#define  VCD_HOR_AC_TIM_VALUE		GENMASK(13, 0)
+
+#define VCD_HOR_AC_LAST			0x8050
+#define  VCD_HOR_AC_LAST_VALUE		GENMASK(13, 0)
+
+#define VCD_HOR_LIN_TIM			0x8054
+#define  VCD_HOR_LIN_TIM_NEW		BIT(31)
+#define  VCD_HOR_LIN_TIM_HLC_DIF	BIT(30)
+#define  VCD_HOR_LIN_TIM_VALUE		GENMASK(11, 0)
+
+#define VCD_HOR_LIN_LAST		0x8058
+#define  VCD_HOR_LIN_LAST_VALUE		GENMASK(11, 0)
+
+#define VCD_FIFO			0x805c
+#define  VCD_FIFO_TH			0x100350ff
+
+/* GCR Registers */
+#define INTCR				0x3c
+#define  INTCR_GFXIFDIS			(BIT(8) | BIT(9))
+#define  INTCR_GIRST			BIT(17)
+#define  INTCR_LDDRB			BIT(18)
+#define  INTCR_DACOFF			BIT(15)
+#define  INTCR_DEHS			BIT(27)
+#define  INTCR_KVMSI			BIT(28)
+
+#define INTCR2				0x60
+#define  INTCR2_GIRST2			BIT(2)
+#define  INTCR2_GIHCRST			BIT(5)
+#define  INTCR2_GIVCRST			BIT(6)
+
+#define INTCR3				0x9c
+#define  INTCR3_GMMAP			GENMASK(10, 8)
+#define  INTCR3_GMMAP_128MB		0
+#define  INTCR3_GMMAP_256MB		1
+#define  INTCR3_GMMAP_512MB		2
+#define  INTCR3_GMMAP_1GB		3
+#define  INTCR3_GMMAP_2GB		4
+
+#define INTCR4				0xc0
+#define  INTCR4_GMMAP			GENMASK(22, 16)
+#define  INTCR4_GMMAP_512MB		0x1f
+#define  INTCR4_GMMAP_512MB_ECC		0x1b
+#define  INTCR4_GMMAP_1GB		0x3f
+#define  INTCR4_GMMAP_1GB_ECC		0x37
+#define  INTCR4_GMMAP_2GB		0x7f
+#define  INTCR4_GMMAP_2GB_ECC		0x6f
+
+#define  ADDR_GMMAP_128MB		0x07000000
+#define  ADDR_GMMAP_256MB		0x0f000000
+#define  ADDR_GMMAP_512MB		0x1f000000
+#define  ADDR_GMMAP_512MB_ECC		0x1b000000
+#define  ADDR_GMMAP_1GB			0x3f000000
+#define  ADDR_GMMAP_1GB_ECC		0x37000000
+#define  ADDR_GMMAP_2GB			0x7f000000
+#define  ADDR_GMMAP_2GB_ECC		0x6f000000
+
+#define GMMAP_LENGTH			0xc00000 /* 4MB preserved, total 16MB */
+
+#define MFSEL1				0x0c
+#define  MFSEL1_DVH1SEL			BIT(27)
+
+/* GFXI Registers */
+#define GFXI_START			0xe000
+#define GFXI_FIFO			0xe050
+#define GFXI_MASK			0x00ff
+
+#define DISPST				0
+#define DISPST_MGAMODE			BIT(7)
+#define DISPST_HSCROFF			BIT(1)
+
+#define HVCNTL				0x10
+#define  HVCNTL_MASK			0xff
+#define HVCNTH				0x14
+#define  HVCNTH_MASK			0x07
+#define HBPCNTL				0x18
+#define  HBPCNTL_MASK			0xff
+#define HBPCNTH				0x1c
+#define  HBPCNTH_MASK			0x01
+#define VVCNTL				0x20
+#define  VVCNTL_MASK			0xff
+#define VVCNTH				0x24
+#define  VVCNTH_MASK			0x07
+#define VPBCNTL				0x28
+#define  VPBCNTL_MASK			0xff
+#define VPBCNTH				0x2c
+#define  VPBCNTH_MASK			0x01
+
+#define GPLLINDIV			0x40
+#define  GPLLINDIV_MASK			0x3f
+#define  GPLLFBDV8_MASK			0x80
+#define  GPLLINDIV_OFFSET		0
+#define  GPLLFBDV8_OFFSET		7
+
+#define GPLLFBDIV			0x44
+#define  GPLLFBDIV_MASK			0xff
+
+#define GPLLST				0x48
+#define  GPLLFBDV109_MASK		0xc0
+#define  GPLLFBDV109_OFFSET		6
+#define  GPLLST_PLLOTDIV1_MASK		0x07
+#define  GPLLST_PLLOTDIV2_MASK		0x38
+#define  GPLLST_PLLOTDIV1_OFFSET	0
+#define  GPLLST_PLLOTDIV2_OFFSET	3
+
+#define VCD_R_MAX			31
+#define VCD_G_MAX			63
+#define VCD_B_MAX			31
+#define VCD_R_SHIFT			11
+#define VCD_G_SHIFT			5
+#define VCD_B_SHIFT			0
+
+#define VCD_KVM_BW_PCLK			120000000UL
+
+/* ioctls */
 #define VCD_IOC_MAGIC		'v'
 #define VCD_IOCGETINFO		_IOR(VCD_IOC_MAGIC,  1, struct vcd_info)
 #define VCD_IOCSENDCMD		_IOW(VCD_IOC_MAGIC,  2, unsigned int)
@@ -49,275 +308,6 @@
 #define VCD_SHORT_RESET		_IO(VCD_IOC_MAGIC, 10)
 #define VCD_IOCSETDISPLAY	_IOW(VCD_IOC_MAGIC, 11, unsigned int)
 #define VCD_IOC_MAXNR		11
-
-#define VCD_OP_TIMEOUT msecs_to_jiffies(100)
-#define RESET_TIMEOUT  msecs_to_jiffies(100)
-
-#define DEVICE_NAME "nuvoton-vcd"
-
-#define RECT_TILE_W	16
-#define RECT_TILE_H	16
-#define VCD_INIT_WIDTH	640
-#define VCD_INIT_HIGHT	480
-#define VCD_MAX_WIDTH	2047
-#define VCD_MAX_HIGHT	1536
-#define VCD_MIN_LP	512
-#define VCD_MAX_LP	4096
-
-/* VCD  Register */
-#define VCD_DIFF_TBL 0x0000
-#define VCD_FBA_ADR	0x8000
-#define VCD_FBB_ADR	0x8004
-
-#define VCD_FB_LP	0x8008
-#define  VCD_FB_LP_MASK 0xffff
-#define  VCD_FBB_LP_OFFSET 16
-
-#define VCD_CAP_RES	0x800C
-#define  VCD_CAPRES_MASK 0x7ff
-
-#define VCD_DVO_DEL 0x8010
-#define  VCD_DVO_DEL_VERT_HOFF GENMASK(31, 27)
-#define  VCD_DVO_DEL_MASK 0x7ff
-#define  VCD_DVO_DEL_VERT_HOFF_OFFSET 27
-#define  VCD_DVO_DEL_VSYNC_DEL_OFFSET 16
-#define  VCD_DVO_DEL_HSYNC_DEL_OFFSET 0
-
-#define VCD_MODE	0x8014
-#define  VCD_MODE_VCDE	BIT(0)
-#define  VCD_MODE_CM565	BIT(1)
-#define  VCD_MODE_IDBC	BIT(3)
-#define  VCD_MODE_COLOR_CNVRT	GENMASK(5, 4)
-#define  VCD_MODE_DAT_INV	BIT(6)
-#define  VCD_MODE_CLK_EDGE	BIT(8)
-#define  VCD_MODE_HS_EDGE	BIT(9)
-#define  VCD_MODE_VS_EDGE	BIT(10)
-#define  VCD_MODE_DE_HS		BIT(11)
-#define  VCD_MODE_KVM_BW_SET	BIT(16)
-#define  VCD_MODE_COLOR_NORM	0x0
-#define  VCD_MODE_COLOR_222		0x1
-#define  VCD_MODE_COLOR_666		0x2
-#define  VCD_MODE_COLOR_888		0x3
-#define  VCD_MODE_COLOR_CNVRT_OFFSET 4
-
-#define VCD_CMD			0x8018
-#define  VCD_CMD_GO	BIT(0)
-#define  VCD_CMD_RST	BIT(1)
-#define  VCD_CMD_OP_MASK	0x70
-#define  VCD_CMD_OP_OFFSET	4
-#define  VCD_CMD_OP_CAPTURE	0
-#define  VCD_CMD_OP_COMPARE_TWO	1
-#define  VCD_CMD_OP_COMPARE	2
-
-#define	VCD_STAT		0x801C
-#define	 VCD_STAT_IRQ	BIT(31)
-#define	 VCD_STAT_BUSY	BIT(30)
-#define	 VCD_STAT_BSD3	BIT(13)
-#define	 VCD_STAT_BSD2	BIT(12)
-#define	 VCD_STAT_HSYNC	BIT(11)
-#define	 VCD_STAT_VSYNC	BIT(10)
-#define	 VCD_STAT_HLC_CHG	BIT(9)
-#define	 VCD_STAT_HAC_CHG	BIT(8)
-#define	 VCD_STAT_HHT_CHG	BIT(7)
-#define	 VCD_STAT_HCT_CHG	BIT(6)
-#define	 VCD_STAT_VHT_CHG	BIT(5)
-#define	 VCD_STAT_VCT_CHG	BIT(4)
-#define	 VCD_STAT_IFOR	BIT(3)
-#define	 VCD_STAT_IFOT	BIT(2)
-#define	 VCD_STAT_BSD1	BIT(1)
-#define	 VCD_STAT_DONE	BIT(0)
-#define	 VCD_STAT_CLEAR	0x3FFF
-#define	 VCD_STAT_CURR_LINE_OFFSET 16
-#define	 VCD_STAT_CURR_LINE 0x7ff0000
-
-#define VCD_INTE	0x8020
-#define  VCD_INTE_DONE_IE	BIT(0)
-#define  VCD_INTE_BSD_IE	BIT(1)
-#define  VCD_INTE_IFOT_IE	BIT(2)
-#define  VCD_INTE_IFOR_IE	BIT(3)
-#define  VCD_INTE_VCT_CHG_IE	BIT(4)
-#define  VCD_INTE_VHT_CHG_IE	BIT(5)
-#define  VCD_INTE_HCT_CHG_IE	BIT(6)
-#define  VCD_INTE_HHT_CHG_IE	BIT(7)
-#define  VCD_INTE_HAC_CHG_IE	BIT(8)
-#define  VCD_INTE_HLC_CHG_IE	BIT(9)
-#define  VCD_INTE_VSYNC_IE	BIT(10)
-#define  VCD_INTE_HSYNC_IE	BIT(11)
-#define  VCD_INTE_BSD2_IE	BIT(12)
-#define  VCD_INTE_BSD3_IE	BIT(13)
-
-#define VCD_RCHG	0x8028
-#define VCD_RCHG_TIM_PRSCL_OFFSET 9
-#define VCD_RCHG_IG_CHG2_OFFSET 6
-#define VCD_RCHG_IG_CHG1_OFFSET 3
-#define VCD_RCHG_IG_CHG0_OFFSET 0
-#define VCD_RCHG_TIM_PRSCL  GENMASK(12, VCD_RCHG_TIM_PRSCL_OFFSET)
-#define VCD_RCHG_IG_CHG2  GENMASK(8, VCD_RCHG_IG_CHG2_OFFSET)
-#define VCD_RCHG_IG_CHG1  GENMASK(5, VCD_RCHG_IG_CHG1_OFFSET)
-#define VCD_RCHG_IG_CHG0  GENMASK(2, VCD_RCHG_IG_CHG0_OFFSET)
-
-#define VCD_HOR_CYC_TIM	0x802C
-#define VCD_HOR_CYC_TIM_NEW	BIT(31)
-#define VCD_HOR_CYC_TIM_HCT_DIF	BIT(30)
-#define VCD_HOR_CYC_TIM_VALUE	GENMASK(11, 0)
-#define VCD_HOR_AC_TIM_MASK     0x3fff
-
-#define VCD_HOR_CYC_LAST	0x8030
-#define VCD_HOR_CYC_LAST_VALUE	GENMASK(11, 0)
-
-#define VCD_HOR_HI_TIM	0x8034
-#define VCD_HOR_HI_TIM_NEW	BIT(31)
-#define VCD_HOR_HI_TIM_HHT_DIF	BIT(30)
-#define VCD_HOR_HI_TIM_VALUE	GENMASK(11, 0)
-
-#define VCD_HOR_HI_LAST	0x8038
-#define VCD_HOR_HI_LAST_VALUE	GENMASK(11, 0)
-
-#define VCD_VER_CYC_TIM	0x803C
-#define VCD_VER_CYC_TIM_NEW	BIT(31)
-#define VCD_VER_CYC_TIM_VCT_DIF	BIT(30)
-#define VCD_VER_CYC_TIM_VALUE	GENMASK(23, 0)
-
-#define VCD_VER_CYC_LAST	0x8040
-#define VCD_VER_CYC_LAST_VALUE	GENMASK(23, 0)
-
-#define VCD_VER_HI_TIM	0x8044
-#define VCD_VER_HI_TIM_NEW	BIT(31)
-#define VCD_VER_HI_TIM_VHT_DIF	BIT(30)
-#define VCD_VER_HI_TIM_VALUE	GENMASK(23, 0)
-
-#define VCD_VER_HI_LAST	0x8048
-#define VCD_VER_HI_LAST_VALUE	GENMASK(23, 0)
-
-#define VCD_HOR_AC_TIM	0x804C
-#define VCD_HOR_AC_TIM_NEW	BIT(31)
-#define VCD_HOR_AC_TIM_HAC_DIF	BIT(30)
-#define VCD_HOR_AC_TIM_VALUE	GENMASK(13, 0)
-
-#define VCD_HOR_AC_LAST	0x8050
-#define VCD_HOR_AC_LAST_VALUE	GENMASK(13, 0)
-
-#define VCD_HOR_LIN_TIM	0x8054
-#define VCD_HOR_LIN_TIM_NEW	BIT(31)
-#define VCD_HOR_LIN_TIM_HLC_DIF	BIT(30)
-#define VCD_HOR_LIN_TIM_VALUE	GENMASK(11, 0)
-
-#define VCD_HOR_LIN_LAST	0x8058
-#define VCD_HOR_LIN_LAST_VALUE	GENMASK(11, 0)
-
-#define VCD_FIFO		0x805C
-#define  VCD_FIFO_TH	0x100350ff
-
-/* GCR  Register */
-#define INTCR 0x3c
-#define  INTCR_GFXIFDIS	(BIT(8) | BIT(9))
-#define  INTCR_GIRST	BIT(17)
-#define  INTCR_LDDRB	BIT(18)
-#define  INTCR_DACOFF	BIT(15)
-#define  INTCR_DEHS	BIT(27)
-#define  INTCR_KVMSI	BIT(28)
-
-#define INTCR2 0x60
-#define  INTCR2_GIRST2	BIT(2)
-#define  INTCR2_GIHCRST	BIT(5)
-#define  INTCR2_GIVCRST	BIT(6)
-
-#ifdef CONFIG_ARCH_NPCM7XX
-#define INTCR3 0x9c
-#define INTCR3_GMMAP_MASK	GENMASK(10, 8)
-#define INTCR3_GMMAP_128MB	0x00000000
-#define INTCR3_GMMAP_256MB	0x00000100
-#define INTCR3_GMMAP_512MB	0x00000200
-#define INTCR3_GMMAP_1GB	0x00000300
-#define INTCR3_GMMAP_2GB	0x00000400
-
-#define ADDR_GMMAP_128MB	0x07000000
-#define ADDR_GMMAP_256MB	0x0f000000
-#define ADDR_GMMAP_512MB	0x1f000000
-#define ADDR_GMMAP_1GB		0x3f000000
-#define ADDR_GMMAP_2GB		0x7f000000
-#else
-#define INTCR4 0xC0
-#define INTCR4_GMMAP_MASK	GENMASK(22, 16)
-#define INTCR4_GMMAP_512MB	0x001F0000 //1F00_0000h to 1FFF_FFFFh
-#define INTCR4_GMMAP_512MB_ECC	0x001B0000 //1B00_0000h to 1BFF_FFFFh
-#define INTCR4_GMMAP_1GB	0x003F0000 //3F00_0000h to 3FFF_FFFFh
-#define INTCR4_GMMAP_1GB_ECC	0x00370000 //3700_0000h to 37FF_FFFFh
-#define INTCR4_GMMAP_2GB	0x007F0000 //7F00_0000h to 7FFF_FFFFh
-#define INTCR4_GMMAP_2GB_ECC	0x006F0000 //6F00_0000h to 6FFF_FFFFh
-
-#define ADDR_GMMAP_512MB	0x1F000000
-#define ADDR_GMMAP_512MB_ECC	0x1B000000
-#define ADDR_GMMAP_1GB	0x3F000000
-#define ADDR_GMMAP_1GB_ECC	0x37000000
-#define ADDR_GMMAP_2GB	0x7F000000
-#define ADDR_GMMAP_2GB_ECC	0x6F000000
-#endif
-
-/* Total 16MB, but 4MB preserved*/
-#define GMMAP_LENGTH	0xc00000
-
-#define MFSEL1 0x0c
-#define  MFSEL1_DVH1SEL	BIT(27)
-
-/* GFXI Register */
-#define GFXI_START 0xE000
-#define GFXI_FIFO 0xE050
-#define GFXI_MASK 0x00FF
-
-#define DISPST	0
-#define  DISPST_MGAMODE BIT(7)
-#define  DISPST_HSCROFF BIT(1)
-
-#define HVCNTL	0x10
-#define  HVCNTL_MASK	0xff
-#define HVCNTH	0x14
-#define  HVCNTH_MASK	0x07
-#define HBPCNTL	0x18
-#define  HBPCNTL_MASK	0xff
-#define HBPCNTH	0x1c
-#define  HBPCNTH_MASK	0x01
-#define VVCNTL	0x20
-#define  VVCNTL_MASK	0xff
-#define VVCNTH	0x24
-#define  VVCNTH_MASK	0x07
-#define VPBCNTL	0x28
-#define  VPBCNTL_MASK	0xff
-#define VPBCNTH	0x2C
-#define  VPBCNTH_MASK	0x01
-
-#define GPLLINDIV	0x40
-#define  GPLLINDIV_MASK	0x3f
-#define  GPLLFBDV8_MASK	0x80
-#define  GPLLINDIV_OFFSET	0
-#define  GPLLFBDV8_OFFSET	7
-
-#define GPLLFBDIV	0x44
-#define  GPLLFBDIV_MASK	0xff
-
-#define GPLLST	0x48
-#define  GPLLFBDV109_MASK	0xc0
-#define  GPLLFBDV109_OFFSET	6
-#define  GPLLST_PLLOTDIV1_MASK	0x07
-#define  GPLLST_PLLOTDIV2_MASK	0x38
-#define  GPLLST_PLLOTDIV1_OFFSET	0
-#define  GPLLST_PLLOTDIV2_OFFSET	3
-
-#define VCD_R_MAX	31
-#define VCD_G_MAX	63
-#define VCD_B_MAX	31
-#define VCD_R_SHIFT	11
-#define VCD_G_SHIFT	5
-#define VCD_B_SHIFT	0
-
-#define VCD_KVM_BW_PCLK 120000000UL
-
-#define GET_RES_RERTY			3
-#define GET_RES_TIMEOUT	300
-#define GET_RES_VALID_RERTY		3
-#define GET_RES_VALID_TIMEOUT	100
-
-#define VCD_MAX_SRC_BUFFER_SIZE	0x500000 /* 1920 * 1200, depth 16 */
 
 struct class *vcd_class;
 
@@ -383,11 +373,9 @@ struct npcm750_vcd {
 	struct regmap *vcd_regmap;
 	struct regmap *gcr_regmap;
 	struct regmap *gfx_regmap;
+	void *virt;
 	resource_size_t size;
 	resource_size_t dma;
-	void *gfx_va;
-	resource_size_t gfx_pa;
-	resource_size_t gfx_size;
 	u32 rect_cnt;
 	u32 status;
 	char *video_name;
@@ -456,74 +444,62 @@ static void npcm750_vcd_ip_reset(struct npcm750_vcd *priv)
 	msleep(100);
 }
 
-static u32 npcm750_vcd_get_gmmap(struct npcm750_vcd *priv)
+static void npcm750_vcd_clear_gmmap(struct npcm750_vcd *priv)
 {
 	struct regmap *gcr = priv->gcr_regmap;
-	u32 intcr, gmmap, addr;
+	unsigned int intcr, gmmap;
+	void __iomem *baseptr = NULL;
 
-#ifdef CONFIG_ARCH_NPCM7XX
-	regmap_read(gcr, INTCR3, &intcr);
-	gmmap = (intcr & INTCR3_GMMAP_MASK);
+	if (of_device_is_compatible(priv->dev->of_node, "nuvoton,npcm750-vcd")) {
+		regmap_read(gcr, INTCR3, &intcr);
+		gmmap = FIELD_GET(INTCR3_GMMAP, intcr);
 
-	switch (gmmap){
-	case INTCR3_GMMAP_128MB:
-		addr = ADDR_GMMAP_128MB;
-		break;
-	case INTCR3_GMMAP_256MB:
-		addr = ADDR_GMMAP_256MB;
-		break;
-	case INTCR3_GMMAP_512MB:
-		addr = ADDR_GMMAP_512MB;
-		break;
-	case INTCR3_GMMAP_1GB:
-		addr = ADDR_GMMAP_1GB;
-		break;
-	case INTCR3_GMMAP_2GB:
-		addr = ADDR_GMMAP_2GB;
-		break;
+		switch (gmmap) {
+		case INTCR3_GMMAP_128MB:
+			baseptr = ioremap_wc(ADDR_GMMAP_128MB, GMMAP_LENGTH);
+			break;
+		case INTCR3_GMMAP_256MB:
+			baseptr = ioremap_wc(ADDR_GMMAP_256MB, GMMAP_LENGTH);
+			break;
+		case INTCR3_GMMAP_512MB:
+			baseptr = ioremap_wc(ADDR_GMMAP_512MB, GMMAP_LENGTH);
+			break;
+		case INTCR3_GMMAP_1GB:
+			baseptr = ioremap_wc(ADDR_GMMAP_1GB, GMMAP_LENGTH);
+			break;
+		case INTCR3_GMMAP_2GB:
+			baseptr = ioremap_wc(ADDR_GMMAP_2GB, GMMAP_LENGTH);
+			break;
+		}
+	} else if (of_device_is_compatible(priv->dev->of_node, "nuvoton,npcm845-vcd")) {
+		regmap_read(gcr, INTCR4, &intcr);
+		gmmap = FIELD_GET(INTCR4_GMMAP, intcr);
+
+		switch (gmmap) {
+		case INTCR4_GMMAP_512MB:
+			baseptr = ioremap_wc(ADDR_GMMAP_512MB, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_512MB_ECC:
+			baseptr = ioremap_wc(ADDR_GMMAP_512MB_ECC, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_1GB:
+			baseptr = ioremap_wc(ADDR_GMMAP_1GB, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_1GB_ECC:
+			baseptr = ioremap_wc(ADDR_GMMAP_1GB_ECC, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_2GB:
+			baseptr = ioremap_wc(ADDR_GMMAP_2GB, GMMAP_LENGTH);
+			break;
+		case INTCR4_GMMAP_2GB_ECC:
+			baseptr = ioremap_wc(ADDR_GMMAP_2GB_ECC, GMMAP_LENGTH);
+			break;
+		}
 	}
-#else
-	regmap_read(gcr, INTCR4, &intcr);
-	gmmap = (intcr & INTCR4_GMMAP_MASK);
 
-	switch (gmmap){
-	case INTCR4_GMMAP_512MB:
-		addr = ADDR_GMMAP_512MB;
-		break;
-	case INTCR4_GMMAP_512MB_ECC:
-		addr = ADDR_GMMAP_512MB_ECC;
-		break;
-	case INTCR4_GMMAP_1GB:
-		addr = ADDR_GMMAP_1GB;
-		break;
-	case INTCR4_GMMAP_1GB_ECC:
-		addr = ADDR_GMMAP_1GB_ECC;
-		break;
-	case INTCR4_GMMAP_2GB:
-		addr = ADDR_GMMAP_2GB;
-		break;
-	case INTCR4_GMMAP_2GB_ECC:
-		addr = ADDR_GMMAP_2GB_ECC;
-		break;
-	}
-#endif
-	return addr;
-}
-
-static void npcm750_vcd_claer_gmmap(struct npcm750_vcd *priv)
-{
-	if (!priv->gfx_va) {
-		void *mem_base = NULL;
-		phys_addr_t pa = npcm750_vcd_get_gmmap(priv);
-
-		mem_base = memremap(pa, GMMAP_LENGTH, MEMREMAP_WC);
-		if (!mem_base)
-			return;
-
-		memset(mem_base, 0, GMMAP_LENGTH);
-		memunmap(mem_base);
-	} else {
-		memset(priv->gfx_va, 0, priv->gfx_size);
+	if (baseptr) {
+		memset(baseptr, 0, GMMAP_LENGTH);
+		iounmap(baseptr);
 	}
 }
 
@@ -958,7 +934,8 @@ static int npcm750_vcd_get_resolution(struct npcm750_vcd *priv)
 			dev_dbg(priv->dev, "invalid resolution %d x %d\n",
 				npcm750_vcd_hres(priv), npcm750_vcd_vres(priv));
 			if (npcm750_vcd_vres(priv) == 0)
-				npcm750_vcd_claer_gmmap(priv);
+				npcm750_vcd_clear_gmmap(priv);
+
 			return -1;
 		}
 
@@ -1580,93 +1557,10 @@ static const struct file_operations npcm750_vcd_fops = {
 	.unlocked_ioctl = npcm750_vcd_ioctl,
 };
 
-static int npcm_gfx_ram(struct npcm750_vcd *priv)
-{
-	int n = 0;
-	struct resource res;
-	struct device *dev = priv->dev;
-	struct device_node *node;
-	resource_size_t start, len;
-
-	node = of_parse_phandle(dev->of_node, "memory-region", 1);
-	if (node) {
-		while (!of_address_to_resource(node, n, &res)) {
-			if (res.start == npcm750_vcd_get_gmmap(priv)) {
-				len = (u32)resource_size(&res);
-				start = (u32)res.start;
-				break;
-			}
-			n++;
-		}
-	} else {
-		dev_dbg(dev, "Cannnot find gfx memory-region\n");
-		return 0;
-	}
-
-	if (start == 0 || !devm_request_mem_region(dev, start, len, "gfx_ram")) {
-		dev_err(dev, "can't reserve gfx ram start 0x%x size 0x%x\n", start, len);
-		return -ENXIO;
-	}
-
-	priv->gfx_va = devm_memremap(dev, start, len, MEMREMAP_WC);
-	if (!priv->gfx_va) {
-		dev_err(dev, "%s: cannot map gfx memory region\n",
-			 __func__);
-		return -ENXIO;
-	}
-
-	priv->gfx_pa = start;
-	priv->gfx_size = len;
-
-	dev_info(dev, "Reserved GFX memory start 0x%x size 0x%x\n", start, len);
-	return 0;
-}
-
-static int npcm750_vcd_ram(struct npcm750_vcd *priv)
-{
-	int ret = 0;
-	struct resource res;
-	struct device *dev = priv->dev;
-	struct device_node *node;
-
-	node = of_parse_phandle(dev->of_node, "memory-region", 0);
-	if (node) {
-		ret = of_address_to_resource(node, 0, &res);
-		of_node_put(node);
-		if (ret) {
-			dev_err(dev, "Couldn't address to resource for vcd reserved memory\n");
-			return -ENODEV;
-		}
-
-		priv->size = (u32)resource_size(&res);
-		priv->dma = (u32)res.start;
-	} else {
-		dev_err(dev, "Cannnot find vcd memory-region\n");
-		return -ENODEV;
-	}
-
-	if (!devm_request_mem_region(dev, priv->dma, priv->size, "vcd_ram")) {
-		dev_err(dev, "can't reserve vcd ram\n");
-		return -ENXIO;
-	}
-
-	dev_info(dev, "Reserved VCD memory start 0x%x size 0x%x\n", priv->dma, priv->size);
-	return 0;
-}
-
-
 static int npcm750_vcd_device_create(struct npcm750_vcd *priv)
 {
 	int ret = 0;
 	struct device *dev = priv->dev;
-
-	ret = npcm750_vcd_ram(priv);
-	if (ret)
-		goto err;
-
-	ret = npcm_gfx_ram(priv);
-	if (ret)
-		goto err;
 
 	ret = of_property_read_u32(dev->of_node,
 			     "de-mode", &priv->de_mode);
@@ -1710,6 +1604,16 @@ err:
 	return ret;
 }
 
+static int npcm750_vcd_alloc_buf(struct npcm750_vcd *priv, size_t size)
+{
+	priv->virt = dma_alloc_coherent(priv->dev, size, &priv->dma, GFP_KERNEL);
+	if (!priv->virt)
+		return -ENOMEM;
+
+	priv->size = size;
+	return 0;
+}
+
 static const struct regmap_config npcm750_vcd_regmap_cfg = {
 	.reg_bits       = 32,
 	.reg_stride     = 4,
@@ -1730,18 +1634,19 @@ static int npcm750_vcd_probe(struct platform_device *pdev)
 
 	priv->dev = dev;
 
-	priv->gcr_regmap = syscon_regmap_lookup_by_phandle(dev->of_node, "gcr-syscon");
+	priv->gcr_regmap = syscon_regmap_lookup_by_phandle(dev->of_node,
+							   "nuvoton,sysgcr");
 	if (IS_ERR(priv->gcr_regmap)) {
-		dev_err(dev, "%s: failed to find gcr-syscon\n",
+		dev_err(dev, "%s: Failed to find nuvoton,sysgcr\n",
 			__func__);
 		ret = IS_ERR(priv->gcr_regmap);
 		goto err;
 	}
 
-
-	priv->gfx_regmap = syscon_regmap_lookup_by_phandle(dev->of_node, "gfxi-syscon");
+	priv->gfx_regmap = syscon_regmap_lookup_by_phandle(dev->of_node,
+							   "nuvoton,sysgfxi");
 	if (IS_ERR(priv->gfx_regmap)) {
-		dev_err(dev, "%s: failed to find gfxi-syscon\n",
+		dev_err(dev, "%s: Failed to find nuvoton,sysgfxi\n",
 			__func__);
 		ret = IS_ERR(priv->gfx_regmap);
 		goto err;
@@ -1770,8 +1675,20 @@ static int npcm750_vcd_probe(struct platform_device *pdev)
 
 	ret = npcm750_vcd_device_create(priv);
 	if (ret) {
-		dev_err(dev, "%s: failed to create device\n",
+		dev_err(dev, "%s: Failed to create device\n",
 			__func__);
+		goto err;
+	}
+
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+	if (ret) {
+		dev_err(dev, "Failed to set DMA mask\n");
+		goto err;
+	}
+
+	ret = npcm750_vcd_alloc_buf(priv, VCD_BUFFER_SIZE);
+	if (ret) {
+		dev_err(dev, "Failed to allocate VCD buffer\n");
 		goto err;
 	}
 
@@ -1796,10 +1713,9 @@ static int npcm750_vcd_remove(struct platform_device *pdev)
 
 	npcm750_vcd_stop(priv);
 
-	if (priv->gfx_va)
-		devm_memunmap(dev, priv->gfx_va);
+	dma_free_coherent(dev, priv->size, priv->virt, priv->dma);
 
-	free_irq(priv->irq, priv->dev);
+	free_irq(priv->irq, dev);
 
 	misc_deregister(&priv->miscdev);
 
