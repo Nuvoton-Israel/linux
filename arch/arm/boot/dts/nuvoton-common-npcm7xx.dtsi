@@ -311,6 +311,7 @@
 		ece: video-codec@f0820000 {
 			compatible = "nuvoton,npcm750-ece";
 			reg = <0xf0820000 0x2000>;
+			interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
 			resets = <&rstc NPCM7XX_RESET_IPSRST2 NPCM7XX_RESET_ECE>;
 			status = "disabled";
 		};
