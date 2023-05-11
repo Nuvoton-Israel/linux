@@ -1792,7 +1792,7 @@ static int npcm_i2c_int_master_handler(struct npcm_i2c *bus)
 		/* reenable slave if it was enabled */
 		if (bus->slave)
 			iowrite8((bus->slave->addr & 0x7F) | NPCM_I2CADDR_SAEN,
-				bus->reg + NPCM_I2CADDR1);
+				 bus->reg + NPCM_I2CADDR1);
 #endif
 		return 0;
 	}
