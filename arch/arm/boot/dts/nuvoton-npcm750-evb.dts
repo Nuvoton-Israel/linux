@@ -64,6 +64,25 @@
 		reg = <0x0 0x20000000>;
 	};
 
+	iio-hwmon {
+		compatible = "iio-hwmon";
+		io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>,
+			<&adc 4>, <&adc 5>, <&adc 6>, <&adc 7>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		heartbeat {
+			label = "heartbeat";
+			gpios = <&gpio4 18 GPIO_ACTIVE_LOW>;
+		};
+
+		identify {
+			label = "identify";
+			gpios = <&gpio4 19 GPIO_ACTIVE_LOW>;
+		};
+	};
+
 	regulators {
 		compatible = "simple-bus";
 		#address-cells = <1>;
@@ -337,6 +356,7 @@
 };
 
 &adc {
+	#io-channel-cells = <1>;
 	status = "okay";
 };
 
