@@ -12,6 +12,8 @@
 	compatible = "nuvoton,npcm750-evb", "nuvoton,npcm750";
 
 	aliases {
+		ethernet0 = &emc0;
+		ethernet1 = &emc1;
 		ethernet2 = &gmac0;
 		ethernet3 = &gmac1;
 		serial0 = &serial0;
@@ -27,7 +29,9 @@
 		udc6 = &udc6;
 		udc7 = &udc7;
 		udc8 = &udc8;
-		udc9 = &udc9;
+		/* udc9 = &udc9; */
+		emmc0 = &sdhci0;
+		emmc1 = &sdhci1;
 		i2c0 = &i2c0;
 		i2c1 = &i2c1;
 		i2c2 = &i2c2;
@@ -80,6 +84,27 @@
 		};
 	};
 
+	regulators {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		reg_vref1_2: regulator@0 {
+			compatible = "regulator-fixed";
+			reg = <0>;
+			regulator-name = "vref_1_2v";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+		};
+		reg_vref3_3: regulator@1 {
+			compatible = "regulator-fixed";
+			reg = <0>;
+			regulator-name = "vref_3_3v";
+			regulator-min-microvolt = <3300000>;
+			regulator-max-microvolt = <3300000>;
+		};
+	};
+
 };
 
 &gmac0 {
@@ -92,7 +117,23 @@
 	status = "okay";
 };
 
+&emc0 {
+	phy-mode = "rmii";
+	#use-ncsi; /* add this to support ncsi */
+	status = "okay";
+};
+
+&emc1 {
+	phy-mode = "rmii";
+	#use-ncsi; /* add this to support ncsi */
+	status = "okay";
+};
+
 &ehci1 {
+	status = "okay";
+};
+
+&ohci1 {
 	status = "okay";
 };
 
@@ -226,7 +267,16 @@
 	status = "okay";
 };
 
-&udc9 {
+/* using USB host instead of UDC9*/
+/* &udc9 {
+	status = "okay";
+}; */
+
+&aes {
+	status = "okay";
+};
+
+&sha {
 	status = "okay";
 };
 
@@ -257,6 +307,37 @@
 &adc {
 	#io-channel-cells = <1>;
 	status = "okay";
+};
+
+&otp {
+	status = "okay";
+};
+
+&lpc_bpc {
+	monitor-ports = <0x80>;
+	status = "okay";
+};
+
+&peci0 {
+	cmd-timeout-ms = <1000>;
+	pull-down = <0>;
+	host-neg-bit-rate = <15>;
+	status = "okay";
+
+	intel-peci-dimmtemp@30 {
+		compatible = "intel,peci-client";
+		reg = <0x30>;
+	};
+};
+
+&gcr {
+	serial_port_mux: mux-controller {
+		compatible = "mmio-mux";
+		#mux-control-cells = <1>;
+
+		mux-reg-masks = <0x38 0x07>;
+		idle-states = <2>; /* Serial port mode 3 (takeover) */
+	};
 };
 
 &lpc_kcs {
@@ -441,6 +522,18 @@
 			reg = <0x800000 0x0>;
 		};
 	};
+};
+
+&sdhci0 {
+	status = "okay";
+};
+
+&sdhci1 {
+	status = "okay";
+};
+
+&pcimbox {
+	status = "okay";
 };
 
 &vcd {

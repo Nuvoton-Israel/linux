@@ -29,12 +29,12 @@
 			input-enable;
 		};
 		pin24_output_high: pin24-output-high {
-			pins = "GPIO24/IOXHDO";
+			pins = "GPIO24/HGPIO4/IOXHDO";
 			bias-disable;
 			output-high;
 		};
 		pin25_output_low: pin25-output-low {
-			pins = "GPIO25/IOXHDI";
+			pins = "GPIO25/HGPIO5/IOXHDI";
 			bias-disable;
 			output-low;
 		};
