@@ -29,7 +29,7 @@
 		udc6 = &udc6;
 		udc7 = &udc7;
 		udc8 = &udc8;
-		udc9 = &udc9;
+		/* udc9 = &udc9; */
 		emmc0 = &sdhci0;
 		emmc1 = &sdhci1;
 		i2c0 = &i2c0;
@@ -172,9 +172,10 @@
 	status = "okay";
 };
 
-&udc9 {
+/* using USB host instead of UDC9*/
+/* &udc9 {
 	status = "okay";
-};
+}; */
 
 &aes {
 	status = "okay";
