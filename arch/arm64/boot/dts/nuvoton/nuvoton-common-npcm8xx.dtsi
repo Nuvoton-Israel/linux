@@ -425,7 +425,7 @@
 			};
 
 			watchdog0: watchdog@801c {
-				compatible = "nuvoton,npcm845-wdt", "nuvoton,npcm750-wdt";
+				compatible = "nuvoton,npcm845-wdt";
 				interrupts = <GIC_SPI 47 IRQ_TYPE_LEVEL_HIGH>;
 				reg = <0x801c 0x4>;
 				status = "disabled";
@@ -434,7 +434,7 @@
 			};
 
 			watchdog1: watchdog@901c {
-				compatible = "nuvoton,npcm845-wdt", "nuvoton,npcm750-wdt";
+				compatible = "nuvoton,npcm845-wdt";
 				interrupts = <GIC_SPI 48 IRQ_TYPE_LEVEL_HIGH>;
 				reg = <0x901c 0x4>;
 				status = "disabled";
@@ -443,7 +443,7 @@
 			};
 
 			watchdog2: watchdog@a01c {
-				compatible = "nuvoton,npcm845-wdt", "nuvoton,npcm750-wdt";
+				compatible = "nuvoton,npcm845-wdt";
 				interrupts = <GIC_SPI 49 IRQ_TYPE_LEVEL_HIGH>;
 				reg = <0xa01c 0x4>;
 				status = "disabled";
