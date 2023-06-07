@@ -134,7 +134,7 @@ struct npcm_video {
 	unsigned int *rect;
 	unsigned int ctrl_cmd;
 	unsigned int op_cmd;
-	bool use_de_mode;
+	bool hsync_mode;
 };
 
 #define to_npcm_video(x) container_of((x), struct npcm_video, v4l2_dev)
@@ -649,7 +649,7 @@ static void npcm_video_adjust_dvodel(struct npcm_video *video)
 	struct regmap *vcd = video->vcd_regmap;
 	unsigned int hact, hdelay, vdelay, val;
 
-	if (video->use_de_mode)
+	if (!video->hsync_mode)
 		return;
 
 	regmap_read(vcd, VCD_HOR_AC_TIM, &val);
@@ -867,7 +867,15 @@ static int npcm_video_start_frame(struct npcm_video *video)
 
 	npcm_video_vcd_state_machine_reset(video);
 
-	if (video->use_de_mode) {
+	if (video->hsync_mode) {
+		regmap_update_bits(gcr, INTCR, INTCR_DEHS, INTCR_DEHS);
+		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, VCD_MODE_DE_HS);
+
+		regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE |
+				   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE,
+				   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
+				   VCD_INTE_IFOR_IE);
+	} else {
 		regmap_read(vcd, VCD_HOR_AC_TIM, &val);
 		regmap_update_bits(vcd, VCD_HOR_AC_LST, VCD_HOR_AC_LAST,
 				   FIELD_GET(VCD_HOR_AC_TIME, val));
@@ -882,14 +890,6 @@ static int npcm_video_start_frame(struct npcm_video *video)
 				   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
 				   VCD_INTE_IFOR_IE | VCD_INTE_HAC_IE |
 				   VCD_INTE_VHT_IE);
-	} else {
-		regmap_update_bits(gcr, INTCR, INTCR_DEHS, INTCR_DEHS);
-		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, VCD_MODE_DE_HS);
-
-		regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE |
-				   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE,
-				   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
-				   VCD_INTE_IFOR_IE);
 	}
 
 	npcm_video_command(video, video->ctrl_cmd);
@@ -1958,8 +1958,8 @@ static int npcm_video_probe(struct platform_device *pdev)
 	if (IS_ERR(video->gfx_regmap))
 		return PTR_ERR(video->gfx_regmap);
 
-	video->use_de_mode = of_property_read_bool(pdev->dev.of_node,
-						   "nuvoton,de-mode");
+	video->hsync_mode = of_property_read_bool(pdev->dev.of_node,
+						  "nuvoton,hsync-mode");
 
 	rc = npcm_video_init(video);
 	if (rc)
