@@ -305,7 +305,6 @@
 			nuvoton,sysgcr = <&gcr>;
 			nuvoton,sysgfxi = <&gfxi>;
 			nuvoton,ece = <&ece>;
-			nuvoton,de-mode;
 			status = "disabled";
 		};
 
