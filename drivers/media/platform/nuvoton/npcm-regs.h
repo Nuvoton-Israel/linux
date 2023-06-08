@@ -74,7 +74,7 @@
 #define VCD_FIFO			0x805c
 #define  VCD_FIFO_TH			0x100350ff
 
-#define VCD_MAX_SRC_BUFFER_SIZE		0x500000 /* 1920 x 1200 x 2 bpp */
+#define VCD_FB_SIZE			0x500000 /* support up to 1920 x 1200 */
 #define VCD_KVM_BW_PCLK			120000000UL
 #define VCD_TIMEOUT_US			300000
 
