@@ -30,8 +30,6 @@
 #include <linux/string.h>
 #include <linux/v4l2-controls.h>
 #include <linux/videodev2.h>
-#include <linux/wait.h>
-#include <linux/workqueue.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-dev.h>
 #include <media/v4l2-device.h>
@@ -42,17 +40,17 @@
 #include <uapi/linux/npcm-video.h>
 #include "npcm-regs.h"
 
-#define DEVICE_NAME			"npcm-video"
-#define MAX_FRAME_RATE			60
-#define MAX_WIDTH			1920
-#define MAX_HEIGHT			1200
-#define MIN_WIDTH			320
-#define MIN_HEIGHT			240
-#define MIN_LP				512
-#define MAX_LP				4096
-#define RECT_W				16
-#define RECT_H				16
-#define BITMAP_SIZE			32
+#define DEVICE_NAME	"npcm-video"
+#define MAX_WIDTH	1920
+#define MAX_HEIGHT	1200
+#define MIN_WIDTH	320
+#define MIN_HEIGHT	240
+#define MIN_LP		512
+#define MAX_LP		4096
+#define RECT_W		16
+#define RECT_H		16
+#define BITMAP_SIZE	32
+#define MAX_REQ_BUFS	10
 
 struct npcm_video_addr {
 	size_t size;
@@ -70,7 +68,6 @@ struct npcm_video_buffer {
 
 enum {
 	VIDEO_STREAMING,
-	VIDEO_FRAME_INPRG,
 	VIDEO_STOPPED,
 };
 
@@ -119,19 +116,17 @@ struct npcm_video {
 	unsigned long flags;
 	unsigned int sequence;
 
-	size_t max_buffer_size;
 	struct npcm_video_addr src;
 	struct reset_control *reset;
 	struct npcm_ece ece;
 
-	unsigned int frame_rate;
 	unsigned int vb_index;
 	unsigned int bytesperline;
 	unsigned int bytesperpixel;
 	unsigned int rect_cnt;
 	unsigned int num_buffers;
 	struct list_head *list;
-	unsigned int *rect;
+	unsigned int rect[MAX_REQ_BUFS];
 	unsigned int ctrl_cmd;
 	unsigned int op_cmd;
 	bool hsync_mode;
@@ -176,7 +171,7 @@ static const struct v4l2_dv_timings_cap npcm_video_timings_cap = {
 
 static DECLARE_BITMAP(bitmap, BITMAP_SIZE);
 
-static const struct npcm_fmt *find_format(struct v4l2_format *f)
+static const struct npcm_fmt *npcm_video_find_format(struct v4l2_format *f)
 {
 	const struct npcm_fmt *fmt;
 	unsigned int k;
@@ -372,22 +367,20 @@ static void npcm_video_ece_stop(struct npcm_video *video)
 	npcm_video_ece_clear_rect_offset(video);
 }
 
-static bool npcm_video_alloc_buf(struct npcm_video *video,
-				 struct npcm_video_addr *addr, size_t size)
+static bool npcm_video_alloc_fb(struct npcm_video *video,
+				struct npcm_video_addr *addr)
 {
-	if (size > VCD_MAX_SRC_BUFFER_SIZE)
-		size = VCD_MAX_SRC_BUFFER_SIZE;
-
-	addr->virt = dma_alloc_coherent(video->dev, size, &addr->dma, GFP_KERNEL);
+	addr->virt = dma_alloc_coherent(video->dev, VCD_FB_SIZE, &addr->dma,
+					GFP_KERNEL);
 	if (!addr->virt)
 		return false;
 
-	addr->size = size;
+	addr->size = VCD_FB_SIZE;
 	return true;
 }
 
-static void npcm_video_free_buf(struct npcm_video *video,
-				struct npcm_video_addr *addr)
+static void npcm_video_free_fb(struct npcm_video *video,
+			       struct npcm_video_addr *addr)
 {
 	dma_free_coherent(video->dev, addr->size, addr->virt, addr->dma);
 	addr->size = 0;
@@ -411,7 +404,8 @@ static void npcm_video_free_diff_table(struct npcm_video *video)
 	}
 }
 
-static unsigned int npcm_video_add_rect(struct npcm_video *video, unsigned int index,
+static unsigned int npcm_video_add_rect(struct npcm_video *video,
+					unsigned int index,
 					unsigned int x, unsigned int y,
 					unsigned int w, unsigned int h)
 {
@@ -493,7 +487,8 @@ static struct rect_list *npcm_video_new_rect(struct npcm_video *video,
 }
 
 static int npcm_video_find_rect(struct npcm_video *video,
-				struct rect_list_info *info, unsigned int offset)
+				struct rect_list_info *info,
+				unsigned int offset)
 {
 	if (offset < info->tile_perline) {
 		info->list = npcm_video_new_rect(video, offset, info->index);
@@ -768,7 +763,8 @@ static unsigned int npcm_video_get_bpp(struct npcm_video *video)
  * Pitch must be a power of 2, >= linebytes,
  * at least 512, and no more than 4096.
  */
-static void npcm_video_set_linepitch(struct npcm_video *video, unsigned int linebytes)
+static void npcm_video_set_linepitch(struct npcm_video *video,
+				     unsigned int linebytes)
 {
 	struct regmap *vcd = video->vcd_regmap;
 	unsigned int pitch = MIN_LP;
@@ -862,7 +858,6 @@ static int npcm_video_start_frame(struct npcm_video *video)
 		return 0;
 	}
 
-	set_bit(VIDEO_FRAME_INPRG, &video->flags);
 	spin_unlock_irqrestore(&video->lock, flags);
 
 	npcm_video_vcd_state_machine_reset(video);
@@ -1052,7 +1047,6 @@ static int npcm_video_set_resolution(struct npcm_video *video,
 	npcm_video_kvm_bw(video, timing->pixelclock > VCD_KVM_BW_PCLK);
 	npcm_video_gfx_reset(video);
 	regmap_read(vcd, VCD_MODE, &mode);
-	clear_bit(VIDEO_FRAME_INPRG, &video->flags);
 
 	dev_dbg(video->dev, "VCD mode = 0x%x, %s mode\n", mode,
 		npcm_video_is_mga(video) ? "Hi Res" : "VGA");
@@ -1069,9 +1063,8 @@ static void npcm_video_start(struct npcm_video *video)
 {
 	npcm_video_init_reg(video);
 
-	video->max_buffer_size = VCD_MAX_SRC_BUFFER_SIZE;
-	if (!npcm_video_alloc_buf(video, &video->src, video->max_buffer_size)) {
-		dev_err(video->dev, "Failed to allocate VCD buffer\n");
+	if (!npcm_video_alloc_fb(video, &video->src)) {
+		dev_err(video->dev, "Failed to allocate VCD frame buffer\n");
 		return;
 	}
 
@@ -1107,11 +1100,8 @@ static void npcm_video_start(struct npcm_video *video)
 static void npcm_video_stop(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	unsigned long flags;
 
-	spin_lock_irqsave(&video->lock, flags);
 	set_bit(VIDEO_STOPPED, &video->flags);
-	spin_unlock_irqrestore(&video->lock, flags);
 	cancel_work_sync(&video->res_work);
 
 	regmap_write(vcd, VCD_INTE, 0);
@@ -1120,15 +1110,13 @@ static void npcm_video_stop(struct npcm_video *video)
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 
 	if (video->src.size)
-		npcm_video_free_buf(video, &video->src);
+		npcm_video_free_fb(video, &video->src);
 
 	if (video->list)
 		npcm_video_free_diff_table(video);
 
 	kfree(video->list);
 	video->list = NULL;
-	kfree(video->rect);
-	video->rect = NULL;
 
 	video->v4l2_input_status = V4L2_IN_ST_NO_SIGNAL;
 	video->flags = 0;
@@ -1208,10 +1196,8 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 
 	if (test_bit(VIDEO_STOPPED, &video->flags) ||
-	    !test_bit(VIDEO_STREAMING, &video->flags)) {
-		clear_bit(VIDEO_FRAME_INPRG, &video->flags);
+	    !test_bit(VIDEO_STREAMING, &video->flags))
 		return IRQ_NONE;
-	}
 
 	if (status & VCD_STAT_DONE) {
 		regmap_write(vcd, VCD_INTE, 0);
@@ -1220,7 +1206,6 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 					       struct npcm_video_buffer, link);
 		if (!buf) {
 			spin_unlock(&video->lock);
-			clear_bit(VIDEO_FRAME_INPRG, &video->flags);
 			return IRQ_NONE;
 		}
 
@@ -1248,7 +1233,6 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 		list_del(&buf->link);
 		spin_unlock(&video->lock);
-		clear_bit(VIDEO_FRAME_INPRG, &video->flags);
 		return IRQ_HANDLED;
 	}
 
@@ -1293,13 +1277,20 @@ static int npcm_video_enum_format(struct file *file, void *fh,
 static int npcm_video_try_format(struct file *file, void *fh,
 				 struct v4l2_format *f)
 {
+	struct npcm_video *video = video_drvdata(file);
 	const struct npcm_fmt *fmt;
 
-	fmt = find_format(f);
-	if (!fmt) {
+	fmt = npcm_video_find_format(f);
+	if (!fmt)
 		f->fmt.pix.pixelformat = npcm_fmt_list[0].fourcc;
-		fmt = find_format(f);
-	}
+
+	f->fmt.pix.field = V4L2_FIELD_NONE;
+	f->fmt.pix.colorspace = V4L2_COLORSPACE_SRGB;
+	f->fmt.pix.quantization = V4L2_QUANTIZATION_FULL_RANGE;
+	f->fmt.pix.width = video->pix_fmt.width;
+	f->fmt.pix.height = video->pix_fmt.height;
+	f->fmt.pix.bytesperline = video->bytesperline;
+	f->fmt.pix.sizeimage = video->pix_fmt.sizeimage;
 
 	return 0;
 }
@@ -1359,43 +1350,6 @@ static int npcm_video_set_input(struct file *file, void *fh, unsigned int i)
 {
 	if (i)
 		return -EINVAL;
-
-	return 0;
-}
-
-static int npcm_video_get_parm(struct file *file, void *fh,
-			       struct v4l2_streamparm *a)
-{
-	struct npcm_video *video = video_drvdata(file);
-
-	a->parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
-	a->parm.capture.readbuffers = 3;
-	a->parm.capture.timeperframe.numerator = 1;
-	if (!video->frame_rate)
-		a->parm.capture.timeperframe.denominator = MAX_FRAME_RATE;
-	else
-		a->parm.capture.timeperframe.denominator = video->frame_rate;
-
-	return 0;
-}
-
-static int npcm_video_set_parm(struct file *file, void *fh,
-			       struct v4l2_streamparm *a)
-{
-	unsigned int frame_rate = 0;
-
-	a->parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
-	a->parm.capture.readbuffers = 3;
-
-	if (a->parm.capture.timeperframe.numerator)
-		frame_rate = a->parm.capture.timeperframe.denominator /
-			     a->parm.capture.timeperframe.numerator;
-
-	if (!frame_rate || frame_rate > MAX_FRAME_RATE) {
-		frame_rate = 0;
-		a->parm.capture.timeperframe.denominator = MAX_FRAME_RATE;
-		a->parm.capture.timeperframe.numerator = 1;
-	}
 
 	return 0;
 }
@@ -1500,9 +1454,6 @@ static const struct v4l2_ioctl_ops npcm_video_ioctls = {
 	.vidioc_enum_input = npcm_video_enum_input,
 	.vidioc_g_input = npcm_video_get_input,
 	.vidioc_s_input = npcm_video_set_input,
-
-	.vidioc_g_parm = npcm_video_get_parm,
-	.vidioc_s_parm = npcm_video_set_parm,
 
 	.vidioc_s_dv_timings = npcm_video_set_dv_timings,
 	.vidioc_g_dv_timings = npcm_video_get_dv_timings,
@@ -1639,21 +1590,18 @@ static int npcm_video_queue_setup(struct vb2_queue *q, unsigned int *num_buffers
 	unsigned int i;
 
 	if (*num_planes) {
-		if (sizes[0] < video->max_buffer_size)
+		if (sizes[0] < video->pix_fmt.sizeimage)
 			return -EINVAL;
 
 		return 0;
 	}
 
 	*num_planes = 1;
-	sizes[0] = video->max_buffer_size;
 
-	kfree(video->rect);
-	video->rect = NULL;
+	if (*num_buffers > MAX_REQ_BUFS)
+		*num_buffers = MAX_REQ_BUFS;
 
-	video->rect = kcalloc(*num_buffers, sizeof(*video->rect), GFP_KERNEL);
-	if (!video->rect)
-		return -ENOMEM;
+	sizes[0] = video->pix_fmt.sizeimage;
 
 	if (video->list) {
 		npcm_video_free_diff_table(video);
@@ -1662,10 +1610,8 @@ static int npcm_video_queue_setup(struct vb2_queue *q, unsigned int *num_buffers
 	}
 
 	video->list = kzalloc(sizeof(*video->list) * *num_buffers, GFP_KERNEL);
-	if (!video->list) {
-		kfree(video->rect);
+	if (!video->list)
 		return -ENOMEM;
-	}
 
 	for (i = 0; i < *num_buffers; i++)
 		INIT_LIST_HEAD(&video->list[i]);
@@ -1678,7 +1624,7 @@ static int npcm_video_buf_prepare(struct vb2_buffer *vb)
 {
 	struct npcm_video *video = vb2_get_drv_priv(vb->vb2_queue);
 
-	if (vb2_plane_size(vb, 0) < video->max_buffer_size)
+	if (vb2_plane_size(vb, 0) < video->pix_fmt.sizeimage)
 		return -EINVAL;
 
 	return 0;
@@ -1771,6 +1717,7 @@ static int npcm_video_setup_video(struct npcm_video *video)
 	video->pix_fmt.pixelformat = V4L2_PIX_FMT_HEXTILE;
 	video->pix_fmt.field = V4L2_FIELD_NONE;
 	video->pix_fmt.colorspace = V4L2_COLORSPACE_SRGB;
+	video->pix_fmt.quantization = V4L2_QUANTIZATION_FULL_RANGE;
 	video->v4l2_input_status = V4L2_IN_ST_NO_SIGNAL;
 
 	rc = v4l2_device_register(video->dev, v4l2_dev);
@@ -1792,7 +1739,7 @@ static int npcm_video_setup_video(struct npcm_video *video)
 	v4l2_dev->ctrl_handler = &video->ctrl_handler;
 
 	vbq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	vbq->io_modes = VB2_MMAP | VB2_READ | VB2_DMABUF;
+	vbq->io_modes = VB2_MMAP | VB2_DMABUF;
 	vbq->dev = v4l2_dev->dev;
 	vbq->lock = &video->video_lock;
 	vbq->ops = &npcm_video_vb2_ops;
@@ -1809,8 +1756,7 @@ static int npcm_video_setup_video(struct npcm_video *video)
 	}
 	vdev->queue = vbq;
 	vdev->fops = &npcm_video_v4l2_fops;
-	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
-			    V4L2_CAP_STREAMING;
+	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
 	vdev->v4l2_dev = v4l2_dev;
 	strscpy(vdev->name, DEVICE_NAME, sizeof(vdev->name));
 	vdev->vfl_type = VFL_TYPE_VIDEO;
@@ -1890,7 +1836,6 @@ static int npcm_video_probe(struct platform_device *pdev)
 	if (!video)
 		return -ENOMEM;
 
-	video->frame_rate = MAX_FRAME_RATE;
 	video->dev = &pdev->dev;
 	spin_lock_init(&video->lock);
 	mutex_init(&video->video_lock);
