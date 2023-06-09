@@ -196,6 +196,16 @@ config SSIF_IPMI_BMC
 	  The driver implements the BMC side of the SMBus system
 	  interface (SSIF).
 
+config NPCM7XX_SSIF_IPMI_BMC
+        depends on ARCH_NPCM7XX || COMPILE_TEST
+        select SSIF_IPMI_BMC
+        select I2C_SLAVE
+        tristate "Nuvonton SSIF IPMI BMC driver"
+        help
+          Provides a driver for the Nuvoton SSIF IPMI interface
+          The driver implements the BMC side of
+          the IPMI over SSIF interface.
+
 config IPMB_DEVICE_INTERFACE
 	tristate 'IPMB Interface handler'
 	depends on I2C
