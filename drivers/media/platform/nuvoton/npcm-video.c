@@ -51,6 +51,8 @@
 #define RECT_H		16
 #define BITMAP_SIZE	32
 #define MAX_REQ_BUFS	10
+#define HSYNC_DEL_ADD	13
+#define VSYNC_DEL_ADD	3
 
 struct npcm_video_addr {
 	size_t size;
@@ -130,6 +132,8 @@ struct npcm_video {
 	unsigned int ctrl_cmd;
 	unsigned int op_cmd;
 	bool hsync_mode;
+	unsigned int hdelay_add; /* compensation for HSYNC delay */
+	unsigned int vdelay_add; /* compensation for VSYNC delay */
 };
 
 #define to_npcm_video(x) container_of((x), struct npcm_video, v4l2_dev)
@@ -651,9 +655,8 @@ static void npcm_video_adjust_dvodel(struct npcm_video *video)
 	hact = FIELD_GET(VCD_HOR_AC_TIME, val);
 
 	if (hact != 0x3fff) {
-		/* Compensate for HSYNC and VSYNC delay */
-		hdelay = npcm_video_hbp(video) + hact + 13;
-		vdelay = npcm_video_vbp(video) + 3;
+		hdelay = npcm_video_hbp(video) + hact + video->hdelay_add;
+		vdelay = npcm_video_vbp(video) + video->vdelay_add;
 
 		regmap_write(vcd, VCD_DVO_DEL,
 			     FIELD_PREP(VCD_DVO_DEL_HSYNC_DEL, hdelay) |
@@ -1787,6 +1790,7 @@ static int npcm_video_init(struct npcm_video *video)
 {
 	struct device *dev = video->dev;
 	int irq, rc;
+	unsigned int hdelay_add, vdelay_add;
 
 	irq = irq_of_parse_and_map(dev->of_node, 0);
 	if (!irq) {
@@ -1807,6 +1811,18 @@ static int npcm_video_init(struct npcm_video *video)
 		dev_err(dev, "Failed to set DMA mask\n");
 		of_reserved_mem_device_release(dev);
 	}
+
+	video->hsync_mode = of_property_read_bool(dev->of_node, "nuvoton,hsync-mode");
+
+	if (!of_property_read_u32(dev->of_node, "nuvoton,hsync-delay-add", &hdelay_add))
+		video->hdelay_add = hdelay_add;
+	else
+		video->hdelay_add = HSYNC_DEL_ADD;
+
+	if (!of_property_read_u32(dev->of_node, "nuvoton,vsync-delay-add", &vdelay_add))
+		video->vdelay_add = vdelay_add;
+	else
+		video->vdelay_add = VSYNC_DEL_ADD;
 
 	return rc;
 }
@@ -1902,9 +1918,6 @@ static int npcm_video_probe(struct platform_device *pdev)
 							    "nuvoton,sysgfxi");
 	if (IS_ERR(video->gfx_regmap))
 		return PTR_ERR(video->gfx_regmap);
-
-	video->hsync_mode = of_property_read_bool(pdev->dev.of_node,
-						  "nuvoton,hsync-mode");
 
 	rc = npcm_video_init(video);
 	if (rc)
