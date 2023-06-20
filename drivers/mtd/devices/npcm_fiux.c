@@ -108,6 +108,7 @@ static int npcm_fiux_probe(struct spi_mem *spimem)
 {
 	struct spi_device *spi = spimem->spi;
 	struct flash_platform_data *data = dev_get_platdata(&spi->dev);
+	const char *fiux_name = "mtd-ram-fiux";
 	u32 wrcmd, wraddr, wrdata;
 	struct npcm_fiux *flash;
 	struct mtd_info *mtd;
@@ -165,6 +166,8 @@ static int npcm_fiux_probe(struct spi_mem *spimem)
 		wrcmd = 0x2;
 	}
 
+	of_property_read_string(spi->dev.of_node, "label", &fiux_name);
+
 	mtd = &flash->mtd_ram;
 
 	spi_mem_set_drvdata(spimem, flash);
@@ -173,7 +176,7 @@ static int npcm_fiux_probe(struct spi_mem *spimem)
 
 	/* Populate mtd_info data structure */
 	*mtd = (struct mtd_info) {
-		.name		= "mtd-ram-fiux",
+		.name		= fiux_name,
 		.type		= MTD_RAM,
 		.priv		= flash,
 		.size		= MAP_SIZE_8MB,
