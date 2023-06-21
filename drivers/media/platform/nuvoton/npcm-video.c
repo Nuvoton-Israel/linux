@@ -1877,12 +1877,17 @@ static int npcm_video_probe(struct platform_device *pdev)
 		return PTR_ERR(ece_node);
 	}
 
+	if (!of_device_is_available(ece_node)) {
+		dev_err(&pdev->dev, "ECE status property is disabled\n");
+		return -ENODEV;
+	}
+
 	ece_pdev = of_find_device_by_node(ece_node);
-	of_node_put(ece_node);
 	if (IS_ERR(ece_pdev)) {
 		dev_err(&pdev->dev, "Failed to find ECE device\n");
 		return PTR_ERR(ece_pdev);
 	}
+	of_node_put(ece_node);
 
 	regs = devm_platform_ioremap_resource(ece_pdev, 0);
 	if (IS_ERR(regs)) {
