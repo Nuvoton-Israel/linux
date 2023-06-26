@@ -214,34 +214,6 @@
 #define  INTCR2_GIHCRST			BIT(5)
 #define  INTCR2_GIVCRST			BIT(6)
 
-#define INTCR3				0x9c
-#define  INTCR3_GMMAP			GENMASK(10, 8)
-#define  INTCR3_GMMAP_128MB		0
-#define  INTCR3_GMMAP_256MB		1
-#define  INTCR3_GMMAP_512MB		2
-#define  INTCR3_GMMAP_1GB		3
-#define  INTCR3_GMMAP_2GB		4
-
-#define INTCR4				0xc0
-#define  INTCR4_GMMAP			GENMASK(22, 16)
-#define  INTCR4_GMMAP_512MB		0x1f
-#define  INTCR4_GMMAP_512MB_ECC		0x1b
-#define  INTCR4_GMMAP_1GB		0x3f
-#define  INTCR4_GMMAP_1GB_ECC		0x37
-#define  INTCR4_GMMAP_2GB		0x7f
-#define  INTCR4_GMMAP_2GB_ECC		0x6f
-
-#define  ADDR_GMMAP_128MB		0x07000000
-#define  ADDR_GMMAP_256MB		0x0f000000
-#define  ADDR_GMMAP_512MB		0x1f000000
-#define  ADDR_GMMAP_512MB_ECC		0x1b000000
-#define  ADDR_GMMAP_1GB			0x3f000000
-#define  ADDR_GMMAP_1GB_ECC		0x37000000
-#define  ADDR_GMMAP_2GB			0x7f000000
-#define  ADDR_GMMAP_2GB_ECC		0x6f000000
-
-#define GMMAP_LENGTH			0xc00000 /* 4MB preserved, total 16MB */
-
 #define MFSEL1				0x0c
 #define  MFSEL1_DVH1SEL			BIT(27)
 
@@ -442,65 +414,6 @@ static void npcm750_vcd_ip_reset(struct npcm750_vcd *priv)
 	msleep(100);
 	reset_control_deassert(priv->reset);
 	msleep(100);
-}
-
-static void npcm750_vcd_clear_gmmap(struct npcm750_vcd *priv)
-{
-	struct regmap *gcr = priv->gcr_regmap;
-	unsigned int intcr, gmmap;
-	void __iomem *baseptr = NULL;
-
-	if (of_device_is_compatible(priv->dev->of_node, "nuvoton,npcm750-vcd")) {
-		regmap_read(gcr, INTCR3, &intcr);
-		gmmap = FIELD_GET(INTCR3_GMMAP, intcr);
-
-		switch (gmmap) {
-		case INTCR3_GMMAP_128MB:
-			baseptr = ioremap_wc(ADDR_GMMAP_128MB, GMMAP_LENGTH);
-			break;
-		case INTCR3_GMMAP_256MB:
-			baseptr = ioremap_wc(ADDR_GMMAP_256MB, GMMAP_LENGTH);
-			break;
-		case INTCR3_GMMAP_512MB:
-			baseptr = ioremap_wc(ADDR_GMMAP_512MB, GMMAP_LENGTH);
-			break;
-		case INTCR3_GMMAP_1GB:
-			baseptr = ioremap_wc(ADDR_GMMAP_1GB, GMMAP_LENGTH);
-			break;
-		case INTCR3_GMMAP_2GB:
-			baseptr = ioremap_wc(ADDR_GMMAP_2GB, GMMAP_LENGTH);
-			break;
-		}
-	} else if (of_device_is_compatible(priv->dev->of_node, "nuvoton,npcm845-vcd")) {
-		regmap_read(gcr, INTCR4, &intcr);
-		gmmap = FIELD_GET(INTCR4_GMMAP, intcr);
-
-		switch (gmmap) {
-		case INTCR4_GMMAP_512MB:
-			baseptr = ioremap_wc(ADDR_GMMAP_512MB, GMMAP_LENGTH);
-			break;
-		case INTCR4_GMMAP_512MB_ECC:
-			baseptr = ioremap_wc(ADDR_GMMAP_512MB_ECC, GMMAP_LENGTH);
-			break;
-		case INTCR4_GMMAP_1GB:
-			baseptr = ioremap_wc(ADDR_GMMAP_1GB, GMMAP_LENGTH);
-			break;
-		case INTCR4_GMMAP_1GB_ECC:
-			baseptr = ioremap_wc(ADDR_GMMAP_1GB_ECC, GMMAP_LENGTH);
-			break;
-		case INTCR4_GMMAP_2GB:
-			baseptr = ioremap_wc(ADDR_GMMAP_2GB, GMMAP_LENGTH);
-			break;
-		case INTCR4_GMMAP_2GB_ECC:
-			baseptr = ioremap_wc(ADDR_GMMAP_2GB_ECC, GMMAP_LENGTH);
-			break;
-		}
-	}
-
-	if (baseptr) {
-		memset(baseptr, 0, GMMAP_LENGTH);
-		iounmap(baseptr);
-	}
 }
 
 static u8 npcm750_vcd_is_mga(struct npcm750_vcd *priv)
@@ -899,8 +812,6 @@ static int npcm750_vcd_get_resolution(struct npcm750_vcd *priv)
 		if (!vaild) {
 			dev_dbg(priv->dev, "invalid resolution %d x %d\n",
 				npcm750_vcd_hres(priv), npcm750_vcd_vres(priv));
-			if (npcm750_vcd_vres(priv) == 0)
-				npcm750_vcd_clear_gmmap(priv);
 
 			return -1;
 		}
