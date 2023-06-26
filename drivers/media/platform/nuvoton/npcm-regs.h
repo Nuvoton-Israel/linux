@@ -125,34 +125,6 @@
 #define  INTCR2_GIHCRST			BIT(5)
 #define  INTCR2_GIVCRST			BIT(6)
 
-#define INTCR3				0x9c
-#define  INTCR3_GMMAP			GENMASK(10, 8)
-#define   INTCR3_GMMAP_128MB		0
-#define   INTCR3_GMMAP_256MB		1
-#define   INTCR3_GMMAP_512MB		2
-#define   INTCR3_GMMAP_1GB		3
-#define   INTCR3_GMMAP_2GB		4
-
-#define INTCR4				0xc0
-#define  INTCR4_GMMAP			GENMASK(22, 16)
-#define  INTCR4_GMMAP_512MB		0x1f
-#define  INTCR4_GMMAP_512MB_ECC		0x1b
-#define  INTCR4_GMMAP_1GB		0x3f
-#define  INTCR4_GMMAP_1GB_ECC		0x37
-#define  INTCR4_GMMAP_2GB		0x7f
-#define  INTCR4_GMMAP_2GB_ECC		0x6f
-
-#define ADDR_GMMAP_128MB		0x07000000
-#define ADDR_GMMAP_256MB		0x0f000000
-#define ADDR_GMMAP_512MB		0x1f000000
-#define ADDR_GMMAP_512MB_ECC		0x1b000000
-#define ADDR_GMMAP_1GB			0x3f000000
-#define ADDR_GMMAP_1GB_ECC		0x37000000
-#define ADDR_GMMAP_2GB			0x7f000000
-#define ADDR_GMMAP_2GB_ECC		0x6f000000
-
-#define GMMAP_LENGTH			0xc00000 /* 4MB preserved, total 16MB */
-
 /* GFXI Register */
 #define DISPST				0x00
 #define  DISPST_HSCROFF			BIT(1)
