@@ -1477,9 +1477,6 @@ static void npcm_video_res_work(struct work_struct *w)
 	struct npcm_video *video = container_of(w, struct npcm_video, res_work);
 
 	npcm_video_detect_resolution(video);
-
-	if (video->v4l2_input_status)
-		npcm_video_clear_gmmap(video);
 }
 
 static int npcm_video_open(struct file *file)
