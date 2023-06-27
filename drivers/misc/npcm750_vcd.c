@@ -7,6 +7,7 @@
  */
 
 #include <asm/fb.h>
+#include <linux/bitfield.h>
 #include <linux/cdev.h>
 #include <linux/compat.h>
 #include <linux/completion.h>
@@ -57,6 +58,9 @@
 #define GET_RES_VALID_RERTY		3
 #define GET_RES_VALID_TIMEOUT		100
 
+#define HSYNC_DEL_ADD	13
+#define VSYNC_DEL_ADD	3
+
 /* VCD  Registers */
 #define VCD_DIFF_TBL			0x0000
 #define VCD_FBA_ADR			0x8000
@@ -71,10 +75,8 @@
 
 #define VCD_DVO_DEL			0x8010
 #define  VCD_DVO_DEL_VERT_HOFF		GENMASK(31, 27)
-#define  VCD_DVO_DEL_MASK		0x7ff
-#define  VCD_DVO_DEL_VERT_HOFF_OFFSET	27
-#define  VCD_DVO_DEL_VSYNC_DEL_OFFSET	16
-#define  VCD_DVO_DEL_HSYNC_DEL_OFFSET	0
+#define  VCD_DVO_DEL_HSYNC_DEL		GENMASK(10, 0)
+#define  VCD_DVO_DEL_VSYNC_DEL		GENMASK(26, 16)
 
 #define VCD_MODE			0x8014
 #define  VCD_MODE_VCDE			BIT(0)
@@ -231,17 +233,17 @@
 #define HVCNTH				0x14
 #define  HVCNTH_MASK			0x07
 #define HBPCNTL				0x18
-#define  HBPCNTL_MASK			0xff
+#define  HBPCNTL_MASK			GENMASK(7, 0)
 #define HBPCNTH				0x1c
-#define  HBPCNTH_MASK			0x01
+#define  HBPCNTH_MASK			BIT(0)
 #define VVCNTL				0x20
 #define  VVCNTL_MASK			0xff
 #define VVCNTH				0x24
 #define  VVCNTH_MASK			0x07
-#define VPBCNTL				0x28
-#define  VPBCNTL_MASK			0xff
-#define VPBCNTH				0x2c
-#define  VPBCNTH_MASK			0x01
+#define VBPCNTL				0x28
+#define  VBPCNTL_MASK			GENMASK(7, 0)
+#define VBPCNTH				0x2c
+#define  VBPCNTH_MASK			BIT(0)
 
 #define GPLLINDIV			0x40
 #define  GPLLINDIV_MASK			0x3f
@@ -355,7 +357,9 @@ struct npcm750_vcd {
 	char *video_name;
 	int cmd;
 	atomic_t clients;
-	int de_mode;
+	bool hsync_mode;
+	unsigned int hdelay_add; /* compensation for HSYNC delay */
+	unsigned int vdelay_add; /* compensation for VSYNC delay */
 	int irq;
 	struct completion complete;
 	u32 hortact;
@@ -464,15 +468,52 @@ static void npcm750_vcd_local_display(struct npcm750_vcd *priv, u8 enable)
 	}
 }
 
-static int npcm750_vcd_dvod(struct npcm750_vcd *priv, u32 hdelay, u32 vdelay)
+static unsigned int npcm750_vcd_hbp(struct npcm750_vcd *priv)
+{
+	struct regmap *gfxi = priv->gfx_regmap;
+	unsigned int hbpcnth, hbpcntl;
+
+	regmap_read(gfxi, HBPCNTH, &hbpcnth);
+	regmap_read(gfxi, HBPCNTL, &hbpcntl);
+
+	return ((hbpcnth & HBPCNTH_MASK) << 8) + (hbpcntl & HBPCNTL_MASK);
+}
+
+static unsigned int npcm750_vcd_vbp(struct npcm750_vcd *priv)
+{
+	struct regmap *gfxi = priv->gfx_regmap;
+	unsigned int vbpcnth, vbpcntl;
+
+	regmap_read(gfxi, VBPCNTH, &vbpcnth);
+	regmap_read(gfxi, VBPCNTL, &vbpcntl);
+
+	return ((vbpcnth & VBPCNTH_MASK) << 8) + (vbpcntl & VBPCNTL_MASK);
+}
+
+static void npcm750_vcd_adjust_dvodel(struct npcm750_vcd *priv)
 {
 	struct regmap *vcd = priv->vcd_regmap;
+	unsigned int hact, hdelay, vdelay, val;
 
-	regmap_write(vcd, VCD_DVO_DEL,
-		     (hdelay & VCD_DVO_DEL_MASK) |
-		     ((vdelay & VCD_DVO_DEL_MASK) << VCD_DVO_DEL_VSYNC_DEL_OFFSET));
+	if (!priv->hsync_mode)
+		return;
 
-	return 0;
+	regmap_read(vcd, VCD_HOR_AC_TIM, &val);
+	hact = FIELD_GET(VCD_HOR_AC_TIM_VALUE, val);
+
+	if (hact != 0x3fff) {
+		if (hact < npcm750_vcd_hres(priv))
+			hdelay = npcm750_vcd_hbp(priv) + hact + priv->hdelay_add;
+		else
+			hdelay = npcm750_vcd_hbp(priv);
+
+		vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add;
+
+		regmap_write(vcd, VCD_DVO_DEL,
+			     FIELD_PREP(VCD_DVO_DEL_HSYNC_DEL, hdelay) |
+			     FIELD_PREP(VCD_DVO_DEL_VSYNC_DEL, vdelay));
+	}
+
 }
 
 static int npcm750_vcd_get_bpp(struct npcm750_vcd *priv)
@@ -631,20 +672,6 @@ static void npcm750_vcd_reset(struct npcm750_vcd *priv)
 
 	/* Inactive graphic reset */
 	regmap_update_bits(gcr, INTCR2, INTCR2_GIRST2, 0);
-}
-
-static void npcm750_vcd_dehs(struct npcm750_vcd *priv, int is_de)
-{
-	struct regmap *gcr = priv->gcr_regmap;
-	struct regmap *vcd = priv->vcd_regmap;
-
-	if (is_de) {
-		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, 0);
-		regmap_update_bits(gcr, INTCR, INTCR_DEHS, 0);
-	} else {
-		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, VCD_MODE_DE_HS);
-		regmap_update_bits(gcr, INTCR, INTCR_DEHS, INTCR_DEHS);
-	}
 }
 
 static void npcm750_vcd_kvm_bw(struct npcm750_vcd *priv, u8 bandwidth)
@@ -990,12 +1017,6 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 	regmap_update_bits(gcr, INTCR2, INTCR2_GIHCRST | INTCR2_GIVCRST,
 			   INTCR2_GIHCRST | INTCR2_GIVCRST);
 
-	/* Select KVM GFX input */
-	if (!priv->de_mode)
-		regmap_update_bits(gcr, MFSEL1, MFSEL1_DVH1SEL, MFSEL1_DVH1SEL);
-	else
-		regmap_update_bits(gcr, MFSEL1, MFSEL1_DVH1SEL, 0);
-
 	/* IP Reset */
 	npcm750_vcd_ip_reset(priv);
 
@@ -1028,7 +1049,13 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 			   VCD_MODE_CM565 | VCD_MODE_KVM_BW_SET);
 
 	/* Set DVDE/DVHSYNC */
-	npcm750_vcd_dehs(priv, priv->de_mode);
+	if (priv->hsync_mode) {
+		regmap_update_bits(gcr, INTCR, INTCR_DEHS, INTCR_DEHS);
+		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, VCD_MODE_DE_HS);
+	} else {
+		regmap_update_bits(gcr, INTCR, INTCR_DEHS, 0);
+		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, 0);
+	}
 
 	priv->info.vcd_fb = priv->dma;
 	priv->info.r_max = VCD_R_MAX;
@@ -1047,13 +1074,8 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 	/* Detect video mode */
 	npcm750_vcd_detect_video_mode(priv);
 
-	if (!priv->de_mode) {
-		regmap_update_bits(vcd, VCD_RCHG, VCD_RCHG_TIM_PRSCL,
-				   0x01 << VCD_RCHG_TIM_PRSCL_OFFSET);
-	} else {
-		npcm750_vcd_dvod(priv, 0, 0);
-		regmap_write(vcd, VCD_RCHG, 0);
-	}
+	regmap_update_bits(vcd, VCD_RCHG, VCD_RCHG_TIM_PRSCL,
+			   0x01 << VCD_RCHG_TIM_PRSCL_OFFSET);
 
 	return 0;
 }
@@ -1274,6 +1296,8 @@ static long npcm_do_vcd_ioctl(struct npcm750_vcd *priv, unsigned int cmd,
 				npcm_short_vcd_reset(priv);
 				npcm750_vcd_get_diff_table(priv);
 			}
+
+			npcm750_vcd_adjust_dvodel(priv);
 		}
 		break;
 	case VCD_IOCCHKRES:
@@ -1282,6 +1306,12 @@ static long npcm_do_vcd_ioctl(struct npcm750_vcd *priv, unsigned int cmd,
 		if (changed < 0) {
 			ret = -EFAULT;
 			break;
+		}
+
+		if (changed) {
+			regmap_write(vcd, VCD_DVO_DEL,
+				     FIELD_PREP(VCD_DVO_DEL_HSYNC_DEL, 0) |
+				     FIELD_PREP(VCD_DVO_DEL_VSYNC_DEL, 0));
 		}
 
 		ret = copy_to_user(argp, &changed, sizeof(changed)) ? -EFAULT : 0;
@@ -1320,8 +1350,8 @@ static long npcm_do_vcd_ioctl(struct npcm750_vcd *priv, unsigned int cmd,
 		break;
 	case VCD_IOCDEMODE:
 		ret = copy_from_user(&mode, argp, sizeof(mode)) ? -EFAULT : 0;
-		if (!ret && (priv->de_mode != mode)) {
-			priv->de_mode = mode;
+		if (!ret && !mode) {
+			priv->hsync_mode = true;
 			npcm750_vcd_stop(priv);
 			npcm750_vcd_init(priv);
 		}
@@ -1387,10 +1417,19 @@ static int npcm750_vcd_device_create(struct npcm750_vcd *priv)
 {
 	int ret = 0;
 	struct device *dev = priv->dev;
+	unsigned int hdelay_add, vdelay_add;
 
-	ret = of_property_read_u32(dev->of_node, "de-mode", &priv->de_mode);
-	if (ret)
-		priv->de_mode = 1;
+	priv->hsync_mode = of_property_read_bool(dev->of_node, "nuvoton,hsync-mode");
+
+	if (!of_property_read_u32(dev->of_node, "nuvoton,hsync-delay-add", &hdelay_add))
+		priv->hdelay_add = hdelay_add;
+	else
+		priv->hdelay_add = HSYNC_DEL_ADD;
+
+	if (!of_property_read_u32(dev->of_node, "nuvoton,vsync-delay-add", &vdelay_add))
+		priv->vdelay_add = vdelay_add;
+	else
+		priv->vdelay_add = VSYNC_DEL_ADD;
 
 	priv->irq = irq_of_parse_and_map(dev->of_node, 0);
 	if (!priv->irq) {
