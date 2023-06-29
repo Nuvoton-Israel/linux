@@ -7,15 +7,23 @@
 #include <linux/regmap.h>
 #include "edac_module.h"
 
-#define EDAC_MOD_NAME	"npcm-edac"
-#define EDAC_MSG_SIZE	256
+#define EDAC_MOD_NAME			"npcm-edac"
+#define EDAC_MSG_SIZE			256
 
 /* chip serials */
-#define NPCM7XX_CHIP	BIT(0)
-#define NPCM8XX_CHIP	BIT(1)
+#define NPCM7XX_CHIP			BIT(0)
+#define NPCM8XX_CHIP			BIT(1)
 
 /* syndrome values */
-#define UE_SYNDROME	0x03
+#define UE_SYNDROME			0x03
+
+/* error injection */
+#define ERROR_TYPE_CORRECTABLE		0
+#define ERROR_TYPE_UNCORRECTABLE	1
+#define ERROR_LOCATION_DATA		0
+#define ERROR_LOCATION_CHECKCODE	1
+#define ERROR_BIT_DATA_MAX		63
+#define ERROR_BIT_CHECKCODE_MAX		7
 
 static char data_synd[] = {
 	0xf4, 0xf1, 0xec, 0xea, 0xe9, 0xe6, 0xe5, 0xe3,
@@ -95,12 +103,11 @@ struct priv_data {
 static void handle_ce(struct mem_ctl_info *mci)
 {
 	struct priv_data *priv = mci->pvt_info;
-	const struct npcm_platform_data *pdata = priv->pdata;
-	u64 addr = 0;
-	u64 data = 0;
-	u32 val_h = 0;
-	u32 val_l, id, synd;
+	const struct npcm_platform_data *pdata;
+	u32 val_h = 0, val_l, id, synd;
+	u64 addr = 0, data = 0;
 
+	pdata = priv->pdata;
 	regmap_read(npcm_regmap, pdata->ctl_ce_addr_l, &val_l);
 	if (pdata->chip == NPCM8XX_CHIP) {
 		regmap_read(npcm_regmap, pdata->ctl_ce_addr_h, &val_h);
@@ -129,12 +136,11 @@ static void handle_ce(struct mem_ctl_info *mci)
 static void handle_ue(struct mem_ctl_info *mci)
 {
 	struct priv_data *priv = mci->pvt_info;
-	const struct npcm_platform_data *pdata = priv->pdata;
-	u64 addr = 0;
-	u64 data = 0;
-	u32 val_h = 0;
-	u32 val_l, id, synd;
+	const struct npcm_platform_data *pdata;
+	u32 val_h = 0, val_l, id, synd;
+	u64 addr = 0, data = 0;
 
+	pdata = priv->pdata;
 	regmap_read(npcm_regmap, pdata->ctl_ue_addr_l, &val_l);
 	if (pdata->chip == NPCM8XX_CHIP) {
 		regmap_read(npcm_regmap, pdata->ctl_ue_addr_h, &val_h);
@@ -162,11 +168,11 @@ static void handle_ue(struct mem_ctl_info *mci)
 
 static irqreturn_t edac_ecc_isr(int irq, void *dev_id)
 {
+	const struct npcm_platform_data *pdata;
 	struct mem_ctl_info *mci = dev_id;
-	struct priv_data *priv = mci->pvt_info;
-	const struct npcm_platform_data *pdata = priv->pdata;
 	u32 status;
 
+	pdata = ((struct priv_data *)mci->pvt_info)->pdata;
 	regmap_read(npcm_regmap, pdata->ctl_int_status, &status);
 	if (status & pdata->int_status_ce_mask) {
 		handle_ce(mci);
@@ -184,24 +190,21 @@ static irqreturn_t edac_ecc_isr(int irq, void *dev_id)
 		return IRQ_HANDLED;
 	}
 
+	WARN_ON_ONCE(1);
 	return IRQ_NONE;
 }
 
 static ssize_t force_ecc_error(struct file *file, const char __user *data,
-				    size_t count, loff_t *ppos)
+			       size_t count, loff_t *ppos)
 {
 	struct device *dev = file->private_data;
 	struct mem_ctl_info *mci = to_mci(dev);
 	struct priv_data *priv = mci->pvt_info;
-	const struct npcm_platform_data *pdata = priv->pdata;
-	int ret;
+	const struct npcm_platform_data *pdata;
 	u32 val, syndrome;
+	int ret;
 
-	/*
-	 * error_type - 0: CE, 1: UE
-	 * location   - 0: data, 1: checkcode
-	 * bit        - 0 ~ 63 for data and 0 ~ 7 for checkcode
-	 */
+	pdata = priv->pdata;
 	edac_printk(KERN_INFO, EDAC_MOD_NAME,
 		    "force an ECC error, type = %d, location = %d, bit = %d\n",
 		    priv->error_type, priv->location, priv->bit);
@@ -220,26 +223,30 @@ static ssize_t force_ecc_error(struct file *file, const char __user *data,
 	val &= ~pdata->xor_check_bits_mask;
 
 	/* write syndrome to XOR_CHECK_BITS */
-	if (priv->error_type == 0) {
-		if (priv->location == 0 && priv->bit > 63) {
+	if (priv->error_type == ERROR_TYPE_CORRECTABLE) {
+		if (priv->location == ERROR_LOCATION_DATA &&
+		    priv->bit > ERROR_BIT_DATA_MAX) {
 			edac_printk(KERN_INFO, EDAC_MOD_NAME,
-				    "data bit should not exceed 63\n");
+				    "data bit should not exceed %d (%d)\n",
+				    ERROR_BIT_DATA_MAX, priv->bit);
 			return count;
 		}
 
-		if (priv->location == 1 && priv->bit > 7) {
+		if (priv->location == ERROR_LOCATION_CHECKCODE &&
+		    priv->bit > ERROR_BIT_CHECKCODE_MAX) {
 			edac_printk(KERN_INFO, EDAC_MOD_NAME,
-				    "checkcode bit should not exceed 7\n");
+				    "checkcode bit should not exceed %d (%d)\n",
+				    ERROR_BIT_CHECKCODE_MAX, priv->bit);
 			return count;
 		}
 
-		syndrome = priv->location ? 1 << priv->bit :
-			   data_synd[priv->bit];
+		syndrome = priv->location ? 1 << priv->bit
+					  : data_synd[priv->bit];
 
 		regmap_write(npcm_regmap, pdata->ctl_xor_check_bits,
 			     val | (syndrome << pdata->xor_check_bits_shift) |
 			     pdata->writeback_en_mask);
-	} else if (priv->error_type == 1) {
+	} else if (priv->error_type == ERROR_TYPE_UNCORRECTABLE) {
 		regmap_write(npcm_regmap, pdata->ctl_xor_check_bits,
 			     val | (UE_SYNDROME << pdata->xor_check_bits_shift));
 	}
@@ -257,6 +264,26 @@ static const struct file_operations force_ecc_error_fops = {
 	.llseek = generic_file_llseek,
 };
 
+/*
+ * Setup debugfs for error injection.
+ *
+ * Nodes:
+ *   error_type		- 0: CE, 1: UE
+ *   location		- 0: data, 1: checkcode
+ *   bit		- 0 ~ 63 for data and 0 ~ 7 for checkcode
+ *   force_ecc_error	- trigger
+ *
+ * Examples:
+ *   1. Inject a correctable error (CE) at checkcode bit 7.
+ *      ~# echo 0 > /sys/kernel/debug/edac/npcm-edac/error_type
+ *      ~# echo 1 > /sys/kernel/debug/edac/npcm-edac/location
+ *      ~# echo 7 > /sys/kernel/debug/edac/npcm-edac/bit
+ *      ~# echo 1 > /sys/kernel/debug/edac/npcm-edac/force_ecc_error
+ *
+ *   2. Inject an uncorrectable error (UE).
+ *      ~# echo 1 > /sys/kernel/debug/edac/npcm-edac/error_type
+ *      ~# echo 1 > /sys/kernel/debug/edac/npcm-edac/force_ecc_error
+ */
 static void setup_debugfs(struct mem_ctl_info *mci)
 {
 	struct priv_data *priv = mci->pvt_info;
@@ -274,10 +301,10 @@ static void setup_debugfs(struct mem_ctl_info *mci)
 
 static int setup_irq(struct mem_ctl_info *mci, struct platform_device *pdev)
 {
-	struct priv_data *priv = mci->pvt_info;
-	const struct npcm_platform_data *pdata = priv->pdata;
+	const struct npcm_platform_data *pdata;
 	int ret, irq;
 
+	pdata = ((struct priv_data *)mci->pvt_info)->pdata;
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
 		edac_printk(KERN_ERR, EDAC_MOD_NAME, "IRQ not defined in DTS\n");
@@ -316,8 +343,8 @@ static int edac_probe(struct platform_device *pdev)
 	struct mem_ctl_info *mci;
 	struct priv_data *priv;
 	void __iomem *reg;
-	int rc;
 	u32 val;
+	int rc;
 
 	reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(reg))
@@ -386,18 +413,18 @@ static int edac_remove(struct platform_device *pdev)
 {
 	struct mem_ctl_info *mci = platform_get_drvdata(pdev);
 	struct priv_data *priv = mci->pvt_info;
-	const struct npcm_platform_data *pdata = priv->pdata;
+	const struct npcm_platform_data *pdata;
 
-	regmap_write(npcm_regmap, pdata->ctl_int_mask_master,
-		     pdata->int_mask_master_global_mask);
-	regmap_update_bits(npcm_regmap, pdata->ctl_ecc_en, pdata->ecc_en_mask,
-			   0);
+	pdata = priv->pdata;
+	if (IS_ENABLED(CONFIG_EDAC_DEBUG) && pdata->chip == NPCM8XX_CHIP)
+		edac_debugfs_remove_recursive(priv->debugfs);
 
 	edac_mc_del_mc(&pdev->dev);
 	edac_mc_free(mci);
 
-	if (IS_ENABLED(CONFIG_EDAC_DEBUG) && pdata->chip == NPCM8XX_CHIP)
-		edac_debugfs_remove_recursive(priv->debugfs);
+	regmap_write(npcm_regmap, pdata->ctl_int_mask_master,
+		     pdata->int_mask_master_global_mask);
+	regmap_update_bits(npcm_regmap, pdata->ctl_ecc_en, pdata->ecc_en_mask, 0);
 
 	return 0;
 }
