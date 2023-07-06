@@ -94,6 +94,7 @@ struct npcm_ece {
 	struct regmap *regmap;
 	atomic_t clients;
 	struct reset_control *reset;
+	bool enable;
 };
 
 struct npcm_video {
@@ -353,12 +354,6 @@ static void npcm_video_ece_ip_reset(struct npcm_video *video)
 	usleep_range(10, 20);
 	reset_control_deassert(video->ece.reset);
 	usleep_range(10, 20);
-}
-
-static inline void npcm_video_ece_init(struct npcm_video *video)
-{
-	npcm_video_ece_ip_reset(video);
-	npcm_video_ece_ctrl_reset(video);
 }
 
 static void npcm_video_ece_stop(struct npcm_video *video)
@@ -1031,8 +1026,9 @@ static void npcm_video_start(struct npcm_video *video)
 				   video->bytesperpixel;
 	video->pix_fmt.bytesperline = video->bytesperline;
 
-	if (atomic_inc_return(&video->ece.clients) == 1) {
-		npcm_video_ece_init(video);
+	if (video->ece.enable && atomic_inc_return(&video->ece.clients) == 1) {
+		npcm_video_ece_ip_reset(video);
+		npcm_video_ece_ctrl_reset(video);
 		npcm_video_ece_set_fb_addr(video, video->src.dma);
 		npcm_video_ece_set_lp(video, video->bytesperline);
 
@@ -1066,7 +1062,7 @@ static void npcm_video_stop(struct npcm_video *video)
 	video->flags = 0;
 	video->ctrl_cmd = VCD_CMD_OPERATION_CAPTURE;
 
-	if (atomic_dec_return(&video->ece.clients) == 0) {
+	if (video->ece.enable && atomic_dec_return(&video->ece.clients) == 0) {
 		npcm_video_ece_stop(video);
 		dev_dbg(video->dev, "ECE close: client %d\n",
 			atomic_read(&video->ece.clients));
@@ -1207,14 +1203,17 @@ static int npcm_video_querycap(struct file *file, void *fh,
 static int npcm_video_enum_format(struct file *file, void *fh,
 				  struct v4l2_fmtdesc *f)
 {
+	struct npcm_video *video = video_drvdata(file);
 	const struct npcm_fmt *fmt;
 
 	if (f->index >= NUM_FORMATS)
 		return -EINVAL;
 
 	fmt = &npcm_fmt_list[f->index];
-	f->pixelformat = fmt->fourcc;
+	if (fmt->fourcc == V4L2_PIX_FMT_HEXTILE && !video->ece.enable)
+		return -EINVAL;
 
+	f->pixelformat = fmt->fourcc;
 	return 0;
 }
 
@@ -1225,7 +1224,9 @@ static int npcm_video_try_format(struct file *file, void *fh,
 	const struct npcm_fmt *fmt;
 
 	fmt = npcm_video_find_format(f);
-	if (!fmt)
+
+	/* If format not found or HEXTILE not supported, use RGB565 as default */
+	if (!fmt || (fmt->fourcc == V4L2_PIX_FMT_HEXTILE && !video->ece.enable))
 		f->fmt.pix.pixelformat = npcm_fmt_list[0].fourcc;
 
 	f->fmt.pix.field = V4L2_FIELD_NONE;
@@ -1637,6 +1638,20 @@ static void npcm_video_buf_finish(struct vb2_buffer *vb)
 	}
 }
 
+static const struct regmap_config npcm_video_regmap_cfg = {
+	.reg_bits	= 32,
+	.reg_stride	= 4,
+	.val_bits	= 32,
+	.max_register	= VCD_FIFO,
+};
+
+static const struct regmap_config npcm_video_ece_regmap_cfg = {
+	.reg_bits	= 32,
+	.reg_stride	= 4,
+	.val_bits	= 32,
+	.max_register	= ECE_HEX_RECT_OFFSET,
+};
+
 static const struct vb2_ops npcm_video_vb2_ops = {
 	.queue_setup = npcm_video_queue_setup,
 	.wait_prepare = vb2_ops_wait_prepare,
@@ -1655,7 +1670,11 @@ static int npcm_video_setup_video(struct npcm_video *video)
 	struct vb2_queue *vbq = &video->queue;
 	int rc;
 
-	video->pix_fmt.pixelformat = V4L2_PIX_FMT_HEXTILE;
+	if (video->ece.enable)
+		video->pix_fmt.pixelformat = V4L2_PIX_FMT_HEXTILE;
+	else
+		video->pix_fmt.pixelformat = V4L2_PIX_FMT_RGB565;
+
 	video->pix_fmt.field = V4L2_FIELD_NONE;
 	video->pix_fmt.colorspace = V4L2_COLORSPACE_SRGB;
 	video->pix_fmt.quantization = V4L2_QUANTIZATION_FULL_RANGE;
@@ -1724,6 +1743,54 @@ rel_ctrl_handler:
 	return rc;
 }
 
+static int npcm_video_ece_init(struct npcm_video *video)
+{
+	struct device *dev = video->dev;
+	struct device_node *ece_node;
+	struct platform_device *ece_pdev;
+	void __iomem *regs;
+
+	ece_node = of_parse_phandle(video->dev->of_node, "nuvoton,ece", 0);
+	if (IS_ERR(ece_node)) {
+		dev_err(dev, "Failed to get ECE phandle in DTS\n");
+		return PTR_ERR(ece_node);
+	}
+
+	video->ece.enable = of_device_is_available(ece_node);
+
+	if (video->ece.enable) {
+		dev_info(dev, "Support HEXTILE pixel format\n");
+
+		ece_pdev = of_find_device_by_node(ece_node);
+		if (IS_ERR(ece_pdev)) {
+			dev_err(dev, "Failed to find ECE device\n");
+			return PTR_ERR(ece_pdev);
+		}
+		of_node_put(ece_node);
+
+		regs = devm_platform_ioremap_resource(ece_pdev, 0);
+		if (IS_ERR(regs)) {
+			dev_err(dev, "Failed to parse ECE reg in DTS\n");
+			return PTR_ERR(regs);
+		}
+
+		video->ece.regmap = devm_regmap_init_mmio(dev, regs,
+							  &npcm_video_ece_regmap_cfg);
+		if (IS_ERR(video->ece.regmap)) {
+			dev_err(dev, "Failed to initialize ECE regmap\n");
+			return PTR_ERR(video->ece.regmap);
+		}
+
+		video->ece.reset = devm_reset_control_get(&ece_pdev->dev, NULL);
+		if (IS_ERR(video->ece.reset)) {
+			dev_err(dev, "Failed to get ECE reset control in DTS\n");
+			return PTR_ERR(video->ece.reset);
+		}
+	}
+
+	return 0;
+}
+
 static int npcm_video_init(struct npcm_video *video)
 {
 	struct device *dev = video->dev;
@@ -1762,22 +1829,14 @@ static int npcm_video_init(struct npcm_video *video)
 	else
 		video->vdelay_add = VSYNC_DEL_ADD;
 
-	return rc;
+	rc = npcm_video_ece_init(video);
+	if (rc) {
+		dev_err(dev, "Failed to initialize ECE\n");
+		return rc;
+	}
+
+	return 0;
 }
-
-static const struct regmap_config npcm_video_regmap_cfg = {
-	.reg_bits	= 32,
-	.reg_stride	= 4,
-	.val_bits	= 32,
-	.max_register	= VCD_FIFO,
-};
-
-static const struct regmap_config npcm_video_ece_regmap_cfg = {
-	.reg_bits	= 32,
-	.reg_stride	= 4,
-	.val_bits	= 32,
-	.max_register	= ECE_HEX_RECT_OFFSET,
-};
 
 static int npcm_video_probe(struct platform_device *pdev)
 {
@@ -1809,47 +1868,10 @@ static int npcm_video_probe(struct platform_device *pdev)
 		return PTR_ERR(video->vcd_regmap);
 	}
 
-	ece_node = of_parse_phandle(video->dev->of_node, "nuvoton,ece", 0);
-	if (IS_ERR(ece_node)) {
-		dev_err(&pdev->dev, "Failed to get ECE phandle in DTS\n");
-		return PTR_ERR(ece_node);
-	}
-
-	if (!of_device_is_available(ece_node)) {
-		dev_err(&pdev->dev, "ECE status property is disabled\n");
-		return -ENODEV;
-	}
-
-	ece_pdev = of_find_device_by_node(ece_node);
-	if (IS_ERR(ece_pdev)) {
-		dev_err(&pdev->dev, "Failed to find ECE device\n");
-		return PTR_ERR(ece_pdev);
-	}
-	of_node_put(ece_node);
-
-	regs = devm_platform_ioremap_resource(ece_pdev, 0);
-	if (IS_ERR(regs)) {
-		dev_err(&pdev->dev, "Failed to parse ECE reg in DTS\n");
-		return PTR_ERR(regs);
-	}
-
-	video->ece.regmap = devm_regmap_init_mmio(&pdev->dev, regs,
-						  &npcm_video_ece_regmap_cfg);
-	if (IS_ERR(video->ece.regmap)) {
-		dev_err(&pdev->dev, "Failed to initialize ECE regmap\n");
-		return PTR_ERR(video->ece.regmap);
-	}
-
 	video->reset = devm_reset_control_get(&pdev->dev, NULL);
 	if (IS_ERR(video->reset)) {
 		dev_err(&pdev->dev, "Failed to get VCD reset control in DTS\n");
 		return PTR_ERR(video->reset);
-	}
-
-	video->ece.reset = devm_reset_control_get(&ece_pdev->dev, NULL);
-	if (IS_ERR(video->ece.reset)) {
-		dev_err(&pdev->dev, "Failed to get ECE reset control in DTS\n");
-		return PTR_ERR(video->ece.reset);
 	}
 
 	video->gcr_regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
@@ -1884,7 +1906,8 @@ static int npcm_video_remove(struct platform_device *pdev)
 	vb2_queue_release(&video->queue);
 	v4l2_ctrl_handler_free(&video->ctrl_handler);
 	v4l2_device_unregister(v4l2_dev);
-	npcm_video_ece_stop(video);
+	if (video->ece.enable)
+		npcm_video_ece_stop(video);
 	of_reserved_mem_device_release(dev);
 
 	return 0;
