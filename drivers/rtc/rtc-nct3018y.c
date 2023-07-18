@@ -326,7 +326,18 @@ static int nct3018y_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	unsigned char buf[4] = {0};
-	int err;
+	int err, flags, restore_flags = 0;
+
+	/* Check and set TWO bit */
+	flags = i2c_smbus_read_byte_data(client, NCT3018Y_REG_CTRL);
+	if ( !(flags & NCT3018Y_BIT_TWO) ) {
+		restore_flags =1;
+		err = i2c_smbus_write_byte_data(client, NCT3018Y_REG_CTRL, (flags | NCT3018Y_BIT_TWO));
+		if (err < 0) {
+			dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL\n");
+			return err;
+		}
+	}
 
 	buf[0] = bin2bcd(tm->tm_sec);
 	err = i2c_smbus_write_byte_data(client, NCT3018Y_REG_SC, buf[0]);
@@ -358,6 +369,15 @@ static int nct3018y_rtc_set_time(struct device *dev, struct rtc_time *tm)
 	if (err < 0) {
 		dev_dbg(&client->dev, "Unable to write for day and mon and year\n");
 		return -EIO;
+	}
+
+	/* Restore TWO bit */
+	if ( restore_flags ) {
+		err = i2c_smbus_write_byte_data(client, NCT3018Y_REG_CTRL, flags);
+		if (err < 0) {
+			dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL\n");
+			return err;
+		}
 	}
 
 	return err;
@@ -629,8 +649,7 @@ static int nct3018y_probe(struct i2c_client *client,
 		dev_dbg(&client->dev, "%s: NCT3018Y_BIT_TWO is set\n", __func__);
 	}
 
-	flags = NCT3018Y_BIT_TWO | NCT3018Y_BIT_HF;
-	err = i2c_smbus_write_byte_data(client, NCT3018Y_REG_CTRL, flags);
+	err = i2c_smbus_write_byte_data(client, NCT3018Y_REG_CTRL, flags | NCT3018Y_BIT_HF);
 	if (err < 0) {
 		dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL\n");
 		return err;
