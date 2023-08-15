@@ -801,9 +801,6 @@ static void npcm_video_init_reg(struct npcm_video *video)
 {
 	struct regmap *gcr = video->gcr_regmap, *vcd = video->vcd_regmap;
 
-	/* Selects Data Enable */
-	regmap_update_bits(gcr, INTCR, INTCR_DEHS, 0);
-
 	/* Enable display of KVM GFX and access to memory */
 	regmap_update_bits(gcr, INTCR, INTCR_GFXIFDIS, 0);
 
@@ -825,6 +822,12 @@ static void npcm_video_init_reg(struct npcm_video *video)
 	/* Set video mode */
 	regmap_write(vcd, VCD_MODE, VCD_MODE_VCDE | VCD_MODE_CM565 |
 		     VCD_MODE_IDBC | VCD_MODE_KVM_BW_SET);
+
+	/* Select DE or HSYNC mode */
+	if (video->hsync_mode)
+		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, VCD_MODE_DE_HS);
+	else
+		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, 0);
 }
 
 static int npcm_video_start_frame(struct npcm_video *video)
@@ -861,9 +864,6 @@ static int npcm_video_start_frame(struct npcm_video *video)
 	npcm_video_vcd_state_machine_reset(video);
 
 	if (video->hsync_mode) {
-		regmap_update_bits(gcr, INTCR, INTCR_DEHS, INTCR_DEHS);
-		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, VCD_MODE_DE_HS);
-
 		regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE |
 				   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE,
 				   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
@@ -1818,6 +1818,11 @@ static int npcm_video_init(struct npcm_video *video)
 	}
 
 	video->hsync_mode = of_property_read_bool(dev->of_node, "nuvoton,hsync-mode");
+
+	if (video->hsync_mode)
+		regmap_update_bits(video->gcr_regmap, INTCR, INTCR_DEHS, INTCR_DEHS);
+	else
+		regmap_update_bits(video->gcr_regmap, INTCR, INTCR_DEHS, 0);
 
 	if (!of_property_read_u32(dev->of_node, "nuvoton,hsync-delay-add", &hdelay_add))
 		video->hdelay_add = hdelay_add;
