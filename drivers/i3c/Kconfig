@@ -45,5 +45,11 @@ config I3C_HUB
 	  This enables support for I3C HUB. Say Y here to use I3C HUB driver to
 	  configure I3C HUB device.
 
+config I3C_NPCM_BIC
+	bool "NPCM Bridge IC support"
+	default y
+	help
+	  Say Y here to enable NPCM Bridge IC device driver.
+
 source "drivers/i3c/master/Kconfig"
 endif # I3C
