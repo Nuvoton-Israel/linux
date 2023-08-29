@@ -50,7 +50,6 @@
 #define RECT_W		16
 #define RECT_H		16
 #define BITMAP_SIZE	32
-#define MAX_REQ_BUFS	10
 #define HSYNC_DEL_ADD	13
 #define VSYNC_DEL_ADD	3
 
@@ -68,8 +67,16 @@ struct npcm_video_buffer {
 #define to_npcm_video_buffer(x) \
 	container_of((x), struct npcm_video_buffer, vb)
 
+/*
+ * VIDEO_STREAMING:	a flag indicating if the video has started streaming
+ * VIDEO_CAPTURING:	a flag indicating if the VCD is capturing a frame
+ * VIDEO_RES_CHANGING:	a flag indicating if the resolution is changing
+ * VIDEO_STOPPED:	a flag indicating if the video has stopped streaming
+ */
 enum {
 	VIDEO_STREAMING,
+	VIDEO_CAPTURING,
+	VIDEO_RES_CHANGING,
 	VIDEO_STOPPED,
 };
 
@@ -113,7 +120,6 @@ struct npcm_video {
 	struct video_device vdev;
 	struct mutex video_lock; /* v4l2 and videobuf2 lock */
 
-	struct work_struct res_work;
 	struct list_head buffers;
 	spinlock_t lock; /* buffer list lock */
 	unsigned long flags;
@@ -127,9 +133,8 @@ struct npcm_video {
 	unsigned int bytesperline;
 	unsigned int bytesperpixel;
 	unsigned int rect_cnt;
-	unsigned int num_buffers;
-	struct list_head *list;
-	unsigned int rect[MAX_REQ_BUFS];
+	struct list_head list[VIDEO_MAX_FRAME];
+	unsigned int rect[VIDEO_MAX_FRAME];
 	unsigned int ctrl_cmd;
 	unsigned int op_cmd;
 	bool hsync_mode;
@@ -393,7 +398,7 @@ static void npcm_video_free_diff_table(struct npcm_video *video)
 	struct rect_list *tmp;
 	unsigned int i;
 
-	for (i = 0; i < video->num_buffers; i++) {
+	for (i = 0; i < video->queue.num_buffers; i++) {
 		head = &video->list[i];
 		list_for_each_safe(pos, nx, head) {
 			tmp = list_entry(pos, struct rect_list, list);
@@ -674,22 +679,16 @@ static void npcm_video_vcd_ip_reset(struct npcm_video *video)
 static void npcm_video_vcd_state_machine_reset(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	unsigned int stat;
-	int ret;
 
 	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_VCDE, 0);
 	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_IDBC, 0);
 	regmap_update_bits(vcd, VCD_CMD, VCD_CMD_RST, VCD_CMD_RST);
 
-	/* Wait to reset VCD state machine and clear FIFOs */
+	/*
+	 * VCD_CMD_RST will reset VCD internal state machines and clear FIFOs,
+	 * it should wait at least 800 us for the reset operations completed.
+	 */
 	usleep_range(800, 1000);
-
-	ret = regmap_read_poll_timeout(vcd, VCD_STAT, stat, (stat & VCD_STAT_DONE),
-				       1000, VCD_TIMEOUT_US);
-	if (ret) {
-		dev_warn(video->dev, "Wait for VCD_STAT_DONE timeout\n");
-		return;
-	}
 
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_VCDE, VCD_MODE_VCDE);
@@ -833,7 +832,7 @@ static void npcm_video_init_reg(struct npcm_video *video)
 static int npcm_video_start_frame(struct npcm_video *video)
 {
 	struct npcm_video_buffer *buf;
-	struct regmap *vcd = video->vcd_regmap, *gcr = video->gcr_regmap;
+	struct regmap *vcd = video->vcd_regmap;
 	unsigned long flags;
 	unsigned int val;
 	int ret;
@@ -859,6 +858,7 @@ static int npcm_video_start_frame(struct npcm_video *video)
 		return 0;
 	}
 
+	set_bit(VIDEO_CAPTURING, &video->flags);
 	spin_unlock_irqrestore(&video->lock, flags);
 
 	npcm_video_vcd_state_machine_reset(video);
@@ -925,10 +925,6 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 	struct v4l2_bt_timings *det = &video->detected_timings;
 	struct regmap *gfxi = video->gfx_regmap;
 	unsigned int dispst;
-	static const struct v4l2_event ev = {
-		.type = V4L2_EVENT_SOURCE_CHANGE,
-		.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
-	};
 
 	video->v4l2_input_status = V4L2_IN_ST_NO_SIGNAL;
 	det->width = npcm_video_hres(video);
@@ -957,7 +953,7 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 			det->pixelclock = npcm_video_pclk(video);
 		}
 
-		v4l2_event_queue(&video->vdev, &ev);
+		clear_bit(VIDEO_RES_CHANGING, &video->flags);
 	}
 
 	if (det->width && det->height)
@@ -979,9 +975,15 @@ static int npcm_video_set_resolution(struct npcm_video *video,
 		return -EINVAL;
 	}
 
+	video->active_timings = *timing;
 	video->bytesperpixel = npcm_video_get_bpp(video);
 	npcm_video_set_linepitch(video, timing->width * video->bytesperpixel);
 	video->bytesperline = npcm_video_get_linepitch(video);
+	video->pix_fmt.width = timing->width ? timing->width : MIN_WIDTH;
+	video->pix_fmt.height = timing->height ? timing->height : MIN_HEIGHT;
+	video->pix_fmt.sizeimage = video->pix_fmt.width * video->pix_fmt.height *
+				   video->bytesperpixel;
+	video->pix_fmt.bytesperline = video->bytesperline;
 
 	npcm_video_kvm_bw(video, timing->pixelclock > VCD_KVM_BW_PCLK);
 	npcm_video_gfx_reset(video);
@@ -1012,19 +1014,10 @@ static void npcm_video_start(struct npcm_video *video)
 		dev_err(video->dev, "Failed to set resolution\n");
 		return;
 	}
-	video->active_timings = video->detected_timings;
 
 	/* Set frame buffer physical address */
 	regmap_write(video->vcd_regmap, VCD_FBA_ADR, video->src.dma);
 	regmap_write(video->vcd_regmap, VCD_FBB_ADR, video->src.dma);
-
-	video->pix_fmt.width = video->active_timings.width ?
-			       video->active_timings.width : MIN_WIDTH;
-	video->pix_fmt.height = video->active_timings.height ?
-				video->active_timings.height : MIN_HEIGHT;
-	video->pix_fmt.sizeimage = video->pix_fmt.width * video->pix_fmt.height *
-				   video->bytesperpixel;
-	video->pix_fmt.bytesperline = video->bytesperline;
 
 	if (video->ece.enable && atomic_inc_return(&video->ece.clients) == 1) {
 		npcm_video_ece_ip_reset(video);
@@ -1042,7 +1035,6 @@ static void npcm_video_stop(struct npcm_video *video)
 	struct regmap *vcd = video->vcd_regmap;
 
 	set_bit(VIDEO_STOPPED, &video->flags);
-	cancel_work_sync(&video->res_work);
 
 	regmap_write(vcd, VCD_INTE, 0);
 	regmap_write(vcd, VCD_MODE, 0);
@@ -1052,12 +1044,7 @@ static void npcm_video_stop(struct npcm_video *video)
 	if (video->src.size)
 		npcm_video_free_fb(video, &video->src);
 
-	if (video->list)
-		npcm_video_free_diff_table(video);
-
-	kfree(video->list);
-	video->list = NULL;
-
+	npcm_video_free_diff_table(video);
 	video->v4l2_input_status = V4L2_IN_ST_NO_SIGNAL;
 	video->flags = 0;
 	video->ctrl_cmd = VCD_CMD_OPERATION_CAPTURE;
@@ -1129,6 +1116,10 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 	unsigned int index, size, status, fmt;
 	dma_addr_t dma_addr;
 	void *addr;
+	static const struct v4l2_event ev = {
+		.type = V4L2_EVENT_SOURCE_CHANGE,
+		.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
+	};
 
 	regmap_read(vcd, VCD_STAT, &status);
 	dev_dbg(video->dev, "VCD irq status 0x%x\n", status);
@@ -1142,6 +1133,7 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 	if (status & VCD_STAT_DONE) {
 		regmap_write(vcd, VCD_INTE, 0);
 		spin_lock(&video->lock);
+		clear_bit(VIDEO_CAPTURING, &video->flags);
 		buf = list_first_entry_or_null(&video->buffers,
 					       struct npcm_video_buffer, link);
 		if (!buf) {
@@ -1173,16 +1165,23 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 		list_del(&buf->link);
 		spin_unlock(&video->lock);
-		return IRQ_HANDLED;
+
+		if (npcm_video_start_frame(video))
+			dev_err(video->dev, "Failed to capture next frame\n");
 	}
 
 	/* Resolution changed */
-	if (status & VCD_STAT_VHT_CHG || status & VCD_STAT_HAC_CHG)
-		schedule_work(&video->res_work);
+	if (status & VCD_STAT_VHT_CHG || status & VCD_STAT_HAC_CHG) {
+		if (!test_bit(VIDEO_RES_CHANGING, &video->flags)) {
+			set_bit(VIDEO_RES_CHANGING, &video->flags);
+
+			vb2_queue_error(&video->queue);
+			v4l2_event_queue(&video->vdev, &ev);
+		}
+	}
 
 	if (status & VCD_STAT_IFOR || status & VCD_STAT_IFOT) {
-		dev_dbg(video->dev, "VCD FIFO overrun or over thresholds\n");
-		npcm_video_vcd_state_machine_reset(video);
+		dev_warn(video->dev, "VCD FIFO overrun or over thresholds\n");
 		if (npcm_video_start_frame(video))
 			dev_err(video->dev, "Failed to recover from FIFO overrun\n");
 	}
@@ -1318,12 +1317,6 @@ static int npcm_video_set_dv_timings(struct file *file, void *fh,
 	if (rc)
 		return rc;
 
-	video->active_timings = timings->bt;
-	video->pix_fmt.width = timings->bt.width;
-	video->pix_fmt.height = timings->bt.height;
-	video->pix_fmt.sizeimage = timings->bt.width * timings->bt.height *
-				   video->bytesperpixel;
-	video->pix_fmt.bytesperline = video->bytesperline;
 	timings->type = V4L2_DV_BT_656_1120;
 
 	return 0;
@@ -1450,15 +1443,21 @@ static const struct v4l2_ctrl_ops npcm_video_ctrl_ops = {
 	.g_volatile_ctrl = npcm_video_get_volatile_ctrl,
 };
 
+static const char * const npcm_ctrl_capture_mode_menu[] = {
+	"COMPLETE mode",
+	"DIFF mode",
+	NULL,
+};
+
 static const struct v4l2_ctrl_config npcm_ctrl_capture_mode = {
 	.ops = &npcm_video_ctrl_ops,
 	.id = V4L2_CID_NPCM_CAPTURE_MODE,
 	.name = "NPCM Video Capture Mode",
-	.type = V4L2_CTRL_TYPE_INTEGER,
+	.type = V4L2_CTRL_TYPE_MENU,
 	.min = 0,
 	.max = V4L2_NPCM_CAPTURE_MODE_DIFF,
-	.step = 1,
 	.def = 0,
+	.qmenu = npcm_ctrl_capture_mode_menu,
 };
 
 static const struct v4l2_ctrl_config npcm_ctrl_rect_count = {
@@ -1472,13 +1471,6 @@ static const struct v4l2_ctrl_config npcm_ctrl_rect_count = {
 	.step = 1,
 	.def = 0,
 };
-
-static void npcm_video_res_work(struct work_struct *w)
-{
-	struct npcm_video *video = container_of(w, struct npcm_video, res_work);
-
-	npcm_video_detect_resolution(video);
-}
 
 static int npcm_video_open(struct file *file)
 {
@@ -1539,26 +1531,11 @@ static int npcm_video_queue_setup(struct vb2_queue *q, unsigned int *num_buffers
 	}
 
 	*num_planes = 1;
-
-	if (*num_buffers > MAX_REQ_BUFS)
-		*num_buffers = MAX_REQ_BUFS;
-
 	sizes[0] = video->pix_fmt.sizeimage;
 
-	if (video->list) {
-		npcm_video_free_diff_table(video);
-		kfree(video->list);
-		video->list = NULL;
-	}
-
-	video->list = kzalloc(sizeof(*video->list) * *num_buffers, GFP_KERNEL);
-	if (!video->list)
-		return -ENOMEM;
-
-	for (i = 0; i < *num_buffers; i++)
+	for (i = 0; i < VIDEO_MAX_FRAME; i++)
 		INIT_LIST_HEAD(&video->list[i]);
 
-	video->num_buffers = *num_buffers;
 	return 0;
 }
 
@@ -1607,10 +1584,18 @@ static void npcm_video_buf_queue(struct vb2_buffer *vb)
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct npcm_video_buffer *nvb = to_npcm_video_buffer(vbuf);
 	unsigned long flags;
+	bool empty;
 
 	spin_lock_irqsave(&video->lock, flags);
+	empty = list_empty(&video->buffers);
 	list_add_tail(&nvb->link, &video->buffers);
 	spin_unlock_irqrestore(&video->lock, flags);
+
+	if (test_bit(VIDEO_STREAMING, &video->flags) &&
+	    !test_bit(VIDEO_CAPTURING, &video->flags) && empty) {
+		if (npcm_video_start_frame(video))
+			dev_err(video->dev, "Failed to capture next frame\n");
+	}
 }
 
 static void npcm_video_buf_finish(struct vb2_buffer *vb)
@@ -1622,19 +1607,13 @@ static void npcm_video_buf_finish(struct vb2_buffer *vb)
 	video->vb_index = vb->index;
 
 	if (test_bit(VIDEO_STREAMING, &video->flags)) {
-		/*
-		 * Free associated rect_list and capture next frame when a
-		 * video buffer get dequeued.
-		 */
+		/* Free associated rect_list when a video buffer get dequeued */
 		head = &video->list[video->vb_index];
 		list_for_each_safe(pos, nx, head) {
 			tmp = list_entry(pos, struct rect_list, list);
 			list_del(&tmp->list);
 			kfree(tmp);
 		}
-
-		if (npcm_video_start_frame(video))
-			dev_err(video->dev, "Failed to capture next frame\n");
 	}
 }
 
@@ -1846,8 +1825,6 @@ static int npcm_video_init(struct npcm_video *video)
 static int npcm_video_probe(struct platform_device *pdev)
 {
 	struct npcm_video *video = kzalloc(sizeof(*video), GFP_KERNEL);
-	struct device_node *ece_node;
-	struct platform_device *ece_pdev;
 	int rc;
 	void __iomem *regs;
 
@@ -1857,7 +1834,6 @@ static int npcm_video_probe(struct platform_device *pdev)
 	video->dev = &pdev->dev;
 	spin_lock_init(&video->lock);
 	mutex_init(&video->video_lock);
-	INIT_WORK(&video->res_work, npcm_video_res_work);
 	INIT_LIST_HEAD(&video->buffers);
 
 	regs = devm_platform_ioremap_resource(pdev, 0);
