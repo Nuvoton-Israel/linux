@@ -1935,9 +1935,7 @@ static int npcm7xx_mii_setup(struct net_device *netdev)
 out3:
 	mdiobus_unregister(ether->mii_bus);
 out2:
-	kfree(ether->mii_bus->irq);
 	mdiobus_free(ether->mii_bus);
-	platform_set_drvdata(ether->pdev, NULL);
 out0:
 	return err;
 }
@@ -2111,7 +2109,6 @@ failed_free_napi:
 	if (of_phy_is_fixed_link(np))
 		of_phy_deregister_fixed_link(np);
 	netif_napi_del(&ether->napi);
-	platform_set_drvdata(pdev, NULL);
 failed_free_io:
 	iounmap(ether->reg);
 failed_free_mem:
