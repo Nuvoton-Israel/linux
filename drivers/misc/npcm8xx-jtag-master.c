@@ -448,16 +448,20 @@ static void npcm_jtm_reset_hw(struct npcm_jtm *priv)
 	reset_control_deassert(priv->reset);
 }
 
-static void npcm_jtm_set_baudrate(struct npcm_jtm *priv, unsigned int speed)
+static u32 npcm_jtm_set_baudrate(struct npcm_jtm *priv, unsigned int speed)
 {
 	u32 ckdiv;
 	u32 regtemp;
+	u32 freq;
 
-	ckdiv = DIV_ROUND_CLOSEST(clk_get_rate(priv->clk), (2 * speed)) - 1;
+	freq = clk_get_rate(priv->clk);
+	ckdiv = DIV_ROUND_CLOSEST(freq, (2 * speed)) - 1;
 
 	regtemp = readl(priv->base + JTM_CTL);
 	regtemp &= ~JTM_CTL_CKDV;
 	writel(regtemp | (ckdiv << 16), priv->base + JTM_CTL);
+
+	return (freq / ((ckdiv + 1) * 2));
 }
 
 static void jtag_reset_tapstate(struct npcm_jtm *jtag)
@@ -594,8 +598,7 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (get_user(value, (__u32 __user *)arg))
 			return -EFAULT;
 		if (value <= NPCM_JTM_MAX_RATE) {
-			priv->freq = value;
-			npcm_jtm_set_baudrate(priv, priv->freq);
+			priv->freq = npcm_jtm_set_baudrate(priv, value);
 		} else {
 			dev_err(priv->dev, "invalid jtag freq %u\n", value);
 			ret = -EINVAL;
@@ -788,7 +791,6 @@ err:
 static int npcm_jtm_probe(struct platform_device *pdev)
 {
 	struct npcm_jtm *priv;
-	unsigned long clk_hz;
 	u32 val;
 	int irq;
 	int ret;
@@ -841,10 +843,7 @@ static int npcm_jtm_probe(struct platform_device *pdev)
 
 	init_completion(&priv->xfer_done);
 
-	clk_hz = clk_get_rate(priv->clk);
-
-	priv->freq = NPCM_JTM_DEFAULT_RATE;
-	npcm_jtm_set_baudrate(priv, NPCM_JTM_DEFAULT_RATE);
+	priv->freq = npcm_jtm_set_baudrate(priv, NPCM_JTM_DEFAULT_RATE);
 
 	/* Deassert TRST for normal operation */
 	val = readl(priv->base + JTM_CTL);
