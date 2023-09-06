@@ -1889,8 +1889,6 @@ static int npcm7xx_mii_setup(struct net_device *netdev)
 	for (i = 0; i < PHY_MAX_ADDR; i++)
 		ether->mii_bus->irq[i] = PHY_POLL;
 
-	platform_set_drvdata(ether->pdev, ether->mii_bus);
-
 	/* Enable MDIO Clock */
 	writel(readl((ether->reg + REG_MCMDR)) | MCMDR_ENMDC,
 	       (ether->reg + REG_MCMDR));
@@ -2134,14 +2132,11 @@ static int npcm7xx_ether_remove(struct platform_device *pdev)
 	if (of_phy_is_fixed_link(np))
 		of_phy_deregister_fixed_link(np);
 
-	free_irq(ether->txirq, netdev);
-	free_irq(ether->rxirq, netdev);
-
 	if (ether->phy_dev)
 		phy_disconnect(ether->phy_dev);
 
 	mdiobus_unregister(ether->mii_bus);
-	kfree(ether->mii_bus->irq);
+
 	mdiobus_free(ether->mii_bus);
 
 	platform_set_drvdata(pdev, NULL);
