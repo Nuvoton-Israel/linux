@@ -1837,18 +1837,15 @@ static void get_mac_address(struct net_device *netdev)
 	int err;
 
 	err = of_get_mac_address(np, ether->dev_addr);
-	if (err) {
+
+	if (is_valid_ether_addr(ether->dev_addr)) 
+		eth_hw_addr_set(netdev, ether->dev_addr);
+	else 
 		eth_hw_addr_random(netdev);
-		dev_info(&pdev->dev,
-			"%s: device MAC address (random generator) %pM\n",
-			netdev->name, ether->dev_addr);
-	} else {
-		if (is_valid_ether_addr(ether->dev_addr)) {
-			dev_info(&pdev->dev, "%s: device MAC address : %pM\n",
-			pdev->name, ether->dev_addr);
-		}
-	}
-	dev_addr_set(netdev, ether->dev_addr);
+
+	dev_info(&pdev->dev, "%s: device MAC address : %pM\n",
+		pdev->name, netdev->dev_addr);
+
 }
 
 static int npcm7xx_mii_setup(struct net_device *netdev)
