@@ -111,6 +111,7 @@ struct npcm_video {
 
 	struct device *dev;
 	struct v4l2_ctrl_handler ctrl_handler;
+	struct v4l2_ctrl *rect_cnt_ctrl;
 	struct v4l2_device v4l2_dev;
 	struct v4l2_pix_format pix_fmt;
 	struct v4l2_bt_timings active_timings;
@@ -129,7 +130,6 @@ struct npcm_video {
 	struct reset_control *reset;
 	struct npcm_ece ece;
 
-	unsigned int vb_index;
 	unsigned int bytesperline;
 	unsigned int bytesperpixel;
 	unsigned int rect_cnt;
@@ -229,7 +229,7 @@ static unsigned int npcm_video_ece_get_ed_size(struct npcm_video *video,
 		return 0;
 	}
 
-	size = readl(addr + offset);
+	size = readl((void __iomem *)addr + offset);
 	regmap_read(ece, ECE_HEX_CTRL, &val);
 	gap = FIELD_GET(ECE_HEX_CTRL_ENC_GAP, val);
 
@@ -417,7 +417,7 @@ static unsigned int npcm_video_add_rect(struct npcm_video *video,
 	struct rect_list *list = NULL;
 	struct v4l2_rect *r;
 
-	list = kzalloc(sizeof(*list), GFP_KERNEL);
+	list = kzalloc(sizeof(*list), GFP_ATOMIC);
 	if (!list)
 		return 0;
 
@@ -472,7 +472,7 @@ static struct rect_list *npcm_video_new_rect(struct npcm_video *video,
 	struct rect_list *list = NULL;
 	struct v4l2_rect *r;
 
-	list = kzalloc(sizeof(*list), GFP_KERNEL);
+	list = kzalloc(sizeof(*list), GFP_ATOMIC);
 	if (!list)
 		return NULL;
 
@@ -1154,6 +1154,7 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 			size = npcm_video_hextile(video, index, dma_addr, addr);
 			break;
 		default:
+			spin_unlock(&video->lock);
 			return IRQ_NONE;
 		}
 
@@ -1194,7 +1195,6 @@ static int npcm_video_querycap(struct file *file, void *fh,
 {
 	strscpy(cap->driver, DEVICE_NAME, sizeof(cap->driver));
 	strscpy(cap->card, "NPCM Video Engine", sizeof(cap->card));
-	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s", DEVICE_NAME);
 
 	return 0;
 }
@@ -1422,30 +1422,13 @@ static int npcm_video_set_ctrl(struct v4l2_ctrl *ctrl)
 	return 0;
 }
 
-static int npcm_video_get_volatile_ctrl(struct v4l2_ctrl *ctrl)
-{
-	struct npcm_video *video = container_of(ctrl->handler, struct npcm_video,
-						ctrl_handler);
-
-	switch (ctrl->id) {
-	case V4L2_CID_NPCM_RECT_COUNT:
-		ctrl->val = video->rect[video->vb_index];
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 static const struct v4l2_ctrl_ops npcm_video_ctrl_ops = {
 	.s_ctrl = npcm_video_set_ctrl,
-	.g_volatile_ctrl = npcm_video_get_volatile_ctrl,
 };
 
 static const char * const npcm_ctrl_capture_mode_menu[] = {
-	"COMPLETE mode",
-	"DIFF mode",
+	"COMPLETE",
+	"DIFF",
 	NULL,
 };
 
@@ -1460,12 +1443,14 @@ static const struct v4l2_ctrl_config npcm_ctrl_capture_mode = {
 	.qmenu = npcm_ctrl_capture_mode_menu,
 };
 
+/*
+ * This control value is set when a buffer is dequeued by userspace, i.e. in
+ * npcm_video_buf_finish function.
+ */
 static const struct v4l2_ctrl_config npcm_ctrl_rect_count = {
-	.ops = &npcm_video_ctrl_ops,
 	.id = V4L2_CID_NPCM_RECT_COUNT,
-	.name = "NPCM Compressed Hextile Rectangle Count",
+	.name = "NPCM Hextile Rectangle Count",
 	.type = V4L2_CTRL_TYPE_INTEGER,
-	.flags = V4L2_CTRL_FLAG_VOLATILE,
 	.min = 0,
 	.max = (MAX_WIDTH / RECT_W) * (MAX_HEIGHT / RECT_H),
 	.step = 1,
@@ -1576,6 +1561,7 @@ static void npcm_video_stop_streaming(struct vb2_queue *q)
 	npcm_video_gfx_reset(video);
 	npcm_video_bufs_done(video, VB2_BUF_STATE_ERROR);
 	video->ctrl_cmd = VCD_CMD_OPERATION_CAPTURE;
+	v4l2_ctrl_s_ctrl(video->rect_cnt_ctrl, 0);
 }
 
 static void npcm_video_buf_queue(struct vb2_buffer *vb)
@@ -1604,11 +1590,15 @@ static void npcm_video_buf_finish(struct vb2_buffer *vb)
 	struct list_head *head, *pos, *nx;
 	struct rect_list *tmp;
 
-	video->vb_index = vb->index;
-
+	/*
+	 * This callback is called when the buffer is dequeued, so update
+	 * V4L2_CID_NPCM_RECT_COUNT control value with the number of rectangles
+	 * in this buffer and free associated rect_list.
+	 */
 	if (test_bit(VIDEO_STREAMING, &video->flags)) {
-		/* Free associated rect_list when a video buffer get dequeued */
-		head = &video->list[video->vb_index];
+		v4l2_ctrl_s_ctrl(video->rect_cnt_ctrl, video->rect[vb->index]);
+
+		head = &video->list[vb->index];
 		list_for_each_safe(pos, nx, head) {
 			tmp = list_entry(pos, struct rect_list, list);
 			list_del(&tmp->list);
@@ -1667,7 +1657,8 @@ static int npcm_video_setup_video(struct npcm_video *video)
 
 	v4l2_ctrl_handler_init(&video->ctrl_handler, 2);
 	v4l2_ctrl_new_custom(&video->ctrl_handler, &npcm_ctrl_capture_mode, NULL);
-	v4l2_ctrl_new_custom(&video->ctrl_handler, &npcm_ctrl_rect_count, NULL);
+	video->rect_cnt_ctrl = v4l2_ctrl_new_custom(&video->ctrl_handler,
+						    &npcm_ctrl_rect_count, NULL);
 	if (video->ctrl_handler.error) {
 		dev_err(video->dev, "Failed to init controls: %d\n",
 			video->ctrl_handler.error);
@@ -1730,9 +1721,9 @@ static int npcm_video_ece_init(struct npcm_video *video)
 	void __iomem *regs;
 
 	ece_node = of_parse_phandle(video->dev->of_node, "nuvoton,ece", 0);
-	if (IS_ERR(ece_node)) {
+	if (!ece_node) {
 		dev_err(dev, "Failed to get ECE phandle in DTS\n");
-		return PTR_ERR(ece_node);
+		return -ENODEV;
 	}
 
 	video->ece.enable = of_device_is_available(ece_node);
