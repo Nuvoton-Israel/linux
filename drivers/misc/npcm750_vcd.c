@@ -38,7 +38,7 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 
-#define VCD_VERSION			"1.0.0"
+#define VCD_VERSION			"2.0.0"
 #define DEVICE_NAME			"nuvoton-vcd"
 
 #define VCD_BUFFER_SIZE			0x500000 /* support up to 1920 x 1200 */
@@ -216,7 +216,8 @@
 #define  INTCR2_GIHCRST			BIT(5)
 #define  INTCR2_GIVCRST			BIT(6)
 
-#define MFSEL1				0x0c
+#define MFSEL1_NPCM7XX			0x0c
+#define MFSEL1_NPCM8XX			0x260
 #define  MFSEL1_DVH1SEL			BIT(27)
 
 /* GFXI Registers */
@@ -358,6 +359,7 @@ struct npcm750_vcd {
 	int cmd;
 	atomic_t clients;
 	bool hsync_mode;
+	bool use_head1_source;
 	unsigned int hdelay_add; /* compensation for HSYNC delay */
 	unsigned int vdelay_add; /* compensation for VSYNC delay */
 	int irq;
@@ -1017,6 +1019,21 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 	regmap_update_bits(gcr, INTCR2, INTCR2_GIHCRST | INTCR2_GIVCRST,
 			   INTCR2_GIHCRST | INTCR2_GIVCRST);
 
+	/* Select KVM GFX input */
+	if (of_device_is_compatible(priv->dev->of_node, "nuvoton,npcm750-vcd")) {
+		if (priv->use_head1_source)
+			regmap_update_bits(gcr, MFSEL1_NPCM7XX, MFSEL1_DVH1SEL,
+					   MFSEL1_DVH1SEL);
+		else
+			regmap_update_bits(gcr, MFSEL1_NPCM7XX, MFSEL1_DVH1SEL, 0);
+	} else {
+		if (priv->use_head1_source)
+			regmap_update_bits(gcr, MFSEL1_NPCM8XX, MFSEL1_DVH1SEL,
+					   MFSEL1_DVH1SEL);
+		else
+			regmap_update_bits(gcr, MFSEL1_NPCM8XX, MFSEL1_DVH1SEL, 0);
+	}
+
 	/* IP Reset */
 	npcm750_vcd_ip_reset(priv);
 
@@ -1419,6 +1436,7 @@ static int npcm750_vcd_device_create(struct npcm750_vcd *priv)
 	struct device *dev = priv->dev;
 	unsigned int hdelay_add, vdelay_add;
 
+	priv->use_head1_source = of_property_read_bool(dev->of_node, "nuvoton,use-head1-source");
 	priv->hsync_mode = of_property_read_bool(dev->of_node, "nuvoton,hsync-mode");
 
 	if (!of_property_read_u32(dev->of_node, "nuvoton,hsync-delay-add", &hdelay_add))
