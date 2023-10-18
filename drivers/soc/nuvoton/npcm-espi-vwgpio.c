@@ -392,11 +392,11 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 
 	vwgpio->dev = dev;
 
-	if (of_property_read_u32(pdev->dev.of_node, "npcm,gpio-control-map", &gpvwmap))
+	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,gpio-control-map", &gpvwmap))
 		gpvwmap = 0;
-	if (of_property_read_u32(pdev->dev.of_node, "npcm,control-interrupt-map", &intwin))
+	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,control-interrupt-map", &intwin))
 		intwin = 0;
-	if (of_property_read_u32(pdev->dev.of_node, "npcm,index-en-map", &idxenmap))
+	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,index-en-map", &idxenmap))
 		idxenmap = 0;
 
 	npcm_vwgpio_config(vwgpio, intwin, gpvwmap, idxenmap);
