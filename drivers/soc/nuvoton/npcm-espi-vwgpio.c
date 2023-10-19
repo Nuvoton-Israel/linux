@@ -9,6 +9,8 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
+#include <linux/mfd/syscon.h>
 
 #define ESPI_ESPICFG		0x004
 #define   ESPICFG_VWCHANEN	BIT(1)
@@ -50,17 +52,17 @@ struct vwgpio_event {
 	u8 flags: 3;
 };
 
-struct npcm_espi_vw {
+struct npcm_vwgpio {
 	struct gpio_chip chip;
 	struct device *dev;
-	void __iomem *regs;
+	struct regmap *map;
 	struct vwgpio_event events[VW_MSGPIO_NUM];
 	int irq;
 };
 
 static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 {
-	struct npcm_espi_vw *espi_vw = gpiochip_get_data(gc);
+	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
 	u32 wire = offset % 4;
 	u32 index;
 	u32 val;
@@ -71,7 +73,7 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 		return -EINVAL;
 
 	index = (offset - VM_MSGPIO_START) / 4;
-	val = ioread32(espi_vw->regs + ESPI_VWGPMS(index));
+	regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
 	/* Check wire valid bit */
 	if (!(val & BIT(wire + 4)))
 		return -EIO;
@@ -81,7 +83,7 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 
 static void vwgpio_set_value(struct gpio_chip *gc, unsigned int offset, int val)
 {
-	struct npcm_espi_vw *espi_vw = gpiochip_get_data(gc);
+	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
 	u32 index = offset / 4;
 	u32 wire = offset % 4;
 	u32 reg;
@@ -92,14 +94,14 @@ static void vwgpio_set_value(struct gpio_chip *gc, unsigned int offset, int val)
 	if (offset >= VW_SMGPIO_NUM)
 		return;
 
-	reg = ioread32(espi_vw->regs + ESPI_VWGPSM(index));
+	regmap_read(vwgpio->map, ESPI_VWGPSM(index), &reg);
 	/* Set index enable & wire valid */
 	reg |= BIT(wire + 4) | VWGPSM_INDEX_EN;
 	if (val)
 		reg |= BIT(wire);
 	else
 		reg &= ~BIT(wire);
-	iowrite32(reg, espi_vw->regs + ESPI_VWGPSM(index));
+	regmap_write(vwgpio->map, ESPI_VWGPSM(index), reg);
 }
 
 static int vwgpio_get_direction(struct gpio_chip *gc, unsigned int offset)
@@ -122,12 +124,12 @@ static int vwgpio_direction_output(struct gpio_chip *gc, unsigned int offset, in
 	return -EINVAL;
 }
 
-static void npcm_espi_vwgpms_config(struct npcm_espi_vw *espi_vw, int index,
-			       bool enable, bool int_en)
+static void npcm_vwgpio_gpms_config(struct npcm_vwgpio *vwgpio, int index,
+				    bool enable, bool int_en)
 {
 	u32 val;
 
-	val = ioread32(espi_vw->regs + ESPI_VWGPMS(index));
+	regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
 	if (enable)
 		val |= VWGPMS_INDEX_EN;
 	else
@@ -138,13 +140,13 @@ static void npcm_espi_vwgpms_config(struct npcm_espi_vw *espi_vw, int index,
 	else
 		val &= ~VWGPMS_IE;
 
-	iowrite32(val, espi_vw->regs + ESPI_VWGPMS(index));
+	regmap_write(vwgpio->map, ESPI_VWGPMS(index), val);
 }
 
-static void npcm_vwgpio_check_event(struct npcm_espi_vw *espi_vw,
+static void npcm_vwgpio_check_event(struct npcm_vwgpio *vwgpio,
 				   unsigned int event_idx)
 {
-	struct gpio_chip *gc = &espi_vw->chip;
+	struct gpio_chip *gc = &vwgpio->chip;
 	struct vwgpio_event *event;
 	bool raise_irq = false;
 	unsigned int girq;
@@ -156,11 +158,11 @@ static void npcm_vwgpio_check_event(struct npcm_espi_vw *espi_vw,
 	if (event_idx >= VW_MSGPIO_NUM)
 		return;
 
-	event = &espi_vw->events[event_idx];
+	event = &vwgpio->events[event_idx];
 
-	val = ioread32(espi_vw->regs + ESPI_VWGPMS(index));
+	regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
 	/* Clear MODIFIED bit */
-	iowrite32(val | VWGPMS_MODIFIED, espi_vw->regs + ESPI_VWGPMS(index));
+	regmap_write(vwgpio->map, ESPI_VWGPMS(index), val | VWGPMS_MODIFIED);
 
 	/* Check event enable */
 	if (!event->enable)
@@ -212,31 +214,28 @@ static void npcm_vwgpio_check_event(struct npcm_espi_vw *espi_vw,
 	}
 }
 
-static void npcm_vwgpio_irq_handler(struct irq_desc *desc)
+static irqreturn_t npcm_vwgpio_irq_handler(int irq, void *dev_id)
 {
-	struct gpio_chip *gc = irq_desc_get_handler_data(desc);
-	struct irq_chip *ic = irq_desc_get_chip(desc);
-	struct npcm_espi_vw *espi_vw = gpiochip_get_data(gc);
+	struct npcm_vwgpio *vwgpio = dev_id;
 	u32 status;
 	int i;
 
-	chained_irq_enter(ic, desc);
-
-	status = ioread32(espi_vw->regs + ESPI_ESPISTS);
-	/* Clear status */
-	iowrite32(status, espi_vw->regs + ESPI_ESPISTS);
+	regmap_read(vwgpio->map, ESPI_ESPISTS, &status);
 	if (!(status & ESPISTS_VWUPD))
-		goto exit;
+		return IRQ_HANDLED;
+
+	/* Clear ESPISTS_VWUPD status */
+	regmap_write(vwgpio->map, ESPI_ESPISTS, ESPISTS_VWUPD);
 	/* Check all events */
 	for (i = 0; i < VW_MSGPIO_NUM; i++)
-		npcm_vwgpio_check_event(espi_vw, i);
-exit:
-	chained_irq_exit(ic, desc);
+		npcm_vwgpio_check_event(vwgpio, i);
+
+	return IRQ_HANDLED;
 }
 
 static int npcm_vwgpio_set_irq_type(struct irq_data *d, unsigned int type)
 {
-	struct npcm_espi_vw *espi_vw = gpiochip_get_data(irq_data_get_irq_chip_data(d));
+	struct npcm_vwgpio *vwgpio = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 	unsigned int gpio = irqd_to_hwirq(d);
 	unsigned int event_idx;
 
@@ -247,23 +246,23 @@ static int npcm_vwgpio_set_irq_type(struct irq_data *d, unsigned int type)
 
 	switch (type) {
 	case IRQ_TYPE_EDGE_RISING:
-		espi_vw->events[event_idx].type = VW_GPIO_EVENT_EDGE_RISING;
+		vwgpio->events[event_idx].type = VW_GPIO_EVENT_EDGE_RISING;
 		irq_set_handler_locked(d, handle_edge_irq);
 		break;
 	case IRQ_TYPE_EDGE_FALLING:
-		espi_vw->events[event_idx].type = VW_GPIO_EVENT_EDGE_FALLING;
+		vwgpio->events[event_idx].type = VW_GPIO_EVENT_EDGE_FALLING;
 		irq_set_handler_locked(d, handle_edge_irq);
 		break;
 	case IRQ_TYPE_EDGE_BOTH:
-		espi_vw->events[event_idx].type = VW_GPIO_EVENT_EDGE_BOTH;
+		vwgpio->events[event_idx].type = VW_GPIO_EVENT_EDGE_BOTH;
 		irq_set_handler_locked(d, handle_edge_irq);
 		break;
 	case IRQ_TYPE_LEVEL_LOW:
-		espi_vw->events[event_idx].type = VW_GPIO_EVENT_LEVEL_LOW;
+		vwgpio->events[event_idx].type = VW_GPIO_EVENT_LEVEL_LOW;
 		irq_set_handler_locked(d, handle_level_irq);
 		break;
 	case IRQ_TYPE_LEVEL_HIGH:
-		espi_vw->events[event_idx].type = VW_GPIO_EVENT_LEVEL_HIGH;
+		vwgpio->events[event_idx].type = VW_GPIO_EVENT_LEVEL_HIGH;
 		irq_set_handler_locked(d, handle_level_irq);
 		break;
 	default:
@@ -279,7 +278,7 @@ static void npcm_vwgpio_irq_ack(struct irq_data *d)
 
 static void npcm_vwgpio_irq_mask(struct irq_data *d)
 {
-	struct npcm_espi_vw *espi_vw = gpiochip_get_data(irq_data_get_irq_chip_data(d));
+	struct npcm_vwgpio *vwgpio = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 	unsigned int gpio = irqd_to_hwirq(d);
 	bool int_enable = false;
 	int index;
@@ -290,22 +289,22 @@ static void npcm_vwgpio_irq_mask(struct irq_data *d)
 	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
 		return;
 
-	espi_vw->events[gpio - VM_MSGPIO_START].enable = 0;
+	vwgpio->events[gpio - VM_MSGPIO_START].enable = 0;
 	index = (gpio - VM_MSGPIO_START) / 4;
 	/* Check all wires in the same VMGPIOMS index */
 	for (wire = 0; wire < 4; wire++) {
-		if (espi_vw->events[index * 4 + wire].enable) {
+		if (vwgpio->events[index * 4 + wire].enable) {
 			int_enable = true;
 			break;
 		}
 	}
 	if (!int_enable)
-		npcm_espi_vwgpms_config(espi_vw, index, true, false);
+		npcm_vwgpio_gpms_config(vwgpio, index, true, false);
 }
 
 static void npcm_vwgpio_irq_unmask(struct irq_data *d)
 {
-	struct npcm_espi_vw *espi_vw = gpiochip_get_data(irq_data_get_irq_chip_data(d));
+	struct npcm_vwgpio *vwgpio = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 	unsigned int gpio = irqd_to_hwirq(d);
 	int index;
 
@@ -315,13 +314,13 @@ static void npcm_vwgpio_irq_unmask(struct irq_data *d)
 		return;
 
 	/* Get current state */
-	espi_vw->events[gpio - VM_MSGPIO_START].state =
-		vwgpio_get_value(&espi_vw->chip, gpio);
+	vwgpio->events[gpio - VM_MSGPIO_START].state =
+		vwgpio_get_value(&vwgpio->chip, gpio);
 
 	/* Set event enable */
-	espi_vw->events[gpio - VM_MSGPIO_START].enable = 1;
+	vwgpio->events[gpio - VM_MSGPIO_START].enable = 1;
 	index = (gpio - VM_MSGPIO_START) / 4;
-	npcm_espi_vwgpms_config(espi_vw, index, true, true);
+	npcm_vwgpio_gpms_config(vwgpio, index, true, true);
 }
 
 static struct irq_chip npcm_vwgpio_irqchip = {
@@ -332,118 +331,113 @@ static struct irq_chip npcm_vwgpio_irqchip = {
 	.irq_set_type = npcm_vwgpio_set_irq_type,
 };
 
-static void npcm_espi_vwgpio_init(struct npcm_espi_vw *espi_vw)
+static void npcm_vwgpio_init(struct npcm_vwgpio *vwgpio)
 {
-	u32 val;
 	int i;
 
 	/* Get gpio initial state */
-	memset(&espi_vw->events, 0, sizeof(espi_vw->events));
+	memset(&vwgpio->events, 0, sizeof(vwgpio->events));
 	for (i = 0; i < VW_MSGPIO_NUM; i++)
-		espi_vw->events[i].state =
-			vwgpio_get_value(&espi_vw->chip, VM_MSGPIO_START + i);
+		vwgpio->events[i].state =
+			vwgpio_get_value(&vwgpio->chip, VM_MSGPIO_START + i);
 
 	/* enable VWUPD interrupt */
-	val = ioread32(espi_vw->regs + ESPI_ESPIIE);
-	val |= ESPIIE_VWUPDIE;
-	iowrite32(val, espi_vw->regs + ESPI_ESPIIE);
+	regmap_set_bits(vwgpio->map, ESPI_ESPIIE, ESPIIE_VWUPDIE);
 }
 
-static void npcm_espi_vw_config(struct npcm_espi_vw *espi_vw, u8 intwin,
-				u8 gpvwmap, bool irq_dis, bool no_valid)
+static void npcm_vwgpio_config(struct npcm_vwgpio *vwgpio, u8 intwin,
+			       u8 gpvwmap, u32 idxenmap)
 {
 	u32 val = VWCTL_INTWIN(intwin) | VWCTL_GPVWMAP(gpvwmap);
-
-	if (irq_dis)
-		val |= VWCTL_IRQD;
-	if (no_valid)
-		val |= VWCTL_NOVALID;
-
-	iowrite32(val, espi_vw->regs + ESPI_VWCTL);
-}
-
-static void npcm_espi_vw_index_en(struct npcm_espi_vw *espi_vw,
-				  u32 idxenmap)
-{
-	u32 val;
 	int i;
+
+	regmap_write(vwgpio->map, ESPI_VWCTL, val);
 
 	for (i = 0; i < VWGPSM_INDEX_COUNT; i++) {
 		if (!(idxenmap & BIT(i)))
 			continue;
-		val = ioread32(espi_vw->regs + ESPI_VWGPSM(i));
-		val |= VWGPSM_INDEX_EN;
-		iowrite32(val, espi_vw->regs + ESPI_VWGPSM(i));
+		regmap_set_bits(vwgpio->map, ESPI_VWGPSM(i),
+				VWGPSM_INDEX_EN);
 	}
 	for (i = 0; i < VWGPMS_INDEX_COUNT; i++) {
 		if (!(idxenmap & BIT(i + VWGPSM_INDEX_COUNT)))
 			continue;
-		val = ioread32(espi_vw->regs + ESPI_VWGPMS(i));
-		val |= VWGPMS_INDEX_EN;
-		iowrite32(val, espi_vw->regs + ESPI_VWGPMS(i));
+		regmap_set_bits(vwgpio->map, ESPI_VWGPMS(i),
+				VWGPMS_INDEX_EN);
 	}
 }
 
-static int npcm_espi_vw_probe(struct platform_device *pdev)
+static int npcm_vwgpio_probe(struct platform_device *pdev)
 {
-	struct npcm_espi_vw *espi_vw;
+	struct npcm_vwgpio *vwgpio;
 	struct device *dev = &pdev->dev;
 	struct gpio_irq_chip *irq;
 	u32 gpvwmap, intwin, idxenmap;
 	int rc;
 
-	espi_vw = devm_kzalloc(dev, sizeof(*espi_vw), GFP_KERNEL);
-	if (!espi_vw)
+	vwgpio = devm_kzalloc(dev, sizeof(*vwgpio), GFP_KERNEL);
+	if (!vwgpio)
 		return -ENOMEM;
 
-	espi_vw->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(espi_vw->regs))
-		return PTR_ERR(espi_vw->regs);
+	vwgpio->map = syscon_node_to_regmap(dev->parent->of_node);
+	if (IS_ERR(vwgpio->map)) {
+		dev_err(dev, "Couldn't get regmap\n");
+		return -ENODEV;
+	}
 
-	espi_vw->irq = platform_get_irq(pdev, 0);
-	if (espi_vw->irq < 0)
-		return espi_vw->irq;
+	vwgpio->irq = platform_get_irq(pdev, 0);
+	if (vwgpio->irq < 0)
+		return vwgpio->irq;
 
-	espi_vw->dev = dev;
+	vwgpio->dev = dev;
 
-	if (of_property_read_u32(pdev->dev.of_node, "npcm,gpio-control-map", &gpvwmap))
+	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,gpio-control-map", &gpvwmap))
 		gpvwmap = 0;
-	if (of_property_read_u32(pdev->dev.of_node, "npcm,control-interrupt-map", &intwin))
+	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,control-interrupt-map", &intwin))
 		intwin = 0;
-	if (of_property_read_u32(pdev->dev.of_node, "npcm,index-en-map", &idxenmap))
+	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,index-en-map", &idxenmap))
 		idxenmap = 0;
 
-	npcm_espi_vw_config(espi_vw, intwin, gpvwmap, false, false);
-	npcm_espi_vw_index_en(espi_vw, idxenmap);
+	npcm_vwgpio_config(vwgpio, intwin, gpvwmap, idxenmap);
 
 	if (of_find_property(pdev->dev.of_node, "gpio-controller", NULL)) {
-		espi_vw->chip.of_node = pdev->dev.of_node;
-		espi_vw->chip.label = "ESPI_VW_GPIO";
-		espi_vw->chip.base = -1;
-		espi_vw->chip.parent = dev;
-		espi_vw->chip.owner = THIS_MODULE;
-		espi_vw->chip.ngpio = 128;
-		espi_vw->chip.can_sleep = 0;
-		espi_vw->chip.get = vwgpio_get_value;
-		espi_vw->chip.set = vwgpio_set_value;
-		espi_vw->chip.direction_output = vwgpio_direction_output;
-		espi_vw->chip.direction_input = vwgpio_direction_input;
-		espi_vw->chip.get_direction = vwgpio_get_direction;
+		vwgpio->chip.of_node = pdev->dev.of_node;
+		vwgpio->chip.label = "ESPI_VW_GPIO";
+		vwgpio->chip.base = -1;
+		vwgpio->chip.parent = dev;
+		vwgpio->chip.owner = THIS_MODULE;
+		vwgpio->chip.ngpio = 128;
+		vwgpio->chip.can_sleep = 0;
+		vwgpio->chip.get = vwgpio_get_value;
+		vwgpio->chip.set = vwgpio_set_value;
+		vwgpio->chip.direction_output = vwgpio_direction_output;
+		vwgpio->chip.direction_input = vwgpio_direction_input;
+		vwgpio->chip.get_direction = vwgpio_get_direction;
 
-		irq = &espi_vw->chip.irq;
+		irq = &vwgpio->chip.irq;
 		irq->chip = &npcm_vwgpio_irqchip;
-		irq->handler = handle_level_irq;
+		irq->handler = handle_bad_irq;
 		irq->default_type = IRQ_TYPE_NONE;
-		irq->parent_handler = npcm_vwgpio_irq_handler;
-		irq->parents = &espi_vw->irq;
-		irq->num_parents = 1;
+		irq->parent_handler = NULL;
+		irq->parents = NULL;
+		irq->num_parents = 0;
 
-		rc = devm_gpiochip_add_data(dev, &espi_vw->chip, espi_vw);
+		rc = devm_gpiochip_add_data(dev, &vwgpio->chip, vwgpio);
 		if (rc) {
 			pr_info("Error adding ESPI vw gpiochip\n");
 			return rc;
 		}
-		npcm_espi_vwgpio_init(espi_vw);
+
+		/* Clear ESPISTS_VWUPD status */
+		regmap_write(vwgpio->map, ESPI_ESPISTS, ESPISTS_VWUPD);
+
+		rc = devm_request_irq(dev, vwgpio->irq, npcm_vwgpio_irq_handler,
+				      IRQF_SHARED, "espi-vw-gpio", vwgpio);
+		if (rc) {
+			dev_err(dev, "failed to request IRQ\n");
+			return rc;
+		}
+		npcm_vwgpio_init(vwgpio);
 	}
 
 	pr_info("%s OK\n", __func__);
@@ -451,27 +445,29 @@ static int npcm_espi_vw_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcm_espi_vw_remove(struct platform_device *pdev)
+static int npcm_vwgpio_remove(struct platform_device *pdev)
 {
 	return 0;
 }
 
-static const struct of_device_id npcm_espi_vw_of_matches[] = {
-	{ .compatible = "nuvoton,npcm7xx-espi-vw", },
-	{ .compatible = "nuvoton,npcm8xx-espi-vw", },
+static const struct of_device_id npcm_vwgpio_of_matches[] = {
+	{ .compatible = "nuvoton,npcm845-espi-vwgpio", },
 	{ },
 };
 
-static struct platform_driver npcm_espi_vw_driver = {
+static struct platform_driver npcm_vwgpio_driver = {
 	.driver = {
-		.name = "npcm-espi-vw",
-		.of_match_table = npcm_espi_vw_of_matches,
+		.name = "npcm-espi-vwgpio",
+		.of_match_table = npcm_vwgpio_of_matches,
 	},
-	.probe = npcm_espi_vw_probe,
-	.remove = npcm_espi_vw_remove,
+	.probe = npcm_vwgpio_probe,
+	.remove = npcm_vwgpio_remove,
 };
 
-module_platform_driver(npcm_espi_vw_driver);
+module_platform_driver(npcm_vwgpio_driver);
 
-MODULE_DESCRIPTION("Nuvoton NPCM eSPI Virtual Wire Driver");
+MODULE_AUTHOR("Tomer Maimon <Tomer.Maimon@nuvoton.com>");
+MODULE_AUTHOR("Ban Feng <kcfeng0@nuvoton.com>");
+MODULE_AUTHOR("Stanley Chu <yschu@nuvoton.com>");
+MODULE_DESCRIPTION("Nuvoton NPCM eSPI Virtual Wire GPIO Driver");
 MODULE_LICENSE("GPL v2");
