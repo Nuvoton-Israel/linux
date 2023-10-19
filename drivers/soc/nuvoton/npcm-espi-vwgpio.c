@@ -58,6 +58,7 @@ struct npcm_vwgpio {
 	struct regmap *map;
 	struct vwgpio_event events[VW_MSGPIO_NUM];
 	int irq;
+	u64 mswire_default;
 };
 
 static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
@@ -76,7 +77,7 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 	regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
 	/* Check wire valid bit */
 	if (!(val & BIT(wire + 4)))
-		return -EIO;
+		return !!(vwgpio->mswire_default & BIT(offset - VM_MSGPIO_START));
 
 	return !!(val & BIT(wire));
 }
@@ -373,6 +374,7 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct gpio_irq_chip *irq;
 	u32 gpvwmap, intwin, idxenmap;
+	u64 mswiremap;
 	int rc;
 
 	vwgpio = devm_kzalloc(dev, sizeof(*vwgpio), GFP_KERNEL);
@@ -397,6 +399,10 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 		intwin = 0;
 	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,index-en-map", &idxenmap))
 		idxenmap = 0;
+	if (of_property_read_u64(pdev->dev.of_node, "nuvoton,vwgpms-wire-map", &mswiremap))
+		vwgpio->mswire_default = 0;
+	else
+		vwgpio->mswire_default = mswiremap;
 
 	npcm_vwgpio_config(vwgpio, intwin, gpvwmap, idxenmap);
 

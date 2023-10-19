@@ -85,6 +85,14 @@ patternProperties:
           Defines the index of the Virtual Wire group (VWGPMS15-0, VWGPSM15-0,
           in this order)
 
+      nuvoton,vwgpms-wire-map:
+        $ref: /schemas/types.yaml#/definitions/uint64
+        minimum: 0x0
+        maximum: 0xFFFFFFFFFFFFFFFF
+        default: 0x0
+        description: |
+          Each bit indicates the state of a Virtual Wire of the group (VWGPMS15-0)
+
     required:
       - compatible
       - interrupts
@@ -93,6 +101,7 @@ patternProperties:
       - nuvoton,gpio-control-map
       - nuvoton,control-interrupt-map
       - nuvoton,index-en-map
+      - nuvoton,vwgpms-wire-map
 
 required:
   - compatible
@@ -117,5 +126,6 @@ examples:
             nuvoton,gpio-control-map = <1>;
             nuvoton,control-interrupt-map = <0>;
             nuvoton,index-en-map = <0x80000000>;
+            nuvoton,vwgpms-wire-map = <0x80000000 0x0>;
         };
     };
