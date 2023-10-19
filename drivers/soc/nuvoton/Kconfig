@@ -14,11 +14,11 @@ config NPCM_MBOX_CERBERUS
 	  processors on the BMC such as TIP and CP. 
 	  Select Y here if you want to use NPCM mailbox controller.
 
-config NPCM_ESPI_VW
-	tristate "NPCM eSPI Virtual Wire"
+config NPCM_ESPI_VWGPIO
+	tristate "NPCM eSPI Virtual Wire GPIO"
 	depends on ARCH_NPCM || COMPILE_TEST
 	help
-	  An implementation of the NPCM eSPI virutal wire driver.
+	  An implementation of the NPCM eSPI virutal wire gpio driver.
 	  It is used to control the virtual wire master-to-slave and
 	  slave-to-master GPIO. It also registers an gpio controller
 	  to handle the master-to-slave gpio event.
