@@ -21,6 +21,8 @@
 #define   ESPIIE_VWUPDIE	BIT(8)
 #define ESPI_VWGPSM(n)		(0x180 + (4*(n)))
 #define   VWGPSM_INDEX_EN	BIT(15)
+#define ESPI_ESPIERR		0x03C
+#define   ESPIERR_VWERR		BIT(11)
 #define ESPI_VWGPMS(n)		(0x1C0 + (4*(n)))
 #define   VWGPMS_INDEX_EN	BIT(15)
 #define   VWGPMS_MODIFIED	BIT(16)
@@ -347,24 +349,41 @@ static void npcm_vwgpio_init(struct npcm_vwgpio *vwgpio)
 }
 
 static void npcm_vwgpio_config(struct npcm_vwgpio *vwgpio, u8 intwin,
-			       u8 gpvwmap, u32 idxenmap)
+			       u8 gpvwmap, u32 idxenmap, u64 smwiremap)
 {
 	u32 val = VWCTL_INTWIN(intwin) | VWCTL_GPVWMAP(gpvwmap);
-	int i;
+	u32 reg;
+	int i, j;
 
 	regmap_write(vwgpio->map, ESPI_VWCTL, val);
 
 	for (i = 0; i < VWGPSM_INDEX_COUNT; i++) {
-		if (!(idxenmap & BIT(i)))
-			continue;
-		regmap_set_bits(vwgpio->map, ESPI_VWGPSM(i),
-				VWGPSM_INDEX_EN);
+		regmap_read(vwgpio->map, ESPI_VWGPSM(i), &reg);
+		if ((idxenmap & BIT(i))) {
+			reg |= VWGPSM_INDEX_EN;
+			for (j = 0; j < 4; j++) {
+				reg |= BIT(j + 4);
+				if (!(smwiremap & BIT((i * 4) + j)))
+					reg &= ~BIT(j);
+				else
+					reg |= BIT(j);
+			}
+		}
+		else {
+			reg &= ~VWGPSM_INDEX_EN;
+			for (j = 0; j < 4; j++) {
+				reg &= ~BIT(j + 4);
+			}
+		}
+		regmap_write(vwgpio->map, ESPI_VWGPSM(i), reg);
 	}
 	for (i = 0; i < VWGPMS_INDEX_COUNT; i++) {
-		if (!(idxenmap & BIT(i + VWGPSM_INDEX_COUNT)))
-			continue;
-		regmap_set_bits(vwgpio->map, ESPI_VWGPMS(i),
-				VWGPMS_INDEX_EN);
+		if (idxenmap & BIT(i + VWGPSM_INDEX_COUNT))
+			regmap_set_bits(vwgpio->map, ESPI_VWGPMS(i),
+					VWGPMS_INDEX_EN);
+		else
+			regmap_clear_bits(vwgpio->map, ESPI_VWGPMS(i),
+					VWGPMS_INDEX_EN);
 	}
 }
 
@@ -374,7 +393,7 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct gpio_irq_chip *irq;
 	u32 gpvwmap, intwin, idxenmap;
-	u64 mswiremap;
+	u64 mswiremap, smwiremap;
 	int rc;
 
 	vwgpio = devm_kzalloc(dev, sizeof(*vwgpio), GFP_KERNEL);
@@ -403,8 +422,10 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 		vwgpio->mswire_default = 0;
 	else
 		vwgpio->mswire_default = mswiremap;
+	if (of_property_read_u64(pdev->dev.of_node, "nuvoton,vwgpsm-wire-map", &smwiremap))
+		smwiremap = 0xFFFFFFFFFFFFFFFFULL;
 
-	npcm_vwgpio_config(vwgpio, intwin, gpvwmap, idxenmap);
+	npcm_vwgpio_config(vwgpio, intwin, gpvwmap, idxenmap, smwiremap);
 
 	if (of_find_property(pdev->dev.of_node, "gpio-controller", NULL)) {
 		vwgpio->chip.of_node = pdev->dev.of_node;
@@ -436,6 +457,10 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 
 		/* Clear ESPISTS_VWUPD status */
 		regmap_write(vwgpio->map, ESPI_ESPISTS, ESPISTS_VWUPD);
+		/* Clear ESPIERR_VWERR status */
+		regmap_write(vwgpio->map, ESPI_ESPIERR, ESPIERR_VWERR);
+		/* Disable VWUPD interrupt */
+		regmap_clear_bits(vwgpio->map, ESPI_ESPIIE, ESPIIE_VWUPDIE);
 
 		rc = devm_request_irq(dev, vwgpio->irq, npcm_vwgpio_irq_handler,
 				      IRQF_SHARED, "espi-vw-gpio", vwgpio);
