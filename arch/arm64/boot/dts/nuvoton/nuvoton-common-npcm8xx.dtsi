@@ -439,6 +439,18 @@
 				};
 			};
 
+			espi: espi@9f000 {
+				compatible = "nuvoton,npcm845-espi",
+						"simple-mfd", "syscon";
+				reg = <0x9f000 0x1000>;
+				vw_gpio: vw_gpio {
+					compatible = "nuvoton,npcm845-espi-vwgpio";
+					interrupts = <GIC_SPI 18 IRQ_TYPE_LEVEL_HIGH>;
+					gpio-controller;
+					#gpio-cells = <2>;
+					status = "disabled";
+				};
+			};
 
 			peci: bus@100000 {
 				compatible = "simple-bus";
