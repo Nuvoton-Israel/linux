@@ -93,6 +93,14 @@ patternProperties:
         description: |
           Each bit indicates the state of a Virtual Wire of the group (VWGPMS15-0)
 
+      nuvoton,vwgpsm-wire-map:
+        $ref: /schemas/types.yaml#/definitions/uint64
+        minimum: 0x0
+        maximum: 0xFFFFFFFFFFFFFFFF
+        default: 0xFFFFFFFFFFFFFFFF
+        description: |
+          Each bit indicates the state of a Virtual Wire of the group (VWGPSM15-0)
+
     required:
       - compatible
       - interrupts
@@ -102,6 +110,7 @@ patternProperties:
       - nuvoton,control-interrupt-map
       - nuvoton,index-en-map
       - nuvoton,vwgpms-wire-map
+      - nuvoton,vwgpsm-wire-map
 
 required:
   - compatible
