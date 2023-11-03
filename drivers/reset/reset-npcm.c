@@ -317,6 +317,8 @@ static void npcm_usb_reset_npcm8xx(struct npcm_rc_data *rc)
 	iprst4 &= ~NPCM_IPSRST4_USBPHY3;
 	writel(iprst4, rc->base + NPCM_IPSRST4);
 
+	udelay(50);
+
 	/* set USB PHY RS bit */
 	regmap_update_bits(rc->gcr_regmap, NPCM_USB1PHYCTL_OFFSET,
 			   NPCM_USBXPHYCTL_RS, NPCM_USBXPHYCTL_RS);
