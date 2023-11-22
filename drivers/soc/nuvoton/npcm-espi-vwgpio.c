@@ -71,15 +71,24 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 	u32 val;
 
 	dev_dbg(gc->parent, "%s: offset=%u\n", __func__, offset);
-	/* Accept MS GPIO only */
-	if (offset < VM_MSGPIO_START || offset >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
+	/* Accept SM/MS GPIO */
+	if (offset >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
 		return -EINVAL;
 
-	index = (offset - VM_MSGPIO_START) / 4;
-	regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
-	/* Check wire valid bit */
-	if (!(val & BIT(wire + 4)))
-		return !!(vwgpio->mswire_default & BIT(offset - VM_MSGPIO_START));
+	if (offset >= VM_MSGPIO_START) {
+		index = (offset - VM_MSGPIO_START) / 4;
+		regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
+		/* Check wire valid bit, invalid return default value */
+		if (!(val & BIT(wire + 4)))
+			return !!(vwgpio->mswire_default & BIT(offset - VM_MSGPIO_START));
+	}
+	else {
+		index = offset / 4;
+		regmap_read(vwgpio->map, ESPI_VWGPSM(index), &val);
+		/* Check wire valid bit*/
+		if (!(val & BIT(wire + 4)))
+			return -EIO;
+	}
 
 	return !!(val & BIT(wire));
 }
