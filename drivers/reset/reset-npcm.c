@@ -255,7 +255,6 @@ static void npcm_usb_reset_npcm7xx(struct npcm_rc_data *rc)
 
 static void npcm_usb_reset_npcm8xx(struct npcm_rc_data *rc)
 {
-	u32 usbphyrs_hold = 0;
 	u32 mdlr, iprst1, iprst2, iprst3, iprst4;
 	u32 ipsrst1_bits = 0;
 	u32 ipsrst2_bits = NPCM_IPSRST2_USB_HOST;
@@ -316,18 +315,12 @@ static void npcm_usb_reset_npcm8xx(struct npcm_rc_data *rc)
 	udelay(50);
 
 	/* set USB PHY RS bit */
-	of_property_read_u32(rc->rcdev.of_node, "nuvoton,usbphyrs-hold",
-						&usbphyrs_hold);
-
-	if ((usbphyrs_hold & BIT(0)) == 0)
-		regmap_update_bits(rc->gcr_regmap, NPCM_USB1PHYCTL_OFFSET,
-				   NPCM_USBXPHYCTL_RS, NPCM_USBXPHYCTL_RS);
-	if ((usbphyrs_hold & BIT(1)) == 0)
-		regmap_update_bits(rc->gcr_regmap, NPCM_USB2PHYCTL_OFFSET,
-				   NPCM_USBXPHYCTL_RS, NPCM_USBXPHYCTL_RS);
-	if ((usbphyrs_hold & BIT(2)) == 0)
-		regmap_update_bits(rc->gcr_regmap, NPCM_USB3PHYCTL_OFFSET,
-				   NPCM_USBXPHYCTL_RS, NPCM_USBXPHYCTL_RS);
+	regmap_update_bits(rc->gcr_regmap, NPCM_USB1PHYCTL_OFFSET,
+			   NPCM_USBXPHYCTL_RS, NPCM_USBXPHYCTL_RS);
+	regmap_update_bits(rc->gcr_regmap, NPCM_USB2PHYCTL_OFFSET,
+			   NPCM_USBXPHYCTL_RS, NPCM_USBXPHYCTL_RS);
+	regmap_update_bits(rc->gcr_regmap, NPCM_USB3PHYCTL_OFFSET,
+			   NPCM_USBXPHYCTL_RS, NPCM_USBXPHYCTL_RS);
 
 	/* deassert reset USB devices*/
 	iprst1 &= ~ipsrst1_bits;
@@ -375,49 +368,6 @@ static int npcm_usb_reset(struct platform_device *pdev, struct npcm_rc_data *rc)
 
 	return 0;
 }
-
-static ssize_t usb_phy_power_show(struct device *dev,
-								  struct device_attribute *attr, char *buf)
-{
-	u32 val, rs;
-	struct npcm_rc_data *rc = platform_get_drvdata(to_platform_device(dev));
-
-	regmap_read(rc->gcr_regmap, NPCM_USB3PHYCTL_OFFSET, &val);
-	rs = !!(val & NPCM_USBXPHYCTL_RS);
-	regmap_read(rc->gcr_regmap, NPCM_USB2PHYCTL_OFFSET, &val);
-	rs = (rs << 1) + !!(val & NPCM_USBXPHYCTL_RS);
-	regmap_read(rc->gcr_regmap, NPCM_USB1PHYCTL_OFFSET, &val);
-	rs = (rs << 1) + !!(val & NPCM_USBXPHYCTL_RS);
-
-	return sprintf(buf, "%u\n", rs);
-}
-
-static ssize_t usb_phy_power_store(struct device *dev,
-								   struct device_attribute *attr,
-								   const char *buf, size_t count)
-{
-	u32 mode;
-	struct npcm_rc_data *rc = platform_get_drvdata(to_platform_device(dev));
-
-	mode = buf[0] - 0x30;
-	if (mode > 7)
-		pr_warn("Invalid mode for usbphyctl RS\n");
-	else {
-		mode <<= 28;
-		regmap_update_bits(rc->gcr_regmap, NPCM_USB1PHYCTL_OFFSET,
-						   NPCM_USBXPHYCTL_RS, mode & NPCM_USBXPHYCTL_RS);
-		mode >>= 1;
-		regmap_update_bits(rc->gcr_regmap, NPCM_USB2PHYCTL_OFFSET,
-						   NPCM_USBXPHYCTL_RS, mode & NPCM_USBXPHYCTL_RS);
-		mode >>= 1;
-		regmap_update_bits(rc->gcr_regmap, NPCM_USB3PHYCTL_OFFSET,
-						   NPCM_USBXPHYCTL_RS, mode & NPCM_USBXPHYCTL_RS);
-	}
-
-	return count;
-}
-
-static DEVICE_ATTR_RW(usb_phy_power);
 
 static const struct reset_control_ops npcm_rc_ops = {
 	.assert		= npcm_rc_assert,
@@ -467,9 +417,6 @@ static int npcm_rc_probe(struct platform_device *pdev)
 				dev_warn(&pdev->dev, "failed to register restart handler\n");
 		}
 	}
-
-	ret = sysfs_create_file(&pdev->dev.kobj,
-		&dev_attr_usb_phy_power.attr);
 
 	return ret;
 }
