@@ -2452,6 +2452,9 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 	if (!of_property_read_u32(dev->of_node, "i3c-od-scl-lo-period-ns", &val))
 		master->scl_timing.i3c_od_lo = val;
 
+	svc_i3c_master_clear_merrwarn(master);
+	svc_i3c_master_flush_fifo(master);
+
 	svc_i3c_setup_dma(pdev, master);
 	svc_i3c_init_debugfs(pdev, master);
 
