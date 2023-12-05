@@ -1447,13 +1447,9 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 		}
 	}
 
-	if (!continued) {
+	if (!continued)
 		svc_i3c_master_emit_stop(master);
 
-		/* Wait idle if stop is sent. */
-		readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
-				   SVC_I3C_MSTATUS_STATE_IDLE(reg), 0, 1000);
-	}
 	if (!use_dma)
 		local_irq_enable();
 
