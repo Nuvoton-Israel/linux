@@ -557,6 +557,7 @@ static void svc_i3c_master_ibi_work(struct work_struct *work)
 	if (ret) {
 		dev_err(master->dev, "Timeout when polling for IBIWON\n");
 		svc_i3c_master_clear_merrwarn(master);
+		svc_i3c_master_emit_stop(master);
 		goto reenable_ibis;
 	}
 
