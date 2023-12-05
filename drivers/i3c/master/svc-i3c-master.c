@@ -258,6 +258,7 @@ struct npcm_dma_xfer_desc {
  * @ibi.slots: Available IBI slots
  * @ibi.tbq_slot: To be queued IBI slot
  * @ibi.lock: IBI lock
+ * @lock: Transfer lock, protect between IBI work thread and callbacks from master
  */
 struct svc_i3c_master {
 	struct i3c_master_controller base;
@@ -282,7 +283,6 @@ struct svc_i3c_master {
 		struct list_head list;
 		struct svc_i3c_xfer *cur;
 		/* Prevent races between transfers */
-		struct mutex lock;
 	} xferqueue;
 	struct {
 		unsigned int num_slots;
@@ -291,6 +291,7 @@ struct svc_i3c_master {
 		/* Prevent races within IBI handlers */
 		spinlock_t lock;
 	} ibi;
+	struct mutex lock;
 	struct dentry *debugfs;
 
 	struct {
@@ -544,6 +545,7 @@ static void svc_i3c_master_ibi_work(struct work_struct *work)
 	u32 status, val;
 	int ret;
 
+	mutex_lock(&master->lock);
 	/* Acknowledge the incoming interrupt with the AUTOIBI mechanism */
 	writel(SVC_I3C_MCTRL_REQUEST_AUTO_IBI |
 	       SVC_I3C_MCTRL_IBIRESP_AUTO,
@@ -629,6 +631,7 @@ reenable_ibis:
 	/* Clear AUTOIBI in case it is not started yet */
 	writel(0, master->regs + SVC_I3C_MCTRL);
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
+	mutex_unlock(&master->lock);
 }
 
 static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
@@ -1105,7 +1108,7 @@ static int svc_i3c_master_do_daa(struct i3c_master_controller *m)
 		return ret;
 	}
 
-	mutex_lock(&master->xferqueue.lock);
+	mutex_lock(&master->lock);
 	local_irq_disable();
 	/*
 	 * Fix SCL/SDA timing issue during DAA.
@@ -1116,7 +1119,7 @@ static int svc_i3c_master_do_daa(struct i3c_master_controller *m)
 	ret = svc_i3c_master_do_daa_locked(master, addrs, &dev_nb);
 	svc_i3c_master_set_sda_skew(master, 0);
 	local_irq_enable();
-	mutex_unlock(&master->xferqueue.lock);
+	mutex_unlock(&master->lock);
 	if (ret) {
 		svc_i3c_master_emit_stop(master);
 		svc_i3c_master_clear_merrwarn(master);
@@ -1489,9 +1492,9 @@ static void svc_i3c_master_dequeue_xfer_locked(struct svc_i3c_master *master,
 static void svc_i3c_master_dequeue_xfer(struct svc_i3c_master *master,
 					struct svc_i3c_xfer *xfer)
 {
-	mutex_lock(&master->xferqueue.lock);
+	mutex_lock(&master->lock);
 	svc_i3c_master_dequeue_xfer_locked(master, xfer);
-	mutex_unlock(&master->xferqueue.lock);
+	mutex_unlock(&master->lock);
 }
 
 static void svc_i3c_master_start_xfer_locked(struct svc_i3c_master *master)
@@ -1545,14 +1548,14 @@ static void svc_i3c_master_enqueue_xfer(struct svc_i3c_master *master,
 					struct svc_i3c_xfer *xfer)
 {
 	init_completion(&xfer->comp);
-	mutex_lock(&master->xferqueue.lock);
+	mutex_lock(&master->lock);
 	if (master->xferqueue.cur) {
 		list_add_tail(&xfer->node, &master->xferqueue.list);
 	} else {
 		master->xferqueue.cur = xfer;
 		svc_i3c_master_start_xfer_locked(master);
 	}
-	mutex_unlock(&master->xferqueue.lock);
+	mutex_unlock(&master->lock);
 }
 
 static bool
@@ -2356,7 +2359,7 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 
 	master->free_slots = GENMASK(SVC_I3C_MAX_DEVS - 1, 0);
 
-	mutex_init(&master->xferqueue.lock);
+	mutex_init(&master->lock);
 	INIT_LIST_HEAD(&master->xferqueue.list);
 
 	spin_lock_init(&master->ibi.lock);
