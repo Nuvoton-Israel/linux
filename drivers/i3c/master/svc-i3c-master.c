@@ -107,6 +107,7 @@
 #define   SVC_I3C_MSTATUS_STATE(x) FIELD_GET(GENMASK(2, 0), (x))
 #define   SVC_I3C_MSTATUS_STATE_DAA(x) (SVC_I3C_MSTATUS_STATE(x) == 5)
 #define   SVC_I3C_MSTATUS_STATE_IDLE(x) (SVC_I3C_MSTATUS_STATE(x) == 0)
+#define   SVC_I3C_MSTATUS_STATE_SLVREQ(x) (SVC_I3C_MSTATUS_STATE(x) == 1)
 #define   SVC_I3C_MSTATUS_BETWEEN(x) FIELD_GET(BIT(4), (x))
 #define   SVC_I3C_MSTATUS_NACKED(x) FIELD_GET(BIT(5), (x))
 #define   SVC_I3C_MSTATUS_IBITYPE(x) FIELD_GET(GENMASK(7, 6), (x))
@@ -444,13 +445,6 @@ svc_i3c_master_dev_from_addr(struct svc_i3c_master *master,
 
 static void svc_i3c_master_emit_stop(struct svc_i3c_master *master)
 {
-	u32 mint;
-
-	/* Temporarily disable slvstart interrupt to prevent spurious event */
-	mint = readl(master->regs + SVC_I3C_MINTSET);
-	if (mint & SVC_I3C_MINT_SLVSTART)
-		writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
-
 	if (master->hdr_mode) {
 		writel(SVC_I3C_MCTRL_REQUEST_FORCE_EXIT, master->regs + SVC_I3C_MCTRL);
 		master->hdr_mode = false;
@@ -465,14 +459,6 @@ static void svc_i3c_master_emit_stop(struct svc_i3c_master *master)
 	 * correctly if a start condition follows too rapidly.
 	 */
 	udelay(1);
-
-	/*
-	 * Workaround: clear the spurious SlaveStart event under
-	 * bad signals condition.
-	 */
-	writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MSTATUS);
-	if (mint & SVC_I3C_MINT_SLVSTART)
-		writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTSET);
 }
 
 static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
@@ -550,10 +536,17 @@ static void svc_i3c_master_ibi_work(struct work_struct *work)
 	struct svc_i3c_i2c_dev_data *data;
 	unsigned int ibitype, ibiaddr;
 	struct i3c_dev_desc *dev;
-	u32 status, val;
+	u32 status, val, mstatus;
 	int ret;
 
 	mutex_lock(&master->lock);
+
+	/* Check slave ibi handled not yet */
+	mstatus = readl(master->regs + SVC_I3C_MSTATUS);
+	if (!SVC_I3C_MSTATUS_STATE_SLVREQ(mstatus)) {
+		goto handle_done;
+	}
+
 	/* Acknowledge the incoming interrupt with the AUTOIBI mechanism */
 	writel(SVC_I3C_MCTRL_REQUEST_AUTO_IBI |
 	       SVC_I3C_MCTRL_IBIRESP_AUTO,
@@ -639,6 +632,8 @@ reenable_ibis:
 	writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
 	/* Clear AUTOIBI in case it is not started yet */
 	writel(0, master->regs + SVC_I3C_MCTRL);
+
+handle_done:
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
 	mutex_unlock(&master->lock);
 }
@@ -646,24 +641,58 @@ reenable_ibis:
 static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 {
 	struct svc_i3c_master *master = (struct svc_i3c_master *)dev_id;
-	u32 active = readl(master->regs + SVC_I3C_MINTMASKED);
+	u32 active = readl(master->regs + SVC_I3C_MINTMASKED), mstatus;
 
 	if (SVC_I3C_MSTATUS_COMPLETE(active)) {
 		/* Disable COMPLETE interrupt */
 		writel(SVC_I3C_MINT_COMPLETE, master->regs + SVC_I3C_MINTCLR);
 
 		complete(&master->xfer_comp);
+
+		return IRQ_HANDLED;
 	}
 
 	if (SVC_I3C_MSTATUS_SLVSTART(active)) {
 		/* Clear the interrupt status */
 		writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MSTATUS);
 
-		/* Disable SLVSTART interrupt */
-		writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
+		/* Read I3C state */
+		mstatus = readl(master->regs + SVC_I3C_MSTATUS);
 
-		/* Handle the interrupt in a non atomic context */
-		queue_work(master->base.wq, &master->ibi_work);
+		if (SVC_I3C_MSTATUS_STATE_SLVREQ(mstatus)) {
+			/* Disable SLVSTART interrupt */
+			writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
+
+			/* Handle the interrupt in a non atomic context */
+			queue_work(master->base.wq, &master->ibi_work);
+		}
+		else {
+			/*
+			 * Workaround:
+			 * SlaveStart event under bad signals condition. SLVSTART bit in
+			 * MSTATUS may set even slave device doesn't holding I3C_SDA low,
+			 * but actual SlaveStart event may happened concurently in this
+			 * bad signals condition handler. Give a chance to check current
+			 * work state and intmask to avoid actual SlaveStart cannot be
+			 * trigger after we clear SlaveStart interrupt status.
+			 */
+
+			/* Check if state change after we clear interrupt status */
+			active = readl(master->regs + SVC_I3C_MINTMASKED);
+			mstatus = readl(master->regs + SVC_I3C_MSTATUS);
+
+			if (SVC_I3C_MSTATUS_STATE_SLVREQ(mstatus)) {
+				if (!SVC_I3C_MSTATUS_SLVSTART(active)) {
+					/* Disable SLVSTART interrupt */
+					writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
+					/* Handle the interrupt in a non atomic context */
+					queue_work(master->base.wq, &master->ibi_work);
+				}
+				else {
+					/* handle interrupt in next time */
+				}
+			}
+		}
 	}
 
 	return IRQ_HANDLED;
