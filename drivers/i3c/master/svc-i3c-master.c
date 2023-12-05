@@ -483,6 +483,7 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 	unsigned int count;
 	u32 mdatactrl;
 	u32 val;
+	int ret;
 	u8 *buf;
 
 	slot = i3c_generic_ibi_get_free_slot(data->ibi_pool);
@@ -491,6 +492,13 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 
 	slot->len = 0;
 	buf = slot->data;
+
+	ret = readl_relaxed_poll_timeout(master->regs + SVC_I3C_MSTATUS, val,
+						SVC_I3C_MSTATUS_COMPLETE(val), 0, 1000);
+	if (ret) {
+		dev_err(master->dev, "Timeout when polling for COMPLETE\n");
+		return ret;
+	}
 
 	while (slot->len < SVC_I3C_MAX_IBI_PAYLOAD_SIZE) {
 		if (dev->info.bcr & I3C_BCR_IBI_PAYLOAD)
