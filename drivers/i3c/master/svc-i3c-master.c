@@ -293,6 +293,7 @@ struct svc_i3c_master {
 		spinlock_t lock;
 	} ibi;
 	struct mutex lock;
+	spinlock_t lock_irq;
 	struct dentry *debugfs;
 
 	struct {
@@ -311,7 +312,6 @@ struct svc_i3c_master {
 	dma_addr_t dma_tx_addr;
 	dma_addr_t dma_rx_addr;
 	struct npcm_dma_xfer_desc dma_xfer;
-	u32 mint_save;
 
 	bool en_hj;
 	bool hdr_ddr;
@@ -535,8 +535,9 @@ static void svc_i3c_master_ibi_work(struct work_struct *work)
 	struct svc_i3c_master *master = container_of(work, struct svc_i3c_master, ibi_work);
 	struct svc_i3c_i2c_dev_data *data;
 	unsigned int ibitype, ibiaddr;
+	unsigned long flags;
 	struct i3c_dev_desc *dev;
-	u32 status, val, mstatus;
+	u32 status, val, mstatus, mint;
 	int ret;
 
 	mutex_lock(&master->lock);
@@ -634,7 +635,10 @@ reenable_ibis:
 	writel(0, master->regs + SVC_I3C_MCTRL);
 
 handle_done:
-	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
+	spin_lock_irqsave(&master->lock_irq, flags);
+	mint = readl(master->regs + SVC_I3C_MINTSET) | SVC_I3C_MINT_SLVSTART;
+	svc_i3c_master_enable_interrupts(master, mint);
+	spin_unlock_irqrestore(&master->lock_irq, flags);
 	mutex_unlock(&master->lock);
 }
 
@@ -642,10 +646,13 @@ static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 {
 	struct svc_i3c_master *master = (struct svc_i3c_master *)dev_id;
 	u32 active = readl(master->regs + SVC_I3C_MINTMASKED), mstatus;
+	unsigned long flags;
 
 	if (SVC_I3C_MSTATUS_COMPLETE(active)) {
 		/* Disable COMPLETE interrupt */
+		spin_lock_irqsave(&master->lock_irq, flags);
 		writel(SVC_I3C_MINT_COMPLETE, master->regs + SVC_I3C_MINTCLR);
+		spin_unlock_irqrestore(&master->lock_irq, flags);
 
 		complete(&master->xfer_comp);
 
@@ -661,7 +668,9 @@ static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 
 		if (SVC_I3C_MSTATUS_STATE_SLVREQ(mstatus)) {
 			/* Disable SLVSTART interrupt */
+			spin_lock_irqsave(&master->lock_irq, flags);
 			writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
+			spin_unlock_irqrestore(&master->lock_irq, flags);
 
 			/* Handle the interrupt in a non atomic context */
 			queue_work(master->base.wq, &master->ibi_work);
@@ -684,7 +693,10 @@ static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 			if (SVC_I3C_MSTATUS_STATE_SLVREQ(mstatus)) {
 				if (!SVC_I3C_MSTATUS_SLVSTART(active)) {
 					/* Disable SLVSTART interrupt */
+					spin_lock_irqsave(&master->lock_irq, flags);
 					writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
+					spin_unlock_irqrestore(&master->lock_irq, flags);
+
 					/* Handle the interrupt in a non atomic context */
 					queue_work(master->base.wq, &master->ibi_work);
 				}
@@ -1253,15 +1265,16 @@ static int svc_i3c_master_write(struct svc_i3c_master *master,
 
 static void svc_i3c_master_stop_dma(struct svc_i3c_master *master)
 {
+	unsigned long flags;
+
 	writel(0, master->dma_regs + NPCM_GDMA_CTL(DMA_CH_TX));
 	writel(0, master->dma_regs + NPCM_GDMA_CTL(DMA_CH_RX));
 	writel(0, master->regs + SVC_I3C_MDMACTRL);
 
 	/* Disable COMPLETE interrupt */
+	spin_lock_irqsave(&master->lock_irq, flags);
 	writel(SVC_I3C_MINT_COMPLETE, master->regs + SVC_I3C_MINTCLR);
-
-	/* Restore the interrupt mask */
-	svc_i3c_master_enable_interrupts(master, master->mint_save);
+	spin_unlock_irqrestore(&master->lock_irq, flags);
 }
 
 static void svc_i3c_master_write_dma_table(const u8 *src, u32 *dst, int len)
@@ -1282,7 +1295,8 @@ static int svc_i3c_master_start_dma(struct svc_i3c_master *master)
 {
 	struct npcm_dma_xfer_desc *xfer = &master->dma_xfer;
 	int ch = xfer->rnw ? DMA_CH_RX : DMA_CH_TX;
-	u32 val;
+	u32 val, mint;
+	unsigned long flags;
 
 	if (!xfer->len)
 		return 0;
@@ -1299,11 +1313,11 @@ static int svc_i3c_master_start_dma(struct svc_i3c_master *master)
 					       (u32 *)master->dma_tx_buf,
 					       xfer->len);
 
-	/* Disable all other i3c interrupts */
-	master->mint_save = readl(master->regs + SVC_I3C_MINTSET);
-	svc_i3c_master_disable_interrupts(master);
 	/* Use I3C Complete interrupt to notify the transaction compeltion */
-	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_COMPLETE);
+	spin_lock_irqsave(&master->lock_irq, flags);
+	mint = readl(master->regs + SVC_I3C_MINTSET) | SVC_I3C_MINT_COMPLETE;
+	svc_i3c_master_enable_interrupts(master, mint);
+	spin_unlock_irqrestore(&master->lock_irq, flags);
 
 	/*
 	 * Setup I3C DMA control
@@ -2396,6 +2410,7 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 	master->free_slots = GENMASK(SVC_I3C_MAX_DEVS - 1, 0);
 
 	mutex_init(&master->lock);
+	spin_lock_init(&master->lock_irq);
 	INIT_LIST_HEAD(&master->xferqueue.list);
 
 	spin_lock_init(&master->ibi.lock);
