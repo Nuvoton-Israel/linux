@@ -464,7 +464,7 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 	unsigned int count;
 	u32 mdatactrl;
 	u32 val;
-	int ret, ibi_count;
+	int ret = 0, ibi_count;
 	u8 *buf;
 
 	slot = i3c_generic_ibi_get_free_slot(data->ibi_pool);
@@ -478,7 +478,7 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 						SVC_I3C_MSTATUS_COMPLETE(val), 0, 1000);
 	if (ret) {
 		dev_err(master->dev, "Timeout when polling for COMPLETE\n");
-		return ret;
+		goto handle_done;
 	}
 
 	if (use_dma) {
@@ -488,8 +488,10 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 				memcpy(buf, xfer->in, ibi_count);
 				slot->len += ibi_count;
 			}
-			else
+			else {
 				dev_err(master->dev, "DMA read fail to fit slot len = 0x%x\n", ibi_count);
+				ret = -EIO;
+			}
 		}
 		goto handle_done;
 	}
@@ -515,7 +517,7 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 handle_done:
 	master->ibi.tbq_slot = slot;
 
-	return 0;
+	return ret;
 }
 
 static void svc_i3c_master_ack_ibi(struct svc_i3c_master *master,
