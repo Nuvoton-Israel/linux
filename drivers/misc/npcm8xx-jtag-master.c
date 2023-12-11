@@ -429,10 +429,13 @@ static int npcm_jtm_shift(struct npcm_jtm *priv, char *jtm_tdo,
 	ret = wait_for_completion_timeout(&priv->xfer_done,
 					     msecs_to_jiffies
 					     (NPCM_JTM_TIMEOUT_MS));
-	if (ret == 0)
+	if (ret == 0) {
+		dev_err(priv->dev, "%s: timeout, remaining tx %u rx %u\n",
+			__func__, priv->tx_len, priv->rx_len);
 		ret = -ETIMEDOUT;
-	else
+	} else {
 		ret = 0;
+	}
 
 	/* disable module and interrupt */
 	val &= ~(JTM_CTL_JTM_EN | JTM_CTL_DONE_IE);
@@ -574,6 +577,7 @@ static int jtag_run_state(struct npcm_jtm *jtag, enum jtagstates run_state,
 {
 	int ret;
 
+	dev_dbg(jtag->miscdev.parent, "run test: tcks %u\n", tcks);
 	jtag_set_tapstate(jtag, JTAG_STATE_CURRENT, run_state);
 	jtag->end_tms_high = false;
 	ret = npcm_jtm_shift(jtag, NULL, NULL, NULL, tcks);
@@ -589,7 +593,7 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct bitbang_packet bitbang;
 	struct tck_bitbang *bitbang_data;
 	u8 *xfer_data;
-	u32 data_size;
+	u32 data_size, print_size;
 	u32 value;
 	int ret = 0;
 
@@ -599,12 +603,16 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		if (value <= NPCM_JTM_MAX_RATE) {
 			priv->freq = npcm_jtm_set_baudrate(priv, value);
+			dev_dbg(priv->miscdev.parent, "JTAG_SIOCFREQ: freq %u",
+				priv->freq);
 		} else {
 			dev_err(priv->dev, "invalid jtag freq %u\n", value);
 			ret = -EINVAL;
 		}
 		break;
 	case JTAG_GIOCFREQ:
+		dev_dbg(priv->miscdev.parent, "JTAG_GIOCFREQ: freq %u",
+			priv->freq);
 		if (put_user(priv->freq, (__u32 __user *)arg))
 			return -EFAULT;
 		break;
@@ -622,6 +630,8 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (IS_ERR(bitbang_data))
 			return -EFAULT;
 
+		dev_dbg(priv->miscdev.parent, "JTAG_IOCBITBANG: len %u",
+			bitbang.length);
 		ret = jtag_bitbangs(priv, &bitbang, bitbang_data);
 		if (ret) {
 			kfree(bitbang_data);
@@ -646,6 +656,12 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		if (tapstate.reset > JTAG_FORCE_RESET)
 			return -EINVAL;
+
+		dev_dbg(priv->miscdev.parent,
+			"JTAG_SIOCSTATE(curr %d): from %d to %d reset %d tck %d",
+			priv->tapstate,
+			tapstate.from, tapstate.endstate,
+			tapstate.reset, tapstate.tck);
 		if (tapstate.reset == JTAG_FORCE_RESET)
 			jtag_reset_tapstate(priv);
 		jtag_set_tapstate(priv, tapstate.from,
@@ -659,10 +675,11 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			jtag_run_state(priv, tapstate.endstate, tapstate.tck);
 		break;
 	case JTAG_GIOCSTATUS:
+		dev_dbg(priv->miscdev.parent, "JTAG_GIOCSTATUS: state %d",
+			priv->tapstate);
 		ret = put_user(priv->tapstate, (__u32 __user *)arg);
 		break;
 	case JTAG_IOCXFER:
-
 		if (copy_from_user(&xfer, (const void __user *)arg,
 			sizeof(struct jtag_xfer)))
 			return -EFAULT;
@@ -682,16 +699,27 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (xfer.endstate > JTAG_STATE_CURRENT)
 			return -EINVAL;
 
+		dev_dbg(priv->miscdev.parent,
+			"JTAG_IOCXFER: type %s, dir %d, state %d to %d, padding %d, len 0x%x\n",
+			xfer.type ? "DR" : "IR", xfer.direction,
+			xfer.from, xfer.endstate, xfer.padding, xfer.length);
+
 		data_size = DIV_ROUND_UP(xfer.length, BITS_PER_BYTE);
 		xfer_data = memdup_user((void __user *)xfer.tdio, data_size);
 		if (IS_ERR(xfer_data))
 			return -EFAULT;
 
+		print_size = data_size > 128 ? 128 : data_size;
+		print_hex_dump_debug("I:", DUMP_PREFIX_NONE, 16, 1, xfer_data,
+				     print_size, false);
 		ret = jtag_transfer(priv, &xfer, xfer_data, data_size);
 		if (ret) {
 			kfree(xfer_data);
 			return -EIO;
 		}
+
+		print_hex_dump_debug("O:", DUMP_PREFIX_NONE, 16, 1, xfer_data,
+				     print_size, false);
 		ret = copy_to_user((void __user *)xfer.tdio,
 				   (void *)xfer_data, data_size);
 		kfree(xfer_data);
@@ -705,6 +733,8 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case JTAG_SIOCMODE:
 		break;
 	case JTAG_RUNTEST:
+		dev_dbg(priv->miscdev.parent, "JTAG_RUNTEST: tcks %u",
+			(unsigned int)arg);
 		ret = jtag_run_state(priv, JTAG_STATE_CURRENT, (unsigned int)arg);
 		break;
 	default:
