@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
+#include <linux/spinlock.h>
 #include <linux/mfd/syscon.h>
 
 #define ESPI_ESPICFG		0x004
@@ -60,6 +61,7 @@ struct npcm_vwgpio {
 	struct regmap *map;
 	struct vwgpio_event events[VW_MSGPIO_NUM];
 	int irq;
+	raw_spinlock_t lock;
 	u64 mswire_default;
 };
 
@@ -97,6 +99,7 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 static void vwgpio_set_value(struct gpio_chip *gc, unsigned int offset, int val)
 {
 	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
+	unsigned long flags;
 	u32 index = offset / 4;
 	u32 wire = offset % 4;
 	u32 reg;
@@ -114,7 +117,12 @@ static void vwgpio_set_value(struct gpio_chip *gc, unsigned int offset, int val)
 		reg |= BIT(wire);
 	else
 		reg &= ~BIT(wire);
+
+	raw_spin_lock_irqsave(&vwgpio->lock, flags);
+
 	regmap_write(vwgpio->map, ESPI_VWGPSM(index), reg);
+
+	raw_spin_unlock_irqrestore(&vwgpio->lock, flags);
 }
 
 static int vwgpio_get_direction(struct gpio_chip *gc, unsigned int offset)
@@ -135,25 +143,6 @@ static int vwgpio_direction_output(struct gpio_chip *gc,
 	return 0;
 }
 
-static void npcm_vwgpio_gpms_config(struct npcm_vwgpio *vwgpio, int index,
-				    bool enable, bool int_en)
-{
-	u32 val;
-
-	regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
-	if (enable)
-		val |= VWGPMS_INDEX_EN;
-	else
-		val &= ~VWGPMS_INDEX_EN;
-
-	if (int_en)
-		val |= VWGPMS_IE;
-	else
-		val &= ~VWGPMS_IE;
-
-	regmap_write(vwgpio->map, ESPI_VWGPMS(index), val);
-}
-
 static void npcm_vwgpio_check_event(struct npcm_vwgpio *vwgpio,
 				    unsigned int event_idx)
 {
@@ -163,25 +152,28 @@ static void npcm_vwgpio_check_event(struct npcm_vwgpio *vwgpio,
 	unsigned int girq;
 	u32 index = event_idx / 4;
 	u32 wire = event_idx % 4;
+	unsigned long flags;
 	u8 new_state;
 	u32 val;
 
 	if (event_idx >= VW_MSGPIO_NUM)
 		return;
 
-	event = &vwgpio->events[event_idx];
-
 	regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
 	/* Clear MODIFIED bit */
 	regmap_write(vwgpio->map, ESPI_VWGPMS(index), val | VWGPMS_MODIFIED);
 
+	raw_spin_lock_irqsave(&vwgpio->lock, flags);
+
+	event = &vwgpio->events[event_idx];
+
 	/* Check event enable */
 	if (!event->enable)
-		return;
+		goto out;
 
 	/* Check wire valid bit */
 	if (!(val & BIT(wire + 4)))
-		return;
+		goto out;
 
 	new_state = !!(val & BIT(wire));
 	switch (event->type) {
@@ -216,7 +208,12 @@ static void npcm_vwgpio_check_event(struct npcm_vwgpio *vwgpio,
 			raise_irq = true;
 		}
 		break;
+	default:
+		break;
 	}
+
+out:
+	raw_spin_unlock_irqrestore(&vwgpio->lock, flags);
 
 	if (raise_irq)
 		generic_handle_domain_irq(gc->irq.domain,
@@ -247,7 +244,10 @@ static int npcm_vwgpio_set_irq_type(struct irq_data *d, unsigned int type)
 	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
 	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
 	unsigned int gpio = irqd_to_hwirq(d);
+	irq_flow_handler_t handler;
 	unsigned int event_idx;
+	unsigned long flags;
+	u8 value;
 
 	dev_dbg(vwgpio->dev, "gpio %u, type %d\n", gpio, type);
 	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
@@ -256,28 +256,33 @@ static int npcm_vwgpio_set_irq_type(struct irq_data *d, unsigned int type)
 
 	switch (type) {
 	case IRQ_TYPE_EDGE_RISING:
-		vwgpio->events[event_idx].type = VW_GPIO_EVENT_EDGE_RISING;
-		irq_set_handler_locked(d, handle_edge_irq);
-		break;
+		value = VW_GPIO_EVENT_EDGE_RISING;
+		fallthrough;
 	case IRQ_TYPE_EDGE_FALLING:
-		vwgpio->events[event_idx].type = VW_GPIO_EVENT_EDGE_FALLING;
-		irq_set_handler_locked(d, handle_edge_irq);
-		break;
+		value = VW_GPIO_EVENT_EDGE_FALLING;
+		fallthrough;
 	case IRQ_TYPE_EDGE_BOTH:
-		vwgpio->events[event_idx].type = VW_GPIO_EVENT_EDGE_BOTH;
-		irq_set_handler_locked(d, handle_edge_irq);
+		value = VW_GPIO_EVENT_EDGE_BOTH;
+		handler = handle_edge_irq;
 		break;
 	case IRQ_TYPE_LEVEL_LOW:
-		vwgpio->events[event_idx].type = VW_GPIO_EVENT_LEVEL_LOW;
-		irq_set_handler_locked(d, handle_level_irq);
-		break;
+		value = VW_GPIO_EVENT_LEVEL_LOW;
+		fallthrough;
 	case IRQ_TYPE_LEVEL_HIGH:
-		vwgpio->events[event_idx].type = VW_GPIO_EVENT_LEVEL_HIGH;
-		irq_set_handler_locked(d, handle_level_irq);
+		value = VW_GPIO_EVENT_LEVEL_HIGH;
+		handler = handle_level_irq;
 		break;
 	default:
 		return -EINVAL;
 	}
+
+	raw_spin_lock_irqsave(&vwgpio->lock, flags);
+
+	vwgpio->events[event_idx].type = value;
+
+	raw_spin_unlock_irqrestore(&vwgpio->lock, flags);
+
+	irq_set_handler_locked(d, handler);
 
 	return 0;
 }
@@ -286,53 +291,67 @@ static void npcm_vwgpio_irq_ack(struct irq_data *d)
 {
 }
 
-static void npcm_vwgpio_irq_mask(struct irq_data *d)
+static void npcm_vwgpio_irq_set_mask(struct irq_data *d, bool enable, bool set)
 {
 	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
 	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
 	unsigned int gpio = irqd_to_hwirq(d);
 	bool int_enable = false;
-	int index;
-	int wire;
+	unsigned long flags;
+	int index, wire;
+	u32 val;
 
-	dev_dbg(vwgpio->dev, "gpio %u\n", gpio);
-	/* Accept MS GPIO only */
 	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
 		return;
 
-	vwgpio->events[gpio - VM_MSGPIO_START].enable = 0;
 	index = (gpio - VM_MSGPIO_START) / 4;
-	/* Check all wires in the same VMGPIOMS index */
-	for (wire = 0; wire < 4; wire++) {
-		if (vwgpio->events[index * 4 + wire].enable) {
-			int_enable = true;
-			break;
+
+	raw_spin_lock_irqsave(&vwgpio->lock, flags);
+
+	if (!set) {
+		vwgpio->events[gpio - VM_MSGPIO_START].enable = 0;
+		/* Check all wires in the same VMGPIOMS index */
+		for (wire = 0; wire < 4; wire++) {
+			if (vwgpio->events[index * 4 + wire].enable) {
+				int_enable = true;
+				break;
+			}
 		}
+	} else {
+		/* Set event enable */
+		vwgpio->events[gpio - VM_MSGPIO_START].enable = 1;
+		/* Get current state */
+		vwgpio->events[gpio - VM_MSGPIO_START].state =
+			vwgpio_get_value(&vwgpio->chip, gpio);
 	}
-	if (!int_enable)
-		npcm_vwgpio_gpms_config(vwgpio, index, true, false);
+
+	if (!int_enable) {
+		regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
+
+		if (enable)
+			val |= VWGPMS_INDEX_EN;
+		else
+			val &= ~VWGPMS_INDEX_EN;
+
+		if (set)
+			val |= VWGPMS_IE;
+		else
+			val &= ~VWGPMS_IE;
+
+		regmap_write(vwgpio->map, ESPI_VWGPMS(index), val);
+	}
+
+        raw_spin_unlock_irqrestore(&vwgpio->lock, flags);
+}
+
+static void npcm_vwgpio_irq_mask(struct irq_data *d)
+{
+	npcm_vwgpio_irq_set_mask(d, true, false);
 }
 
 static void npcm_vwgpio_irq_unmask(struct irq_data *d)
 {
-	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
-	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
-	unsigned int gpio = irqd_to_hwirq(d);
-	int index;
-
-	dev_dbg(vwgpio->dev, "gpio %u\n", gpio);
-	/* Accept MS GPIO only */
-	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
-		return;
-
-	/* Get current state */
-	vwgpio->events[gpio - VM_MSGPIO_START].state =
-		vwgpio_get_value(&vwgpio->chip, gpio);
-
-	/* Set event enable */
-	vwgpio->events[gpio - VM_MSGPIO_START].enable = 1;
-	index = (gpio - VM_MSGPIO_START) / 4;
-	npcm_vwgpio_gpms_config(vwgpio, index, true, true);
+	npcm_vwgpio_irq_set_mask(d, true, true);
 }
 
 static struct irq_chip npcm_vwgpio_irqchip = {
@@ -455,6 +474,8 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 		vwgpio->chip.direction_output = vwgpio_direction_output;
 		vwgpio->chip.direction_input = vwgpio_direction_input;
 		vwgpio->chip.get_direction = vwgpio_get_direction;
+
+		raw_spin_lock_init(&vwgpio->lock);
 
 		irq = &vwgpio->chip.irq;
 		irq->chip = &npcm_vwgpio_irqchip;
