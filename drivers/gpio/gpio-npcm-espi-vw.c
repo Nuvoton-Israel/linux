@@ -80,7 +80,8 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 		regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
 		/* Check wire valid bit, invalid return default value */
 		if (!(val & BIT(wire + 4)))
-			return !!(vwgpio->mswire_default & BIT(offset - VM_MSGPIO_START));
+			return !!(vwgpio->mswire_default &
+				  BIT(offset - VM_MSGPIO_START));
 	}
 	else {
 		index = offset / 4;
@@ -101,7 +102,7 @@ static void vwgpio_set_value(struct gpio_chip *gc, unsigned int offset, int val)
 	u32 reg;
 
 	dev_dbg(gc->parent, "%s: offset=%u, val=%d\n", __func__,
-		  offset, val);
+		offset, val);
 	/* Accept SM GPIO only */
 	if (offset >= VW_SMGPIO_NUM)
 		return;
@@ -127,13 +128,11 @@ static int vwgpio_direction_input(struct gpio_chip *gc, unsigned int offset)
 	return (offset >= VW_SMGPIO_NUM) ? 0 : -EINVAL;
 }
 
-static int vwgpio_direction_output(struct gpio_chip *gc, unsigned int offset, int val)
+static int vwgpio_direction_output(struct gpio_chip *gc,
+				   unsigned int offset, int val)
 {
-	if (offset < VW_SMGPIO_NUM) {
-		gc->set(gc, offset, val);
-		return 0;
-	}
-	return -EINVAL;
+	gc->set(gc, offset, val);
+	return 0;
 }
 
 static void npcm_vwgpio_gpms_config(struct npcm_vwgpio *vwgpio, int index,
@@ -156,7 +155,7 @@ static void npcm_vwgpio_gpms_config(struct npcm_vwgpio *vwgpio, int index,
 }
 
 static void npcm_vwgpio_check_event(struct npcm_vwgpio *vwgpio,
-				   unsigned int event_idx)
+				    unsigned int event_idx)
 {
 	struct gpio_chip *gc = &vwgpio->chip;
 	struct vwgpio_event *event;
@@ -219,11 +218,9 @@ static void npcm_vwgpio_check_event(struct npcm_vwgpio *vwgpio,
 		break;
 	}
 
-	if (raise_irq) {
-		girq = irq_find_mapping(gc->irq.domain,
-					VM_MSGPIO_START + event_idx);
-		generic_handle_irq(girq);
-	}
+	if (raise_irq)
+		generic_handle_domain_irq(gc->irq.domain,
+					  VM_MSGPIO_START + event_idx);
 }
 
 static irqreturn_t npcm_vwgpio_irq_handler(int irq, void *dev_id)
@@ -247,11 +244,12 @@ static irqreturn_t npcm_vwgpio_irq_handler(int irq, void *dev_id)
 
 static int npcm_vwgpio_set_irq_type(struct irq_data *d, unsigned int type)
 {
-	struct npcm_vwgpio *vwgpio = gpiochip_get_data(irq_data_get_irq_chip_data(d));
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
 	unsigned int gpio = irqd_to_hwirq(d);
 	unsigned int event_idx;
 
-	pr_debug("%s: gpio %u, type %d\n", __func__, gpio, type);
+	dev_dbg(vwgpio->dev, "gpio %u, type %d\n", gpio, type);
 	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
 		return -EINVAL;
 	event_idx = gpio - VM_MSGPIO_START;
@@ -290,13 +288,14 @@ static void npcm_vwgpio_irq_ack(struct irq_data *d)
 
 static void npcm_vwgpio_irq_mask(struct irq_data *d)
 {
-	struct npcm_vwgpio *vwgpio = gpiochip_get_data(irq_data_get_irq_chip_data(d));
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
 	unsigned int gpio = irqd_to_hwirq(d);
 	bool int_enable = false;
 	int index;
 	int wire;
 
-	pr_debug("%s: gpio %u\n", __func__, gpio);
+	dev_dbg(vwgpio->dev, "gpio %u\n", gpio);
 	/* Accept MS GPIO only */
 	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
 		return;
@@ -316,11 +315,12 @@ static void npcm_vwgpio_irq_mask(struct irq_data *d)
 
 static void npcm_vwgpio_irq_unmask(struct irq_data *d)
 {
-	struct npcm_vwgpio *vwgpio = gpiochip_get_data(irq_data_get_irq_chip_data(d));
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+	struct npcm_vwgpio *vwgpio = gpiochip_get_data(gc);
 	unsigned int gpio = irqd_to_hwirq(d);
 	int index;
 
-	pr_debug("%s: gpio %u\n", __func__, gpio);
+	dev_dbg(vwgpio->dev, "gpio %u\n", gpio);
 	/* Accept MS GPIO only */
 	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
 		return;
@@ -422,17 +422,22 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 
 	vwgpio->dev = dev;
 
-	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,gpio-control-map", &gpvwmap))
+	if (of_property_read_u32(pdev->dev.of_node,
+				 "nuvoton,gpio-control-map", &gpvwmap))
 		gpvwmap = 0;
-	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,control-interrupt-map", &intwin))
+	if (of_property_read_u32(pdev->dev.of_node,
+				 "nuvoton,control-interrupt-map", &intwin))
 		intwin = 0;
-	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,index-en-map", &idxenmap))
+	if (of_property_read_u32(pdev->dev.of_node,
+				 "nuvoton,index-en-map", &idxenmap))
 		idxenmap = 0;
-	if (of_property_read_u64(pdev->dev.of_node, "nuvoton,vwgpms-wire-map", &mswiremap))
+	if (of_property_read_u64(pdev->dev.of_node,
+				 "nuvoton,vwgpms-wire-map", &mswiremap))
 		vwgpio->mswire_default = 0;
 	else
 		vwgpio->mswire_default = mswiremap;
-	if (of_property_read_u64(pdev->dev.of_node, "nuvoton,vwgpsm-wire-map", &smwiremap))
+	if (of_property_read_u64(pdev->dev.of_node,
+				 "nuvoton,vwgpsm-wire-map", &smwiremap))
 		smwiremap = 0xFFFFFFFFFFFFFFFFULL;
 
 	npcm_vwgpio_config(vwgpio, intwin, gpvwmap, idxenmap, smwiremap);
@@ -443,7 +448,7 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 		vwgpio->chip.base = -1;
 		vwgpio->chip.parent = dev;
 		vwgpio->chip.owner = THIS_MODULE;
-		vwgpio->chip.ngpio = 128;
+		vwgpio->chip.ngpio = VW_SMGPIO_NUM + VW_MSGPIO_NUM;
 		vwgpio->chip.can_sleep = 0;
 		vwgpio->chip.get = vwgpio_get_value;
 		vwgpio->chip.set = vwgpio_set_value;
@@ -461,7 +466,7 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 
 		rc = devm_gpiochip_add_data(dev, &vwgpio->chip, vwgpio);
 		if (rc) {
-			pr_info("Error adding ESPI vw gpiochip\n");
+			dev_err(dev, "Error adding ESPI vw gpiochip\n");
 			return rc;
 		}
 
@@ -480,8 +485,6 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 		}
 		npcm_vwgpio_init(vwgpio);
 	}
-
-	pr_info("%s OK\n", __func__);
 
 	return 0;
 }

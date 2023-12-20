@@ -1603,6 +1603,14 @@ config GPIO_NPCM_SGPIO
 	help
 	  Say Y here to support Nuvoton NPCM7XX/NPCM8XX SGPIO functionality.
 
+config GPIO_NPCM_ESPI_VW
+	tristate "NPCM eSPI Virtual Wire GPIO"
+	depends on ARCH_NPCM || COMPILE_TEST
+	select GPIO_GENERIC
+	select GPIOLIB_IRQCHIP
+	help
+	  Select Y here if you want to use eSPI virtual wire gpio.
+
 menu "SPI GPIO expanders"
 	depends on SPI_MASTER
 
