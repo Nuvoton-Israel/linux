@@ -722,12 +722,13 @@ static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, int use_dma)
+static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, int use_dma)
 {
 	struct svc_i3c_i2c_dev_data *data;
 	unsigned int ibitype, ibiaddr;
 	struct i3c_dev_desc *dev;
 	u32 status, val;
+	int ret = 0;
 
 	status = readl(master->regs + SVC_I3C_MSTATUS);
 	ibitype = SVC_I3C_MSTATUS_IBITYPE(status);
@@ -767,6 +768,7 @@ static void svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, int use_
 
 		dev_err(master->dev, "svc_i3c_master_error in ibiwon\n");
 		svc_i3c_master_emit_stop(master);
+		ret = -EIO;
 		goto clear_ibiwon;
 	}
 
@@ -787,6 +789,7 @@ static void svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, int use_
 		queue_work(master->base.wq, &master->hj_work);
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
+		ret = -EOPNOTSUPP;
 	default:
 		break;
 	}
@@ -794,6 +797,7 @@ static void svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, int use_
 clear_ibiwon:
 	/* clear IBIWON status */
 	writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
+	return ret;
 }
 
 static int svc_i3c_master_bus_init(struct i3c_master_controller *m)
@@ -1097,8 +1101,12 @@ static int svc_i3c_master_do_daa_locked(struct svc_i3c_master *master,
 
 		/* runtime do_daa may ibiwon by others slave devices */
 		if (SVC_I3C_MSTATUS_IBIWON(reg)) {
-			svc_i3c_master_handle_ibiwon(master, false);
-			continue;
+			ret = svc_i3c_master_handle_ibiwon(master, false);
+			if (ret) {
+				dev_err(master->dev, "daa: handle ibi event fail, ret=%d\n", ret);
+				return ret;
+			} else
+				continue;
 		}
 
 		if (SVC_I3C_MSTATUS_RXPEND(reg)) {
@@ -1553,7 +1561,11 @@ retry_start:
 	if (SVC_I3C_MSTATUS_IBIWON(mstatus)) {
 		if (rnw) {
 			/* handle ibi event */
-			svc_i3c_master_handle_ibiwon(master, use_dma);
+			ret = svc_i3c_master_handle_ibiwon(master, use_dma);
+			if (ret) {
+				dev_err(master->dev, "xfer read: handle ibi event fail, ret=%d\n", ret);
+				goto emit_stop;
+			}
 
 			/* enable read dma again */
 			if (use_dma) {
@@ -1566,7 +1578,11 @@ retry_start:
 			}
 		} else {
 			/* handle ibi event */
-			svc_i3c_master_handle_ibiwon(master, false);
+			ret = svc_i3c_master_handle_ibiwon(master, false);
+			if (ret) {
+				dev_err(master->dev, "xfer write: handle ibi event fail, ret=%d\n", ret);
+				goto emit_stop;
+			}
 
 			/* for write, re-init xfer_comp and enable complete interrupt */
 			if (use_dma) {
