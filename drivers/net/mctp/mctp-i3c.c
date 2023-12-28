@@ -154,6 +154,7 @@ static int mctp_i3c_read(struct mctp_i3c_device *mi)
 		goto err;
 	}
 
+#ifdef CONFIG_MCTP_TRANSPORT_I3C_PEC
 	/* check PEC, including address byte */
 	addr = mi->addr << 1 | 1;
 	pec = i2c_smbus_pec(0, &addr, 1);
@@ -166,6 +167,9 @@ static int mctp_i3c_read(struct mctp_i3c_device *mi)
 
 	/* Remove PEC */
 	skb_trim(skb, xfer.len - 1);
+#else
+	skb_trim(skb, xfer.len);
+#endif
 
 	cb = __mctp_cb(skb);
 	cb->halen = PID_SIZE;
@@ -175,7 +179,11 @@ static int mctp_i3c_read(struct mctp_i3c_device *mi)
 
 	if (net_status == NET_RX_SUCCESS) {
 		stats->rx_packets++;
+#ifdef CONFIG_MCTP_TRANSPORT_I3C_PEC
 		stats->rx_bytes += xfer.len - 1;
+#else
+		stats->rx_bytes += xfer.len;
+#endif
 	} else {
 		stats->rx_dropped++;
 	}
@@ -403,6 +411,7 @@ static void mctp_i3c_xmit(struct mctp_i3c_bus *mbus, struct sk_buff *skb)
 	if (WARN_ON_ONCE(data_len + 1 > MCTP_I3C_MAXBUF))
 		goto out;
 
+#ifdef CONFIG_MCTP_TRANSPORT_I3C_PEC
 	if (data_len + 1 > (unsigned int)mi->mwl) {
 		/* Route MTU was larger than supported by the endpoint */
 		stats->tx_dropped++;
@@ -428,6 +437,10 @@ static void mctp_i3c_xmit(struct mctp_i3c_bus *mbus, struct sk_buff *skb)
 	data[data_len] = pec;
 
 	xfer.data.out = data;
+#else
+	xfer.len = data_len;
+	xfer.data.out = skb->data;
+#endif
 	rc = i3c_device_do_priv_xfers(mi->i3c, &xfer, 1);
 	if (rc == 0) {
 		stats->tx_bytes += data_len;
