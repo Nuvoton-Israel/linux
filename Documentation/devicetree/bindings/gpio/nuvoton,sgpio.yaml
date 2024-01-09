@@ -10,19 +10,20 @@ maintainers:
   - Jim LIU <JJLIU0@nuvoton.com>
 
 description: |
-  This SGPIO controller is for NUVOTON NPCM7xx and NPCM8xx SoC.
-  Nuvoton NPCM7xx SGPIO module is combine serial to parallel IC (HC595)
-  and parallel to serial IC (HC165), and use APB3 clock to control it.
-  This interface has 4 pins  (D_out , D_in, S_CLK, LDSH).
-  NPCM7xx/NPCM8xx have two sgpio module each module can support up
-  to 64 output pins,and up to 64 input pin, the pin is only for gpi or gpo.
-  GPIO pins have sequential, First half is gpo and second half is gpi.
+  This SGPIO controller is for NUVOTON NPCM7xx and NPCM8xx SoC and detailed
+  information is in the NPCM7XX/8XX SERIAL I/O EXPANSION INTERFACE section.
+  Nuvoton NPCM7xx SGPIO module is combines a serial to parallel IC (HC595)
+  and a parallel to serial IC (HC165).
+  Clock is a division of the APB3 clock.
+  This interface has 4 pins (D_out , D_in, S_CLK, LDSH).
+  NPCM7xx/NPCM8xx have two sgpio modules. Each module can support up
+  to 64 output pins, and up to 64 input pins, the pin is only for GPI or GPO.
   GPIO pins can be programmed to support the following options
   - Support interrupt option for each input port and various interrupt
-    sensitivity option (level-high, level-low, edge-high, edge-low)
+    sensitivity options (level-high, level-low, edge-high, edge-low)
   - ngpios is number of nuvoton,input-ngpios GPIO lines and nuvoton,output-ngpios GPIO lines.
-    nuvoton,input-ngpios GPIO lines is only for gpi.
-    nuvoton,output-ngpios GPIO lines is only for gpo.
+    nuvoton,input-ngpios GPIO lines is only for GPI.
+    nuvoton,output-ngpios GPIO lines is only for GPO.
 
 properties:
   compatible:
@@ -47,14 +48,14 @@ properties:
   nuvoton,input-ngpios:
     $ref: /schemas/types.yaml#/definitions/uint32
     description:
-      The numbers of GPIO's exposed. GPIO lines is only for gpi.
+      The numbers of GPIO's exposed. GPIO lines are only for GPI.
     minimum: 0
     maximum: 64
 
   nuvoton,output-ngpios:
     $ref: /schemas/types.yaml#/definitions/uint32
     description:
-      The numbers of GPIO's exposed. GPIO lines is only for gpo.
+      The numbers of GPIO's exposed. GPIO lines are only for GPO.
     minimum: 0
     maximum: 64
 
