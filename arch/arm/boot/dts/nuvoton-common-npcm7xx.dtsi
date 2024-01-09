@@ -497,7 +497,6 @@
 				compatible = "nuvoton,npcm750-sgpio";
 				reg = <0x101000 0x200>;
 				clocks = <&clk NPCM7XX_CLK_APB3>;
-				bus-frequency = <8000000>;
 				interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
 				gpio-controller;
 				#gpio-cells = <2>;
@@ -512,7 +511,6 @@
 				compatible = "nuvoton,npcm750-sgpio";
 				reg = <0x102000 0x200>;
 				clocks = <&clk NPCM7XX_CLK_APB3>;
-				bus-frequency = <8000000>;
 				interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>;
 				gpio-controller;
 				#gpio-cells = <2>;
