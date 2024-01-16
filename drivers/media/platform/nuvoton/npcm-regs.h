@@ -72,7 +72,8 @@
 #define  VCD_HOR_AC_LAST		GENMASK(13, 0)
 
 #define VCD_FIFO			0x805c
-#define  VCD_FIFO_TH			0x100350ff
+#define  VCD_FIFO_TH_HEAD1		0x35043
+#define  VCD_FIFO_TH_HEAD2		0x100350ff
 
 #define VCD_FB_SIZE			0x500000 /* support up to 1920 x 1200 */
 #define VCD_KVM_BW_PCLK			120000000UL
@@ -124,6 +125,10 @@
 #define  INTCR2_GIRST2			BIT(2)
 #define  INTCR2_GIHCRST			BIT(5)
 #define  INTCR2_GIVCRST			BIT(6)
+
+#define MFSEL1_NPCM7XX			0x0c
+#define MFSEL1_NPCM8XX			0x260
+#define  MFSEL1_DVH1SEL			BIT(27)
 
 /* GFXI Register */
 #define DISPST				0x00

@@ -137,6 +137,7 @@ struct npcm_video {
 	unsigned int ctrl_cmd;
 	unsigned int op_cmd;
 	bool hsync_mode;
+	bool use_head1_source;
 	unsigned int hdelay_add; /* compensation for HSYNC delay */
 	unsigned int vdelay_add; /* compensation for VSYNC delay */
 };
@@ -811,7 +812,10 @@ static void npcm_video_init_reg(struct npcm_video *video)
 	npcm_video_gfx_reset(video);
 
 	/* Set the FIFO thresholds */
-	regmap_write(vcd, VCD_FIFO, VCD_FIFO_TH);
+	if (video->use_head1_source)
+		regmap_write(vcd, VCD_FIFO, VCD_FIFO_TH_HEAD1);
+	else
+		regmap_write(vcd, VCD_FIFO, VCD_FIFO_TH_HEAD2);
 
 	/* Set RCHG timer */
 	regmap_write(vcd, VCD_RCHG, FIELD_PREP(VCD_RCHG_TIM_PRSCL, 0xf) |
@@ -832,7 +836,7 @@ static int npcm_video_start_frame(struct npcm_video *video)
 {
 	struct npcm_video_buffer *buf;
 	struct regmap *vcd = video->vcd_regmap;
-	unsigned int val;
+	unsigned int val, status;
 	int ret;
 
 	if (video->v4l2_input_status) {
@@ -840,9 +844,10 @@ static int npcm_video_start_frame(struct npcm_video *video)
 		return 0;
 	}
 
+	regmap_read(vcd, VCD_STAT, &status);
 	ret = regmap_read_poll_timeout(vcd, VCD_STAT, val, !(val & VCD_STAT_BUSY),
 				       1000, VCD_TIMEOUT_US);
-	if (ret) {
+	if (ret && !(status & VCD_STAT_IFOR || status & VCD_STAT_IFOT)) {
 		dev_err(video->dev, "Wait for VCD_STAT_BUSY timeout\n");
 		return -EBUSY;
 	}
@@ -1781,6 +1786,25 @@ static int npcm_video_init(struct npcm_video *video)
 	if (rc) {
 		dev_err(dev, "Failed to set DMA mask\n");
 		of_reserved_mem_device_release(dev);
+	}
+
+	video->use_head1_source = of_property_read_bool(dev->of_node,
+							"nuvoton,use-head1-source");
+
+	if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm750-vcd")) {
+		if (video->use_head1_source)
+			regmap_update_bits(video->gcr_regmap, MFSEL1_NPCM7XX,
+					   MFSEL1_DVH1SEL, MFSEL1_DVH1SEL);
+		else
+			regmap_update_bits(video->gcr_regmap, MFSEL1_NPCM7XX,
+					   MFSEL1_DVH1SEL, 0);
+	} else {
+		if (video->use_head1_source)
+			regmap_update_bits(video->gcr_regmap, MFSEL1_NPCM8XX,
+					   MFSEL1_DVH1SEL, MFSEL1_DVH1SEL);
+		else
+			regmap_update_bits(video->gcr_regmap, MFSEL1_NPCM8XX,
+					   MFSEL1_DVH1SEL, 0);
 	}
 
 	video->hsync_mode = of_property_read_bool(dev->of_node, "nuvoton,hsync-mode");
