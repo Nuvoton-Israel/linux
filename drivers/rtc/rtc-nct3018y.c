@@ -7,7 +7,6 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/rtc.h>
 #include <linux/slab.h>
 
@@ -24,10 +23,10 @@
 #define NCT3018Y_REG_CTRL	0x0A /* timer control */
 #define NCT3018Y_REG_ST		0x0B /* status */
 #define NCT3018Y_REG_CLKO	0x0C /* clock out */
+#define NCT3018Y_REG_PART	0x21 /* part info */
 #define NCT3018Y_REG_INTR_CTRL	0x12 /* intrusion control */
 #define NCT3018Y_REG_INTR_TS_SC	0x13 /* intrusion seconds */
 #define NCT3018Y_REG_VCC_DROP_TS_SC	0x19 /* intrusion seconds */
-#define NCT3018Y_REG_PART	0x21 /* part info */
 
 #define NCT3018Y_BIT_AF		BIT(7)
 #define NCT3018Y_BIT_ST		BIT(7)
@@ -44,24 +43,12 @@
 #define NCT3018Y_REG_BAT_MASK		0x07
 #define NCT3018Y_REG_CLKO_F_MASK	0x03 /* frequenc mask */
 #define NCT3018Y_REG_CLKO_CKE		0x80 /* clock out enabled */
-#define NCT3018Y_REG_PART_NCT3015Y	0x01
 #define NCT3018Y_REG_PART_NCT3018Y	0x02
-
-struct rtc_data {
-	u8 part_number;
-};
-
-static const struct rtc_data nct3015y_rtc_data = {
-	.part_number = NCT3018Y_REG_PART_NCT3015Y,
-};
-
-static const struct rtc_data nct3018y_rtc_data = {
-	.part_number = NCT3018Y_REG_PART_NCT3018Y,
-};
 
 struct nct3018y {
 	struct rtc_device *rtc;
 	struct i2c_client *client;
+	int part_num;
 #ifdef CONFIG_COMMON_CLK
 	struct clk_hw clkout_hw;
 #endif
@@ -131,10 +118,8 @@ static int nct3018y_get_alarm_mode(struct i2c_client *client, unsigned char *ala
 		*alarm_flag = flags & NCT3018Y_BIT_AF;
 	}
 
-	if (alarm_enable && alarm_flag) {
-		dev_dbg(&client->dev, "%s:alarm_enable:%x alarm_flag:%x\n",
-			__func__, *alarm_enable, *alarm_flag);
-	}
+	dev_dbg(&client->dev, "%s:alarm_enable:%x alarm_flag:%x\n",
+		__func__, *alarm_enable, *alarm_flag);
 
 	return 0;
 }
@@ -343,28 +328,24 @@ static int nct3018y_rtc_read_time(struct device *dev, struct rtc_time *tm)
 static int nct3018y_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
 	struct i2c_client *client = to_i2c_client(dev);
+	struct nct3018y *nct3018y = dev_get_drvdata(dev);
 	unsigned char buf[4] = {0};
-	int err, part_num, flags, restore_flags = 0;
-
-	part_num = i2c_smbus_read_byte_data(client, NCT3018Y_REG_PART);
-	if (part_num < 0) {
-		dev_dbg(&client->dev, "%s: read error\n", __func__);
-		return part_num;
-	}
+	int err, flags;
+	int restore_flags = 0;
 
 	flags = i2c_smbus_read_byte_data(client, NCT3018Y_REG_CTRL);
 	if (flags < 0) {
-		dev_dbg(&client->dev, "%s: read error\n", __func__);
+		dev_dbg(&client->dev, "Failed to read NCT3018Y_REG_CTRL.\n");
 		return flags;
 	}
 
 	/* Check and set TWO bit */
-	if ((part_num & NCT3018Y_REG_PART_NCT3018Y) && !(flags & NCT3018Y_BIT_TWO)) {
+	if (nct3018y->part_num == NCT3018Y_REG_PART_NCT3018Y && !(flags & NCT3018Y_BIT_TWO)) {
 		restore_flags = 1;
 		flags |= NCT3018Y_BIT_TWO;
 		err = i2c_smbus_write_byte_data(client, NCT3018Y_REG_CTRL, flags);
 		if (err < 0) {
-			dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL\n");
+			dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL.\n");
 			return err;
 		}
 	}
@@ -403,12 +384,12 @@ static int nct3018y_rtc_set_time(struct device *dev, struct rtc_time *tm)
 
 	/* Restore TWO bit */
 	if (restore_flags) {
-		if (part_num & NCT3018Y_REG_PART_NCT3018Y)
+		if (nct3018y->part_num == NCT3018Y_REG_PART_NCT3018Y)
 			flags &= ~NCT3018Y_BIT_TWO;
 
 		err = i2c_smbus_write_byte_data(client, NCT3018Y_REG_CTRL, flags);
 		if (err < 0) {
-			dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL\n");
+			dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL.\n");
 			return err;
 		}
 	}
@@ -659,7 +640,6 @@ static int nct3018y_probe(struct i2c_client *client,
 	struct nct3018y *nct3018y;
 	int err, flags;
 	u32 intrusion_en;
-	const struct rtc_data *data = of_device_get_match_data(&client->dev);
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C |
 				     I2C_FUNC_SMBUS_BYTE |
@@ -683,24 +663,17 @@ static int nct3018y_probe(struct i2c_client *client,
 		dev_dbg(&client->dev, "%s: NCT3018Y_BIT_TWO is set\n", __func__);
 	}
 
-	flags = i2c_smbus_read_byte_data(client, NCT3018Y_REG_PART);
-	if (flags < 0) {
-		dev_dbg(&client->dev, "%s: read error\n", __func__);
-		return flags;
-	} else if (flags & NCT3018Y_REG_PART_NCT3018Y) {
-		if (!(flags & data->part_number))
-			dev_warn(&client->dev, "%s: part_num=0x%x but NCT3018Y_REG_PART=0x%x\n",
-				 __func__, data->part_number, flags);
+	nct3018y->part_num = i2c_smbus_read_byte_data(client, NCT3018Y_REG_PART);
+	if (nct3018y->part_num < 0) {
+		dev_dbg(&client->dev, "Failed to read NCT3018Y_REG_PART.\n");
+		return nct3018y->part_num;
+	} else if (nct3018y->part_num == NCT3018Y_REG_PART_NCT3018Y) {
 		flags = NCT3018Y_BIT_HF;
 		err = i2c_smbus_write_byte_data(client, NCT3018Y_REG_CTRL, flags);
 		if (err < 0) {
-			dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL\n");
+			dev_dbg(&client->dev, "Unable to write NCT3018Y_REG_CTRL.\n");
 			return err;
 		}
-	} else if (flags & NCT3018Y_REG_PART_NCT3015Y) {
-		if (!(flags & data->part_number))
-			dev_warn(&client->dev, "%s: part_num=0x%x but NCT3018Y_REG_PART=0x%x\n",
-				 __func__, data->part_number, flags);
 	}
 
 	flags = 0;
@@ -767,8 +740,7 @@ static const struct i2c_device_id nct3018y_id[] = {
 MODULE_DEVICE_TABLE(i2c, nct3018y_id);
 
 static const struct of_device_id nct3018y_of_match[] = {
-	{ .compatible = "nuvoton,nct3015y", .data = &nct3015y_rtc_data },
-	{ .compatible = "nuvoton,nct3018y", .data = &nct3018y_rtc_data },
+	{ .compatible = "nuvoton,nct3018y" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, nct3018y_of_match);
