@@ -15,9 +15,7 @@ maintainers:
 
 properties:
   compatible:
-    enum:
-      - nuvoton,nct3018y
-      - nuvoton,nct3015y
+    const: nuvoton,nct3018y
 
   reg:
     maxItems: 1
