@@ -152,6 +152,7 @@ Hardware Monitoring Kernel Drivers
    mp2888
    mp2975
    mp5023
+   mpq8785
    nct6683
    nct6775
    nct7363
