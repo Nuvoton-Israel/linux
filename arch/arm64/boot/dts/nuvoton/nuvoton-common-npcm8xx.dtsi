@@ -1562,9 +1562,9 @@
 			groups = "serirq";
 			function = "serirq";
 		};
-		lpcclk_pins: lpcclk-pins {
-			groups = "lpcclk";
-			function = "lpcclk";
+		clkrun_pins: clkrun-pins {
+			groups = "clkrun";
+			function = "clkrun";
 		};
 		scipme_pins: scipme-pins {
 			groups = "scipme";
