@@ -1154,10 +1154,6 @@
 			groups = "jm2";
 			function = "jm2";
 		};
-		smb4den_pins: smb4den-pins {
-			groups = "smb4den";
-			function = "smb4den";
-		};
 		smb4b_pins: smb4b-pins {
 			groups = "smb4b";
 			function = "smb4b";
@@ -1410,13 +1406,9 @@
 			groups = "espi";
 			function = "espi";
 		};
-		rg1_pins: rg1-pins {
-			groups = "rg1";
-			function = "rg1";
-		};
-		rg1mdio_pins: rg1mdio-pins {
-			groups = "rg1mdio";
-			function = "rg1mdio";
+		sg1mdio_pins: sg1mdio-pins {
+			groups = "sg1mdio";
+			function = "sg1mdio";
 		};
 		rg2_pins: rg2-pins {
 			groups = "rg2";
@@ -1570,9 +1562,9 @@
 			groups = "scipme";
 			function = "scipme";
 		};
-		sci_pins: sci-pins {
-			groups = "sci";
-			function = "sci";
+		smi_pins: smi-pins {
+			groups = "smi";
+			function = "smi";
 		};
 		smb6_pins: smb6-pins {
 			groups = "smb6";

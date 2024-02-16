@@ -102,7 +102,7 @@
 			clocks	= <&clk NPCM8XX_CLK_AHB>;
 			clock-names = "stmmaceth";
 			pinctrl-names = "default";
-			pinctrl-0 = <&rg1mdio_pins>;
+			pinctrl-0 = <&sg1mdio_pins>;
 			status = "disabled";
 		};
 
