@@ -458,7 +458,6 @@ static const int smb4_pins[]  = { 28, 29 };
 static const int smb4b_pins[] = { 18, 19 };
 static const int smb4c_pins[] = { 20, 21 };
 static const int smb4d_pins[] = { 22, 23 };
-static const int smb4den_pins[] = { 17 };
 static const int smb5_pins[]  = { 26, 27 };
 static const int smb5b_pins[] = { 13, 12 };
 static const int smb5c_pins[] = { 15, 14 };
@@ -526,9 +525,8 @@ static const int pwm11_pins[] = { 235 };
 static const int uart1_pins[] = { 43, 45, 46, 47, 61, 62, 63 };
 static const int uart2_pins[] = { 48, 49, 50, 51, 52, 53, 54, 55 };
 
-static const int rg1_pins[] = { 96, 97, 98, 99, 100, 101, 102, 103, 104, 105,
-	106, 107 };
-static const int rg1mdio_pins[] = { 108, 109 };
+/* SGMII 1 MD interface pin group */
+static const int sg1mdio_pins[] = { 108, 109 };
 static const int rg2_pins[] = { 110, 111, 112, 113, 208, 209, 210, 211, 212,
 	213, 214, 215 };
 static const int rg2mdio_pins[] = { 216, 217 };
@@ -565,7 +563,7 @@ static const int bmcuart0b_pins[] = { 48, 49 };
 static const int bmcuart1_pins[] = { 43, 44, 62, 63 };
 
 static const int scipme_pins[] = { 169 };
-static const int sci_pins[] = { 170 };
+static const int smi_pins[] = { 170 };
 static const int serirq_pins[] = { 168 };
 
 static const int clkout_pins[] = { 160 };
@@ -725,7 +723,6 @@ struct npcm8xx_group {
 	NPCM8XX_GRP(smb4b), \
 	NPCM8XX_GRP(smb4c), \
 	NPCM8XX_GRP(smb4d), \
-	NPCM8XX_GRP(smb4den), \
 	NPCM8XX_GRP(smb5), \
 	NPCM8XX_GRP(smb5b), \
 	NPCM8XX_GRP(smb5c), \
@@ -788,8 +785,7 @@ struct npcm8xx_group {
 	NPCM8XX_GRP(pwm9), \
 	NPCM8XX_GRP(pwm10), \
 	NPCM8XX_GRP(pwm11), \
-	NPCM8XX_GRP(rg1), \
-	NPCM8XX_GRP(rg1mdio), \
+	NPCM8XX_GRP(sg1mdio), \
 	NPCM8XX_GRP(rg2), \
 	NPCM8XX_GRP(rg2mdio), \
 	NPCM8XX_GRP(ddr), \
@@ -818,7 +814,7 @@ struct npcm8xx_group {
 	NPCM8XX_GRP(wdog1), \
 	NPCM8XX_GRP(wdog2), \
 	NPCM8XX_GRP(scipme), \
-	NPCM8XX_GRP(sci), \
+	NPCM8XX_GRP(smi), \
 	NPCM8XX_GRP(serirq), \
 	NPCM8XX_GRP(jtag2), \
 	NPCM8XX_GRP(spix), \
@@ -974,7 +970,6 @@ NPCM8XX_SFUNC(smb4);
 NPCM8XX_SFUNC(smb4b);
 NPCM8XX_SFUNC(smb4c);
 NPCM8XX_SFUNC(smb4d);
-NPCM8XX_SFUNC(smb4den);
 NPCM8XX_SFUNC(smb5);
 NPCM8XX_SFUNC(smb5b);
 NPCM8XX_SFUNC(smb5c);
@@ -1036,8 +1031,7 @@ NPCM8XX_SFUNC(pwm8);
 NPCM8XX_SFUNC(pwm9);
 NPCM8XX_SFUNC(pwm10);
 NPCM8XX_SFUNC(pwm11);
-NPCM8XX_SFUNC(rg1);
-NPCM8XX_SFUNC(rg1mdio);
+NPCM8XX_SFUNC(sg1mdio);
 NPCM8XX_SFUNC(rg2);
 NPCM8XX_SFUNC(rg2mdio);
 NPCM8XX_SFUNC(ddr);
@@ -1066,7 +1060,7 @@ NPCM8XX_SFUNC(sd1pwr);
 NPCM8XX_SFUNC(wdog1);
 NPCM8XX_SFUNC(wdog2);
 NPCM8XX_SFUNC(scipme);
-NPCM8XX_SFUNC(sci);
+NPCM8XX_SFUNC(smi);
 NPCM8XX_SFUNC(serirq);
 NPCM8XX_SFUNC(jtag2);
 NPCM8XX_SFUNC(spix);
@@ -1198,7 +1192,6 @@ static struct npcm8xx_func npcm8xx_funcs[] = {
 	NPCM8XX_MKFUNC(smb4b),
 	NPCM8XX_MKFUNC(smb4c),
 	NPCM8XX_MKFUNC(smb4d),
-	NPCM8XX_MKFUNC(smb4den),
 	NPCM8XX_MKFUNC(smb5),
 	NPCM8XX_MKFUNC(smb5b),
 	NPCM8XX_MKFUNC(smb5c),
@@ -1260,8 +1253,7 @@ static struct npcm8xx_func npcm8xx_funcs[] = {
 	NPCM8XX_MKFUNC(pwm9),
 	NPCM8XX_MKFUNC(pwm10),
 	NPCM8XX_MKFUNC(pwm11),
-	NPCM8XX_MKFUNC(rg1),
-	NPCM8XX_MKFUNC(rg1mdio),
+	NPCM8XX_MKFUNC(sg1mdio),
 	NPCM8XX_MKFUNC(rg2),
 	NPCM8XX_MKFUNC(rg2mdio),
 	NPCM8XX_MKFUNC(ddr),
@@ -1290,7 +1282,7 @@ static struct npcm8xx_func npcm8xx_funcs[] = {
 	NPCM8XX_MKFUNC(wdog1),
 	NPCM8XX_MKFUNC(wdog2),
 	NPCM8XX_MKFUNC(scipme),
-	NPCM8XX_MKFUNC(sci),
+	NPCM8XX_MKFUNC(smi),
 	NPCM8XX_MKFUNC(serirq),
 	NPCM8XX_MKFUNC(jtag2),
 	NPCM8XX_MKFUNC(spix),
@@ -1452,8 +1444,8 @@ static const struct npcm8xx_pincfg pincfg[] = {
 	NPCM8XX_PINCFG(93,	ga20kbc, MFSEL1, 17,	smb5d, I2CSEGSEL, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(94,	ga20kbc, MFSEL1, 17,	smb5d, I2CSEGSEL, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(95,	lpc, MFSEL1, 26,	espi, MFSEL4, 8,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
-	NPCM8XX_PINCFG(96,	rg1, MFSEL4, 22,	cp1gpio7b, MFSEL6, 24,	tp_gpio7, MFSEL7, 7,	none, NONE, 0,		none, NONE, 0,		SLEW),
-	NPCM8XX_PINCFG(97,	rg1, MFSEL4, 22,	cp1gpio6b, MFSEL6, 25,	tp_gpio6, MFSEL7, 6,	none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(96,	cp1gpio7b, MFSEL6, 24,	tp_gpio7, MFSEL7, 7,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(97,	cp1gpio6b, MFSEL6, 25,	tp_gpio6, MFSEL7, 6,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(98,	bu4b, MFSEL5, 13,	cp1gpio5b, MFSEL6, 26,	tp_gpio5, MFSEL7, 5,	none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(99,	bu4b, MFSEL5, 13,	cp1gpio4b, MFSEL6, 27,	tp_gpio4, MFSEL7, 4,	none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(100,	bu5b, MFSEL5, 12,	cp1gpio3c, MFSEL6, 28,	tp_gpio3, MFSEL7, 3,	none, NONE, 0,		none, NONE, 0,		SLEW),
@@ -1464,8 +1456,8 @@ static const struct npcm8xx_pincfg pincfg[] = {
 	NPCM8XX_PINCFG(105,	vgadig, MFSEL7, 29,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(106,	i3c5, MFSEL3, 22,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(107,	i3c5, MFSEL3, 22,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
-	NPCM8XX_PINCFG(108,	rg1mdio, MFSEL4, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
-	NPCM8XX_PINCFG(109,	rg1mdio, MFSEL4, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(108,	sg1mdio, MFSEL4, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(109,	sg1mdio, MFSEL4, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(110,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		SLEW), /* DSCNT */
 	NPCM8XX_PINCFG(111,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		SLEW), /* DSCNT */
 	NPCM8XX_PINCFG(112,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW), /* DSCNT */
@@ -1526,7 +1518,7 @@ static const struct npcm8xx_pincfg pincfg[] = {
 	NPCM8XX_PINCFG(167,	lpc, MFSEL1, 26,	espi, MFSEL4, 8,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(168,	serirq, MFSEL1, 31,	espi, MFSEL4, 8,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(169,	scipme, MFSEL3, 0,	smb21, MFSEL5, 29,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
-	NPCM8XX_PINCFG(170,	sci, MFSEL1, 22,	smb21, MFSEL5, 29,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
+	NPCM8XX_PINCFG(170,	smi, MFSEL1, 22,	smb21, MFSEL5, 29,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(171,	smb6, MFSEL3, 1,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(172,	smb6, MFSEL3, 1,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(173,	smb7, MFSEL3, 2,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
