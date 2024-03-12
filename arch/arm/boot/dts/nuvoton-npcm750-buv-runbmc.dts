@@ -323,8 +323,8 @@
 	#size-cells = <0>;
 	clock-frequency = <100000>;
 	status = "okay";
-	npcm7xx-ssif-bmc@40000010 {
-		compatible = "nuvoton,npcm7xx-ssif-bmc";
+	ssif-bmc@40000010 {
+		compatible = "ssif-bmc";
 		reg = <0x40000010>;
 	};
 };
