@@ -474,6 +474,9 @@ bool stmmac_eee_init(struct stmmac_priv *priv)
 	/* Check if MAC core supports the EEE feature. */
 	if (!priv->dma_cap.eee)
 		return false;
+		
+	if (priv->plat->eee_force_disable)
+		return false;
 
 	mutex_lock(&priv->lock);
 
@@ -1116,7 +1119,7 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 		writel(ctrl, priv->ioaddr + MAC_CTRL_REG);
 
 	stmmac_mac_set(priv, priv->ioaddr, true);
-	if (phy && priv->dma_cap.eee) {
+	if (phy && priv->dma_cap.eee && !priv->plat->eee_force_disable) {
 		priv->eee_active =
 			phy_init_eee(phy, !(priv->plat->flags &
 				STMMAC_FLAG_RX_CLK_RUNS_IN_LPI)) >= 0;
