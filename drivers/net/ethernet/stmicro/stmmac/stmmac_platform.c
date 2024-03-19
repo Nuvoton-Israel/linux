@@ -20,6 +20,9 @@
 #include "stmmac.h"
 #include "stmmac_platform.h"
 
+#define IND_AC_INDX	0x1FE
+#define SR_MII_CTRL	0x003E0000
+
 #ifdef CONFIG_OF
 
 /**
@@ -432,6 +435,8 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	struct plat_stmmacenet_data *plat;
 	struct stmmac_dma_cfg *dma_cfg;
 	static int bus_id = -ENODEV;
+	void __iomem *base;
+	u16 RegValue;
 	int phy_mode;
 	void *ret;
 	int rc;
@@ -538,6 +543,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		of_device_is_compatible(np, "snps,dwmac-3.50a") ||
 		of_device_is_compatible(np, "snps,dwmac-3.70a") ||
 		of_device_is_compatible(np, "snps,dwmac-3.72a") ||
+		of_device_is_compatible(np, "nuvoton,npcm-dwmac") ||
 		of_device_is_compatible(np, "snps,dwmac")) {
 		/* Note that the max-frame-size parameter as defined in the
 		 * ePAPR v1.1 spec is defined as max-frame-size, it's
@@ -667,6 +673,22 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	if (IS_ERR(plat->stmmac_ahb_rst)) {
 		ret = plat->stmmac_ahb_rst;
 		goto error_hw_init;
+	}
+
+	if (of_device_is_compatible(np, "nuvoton,npcm-dwmac")) {
+		base = devm_platform_ioremap_resource(pdev, 1);
+		if (IS_ERR(base)) {
+			dev_warn(&pdev->dev, "devm_platform_ioremap_resource failed\n");
+		}
+		iowrite16((u16)(SR_MII_CTRL >> 9), base + IND_AC_INDX);
+		RegValue = ioread16(base + 0x2);
+		RegValue = ioread16(base + 0x0);
+		RegValue |= BIT(15);
+		iowrite16(RegValue, base + 0x0);
+		while (RegValue & BIT(15))
+			RegValue = ioread16(base + 0x0);
+		RegValue &= ~(BIT(12));
+		iowrite16(RegValue, base + 0x0);
 	}
 
 	return plat;
