@@ -160,6 +160,7 @@ static void npcm_pspi_setup_transfer(struct spi_device *spi,
 				     struct spi_transfer *t)
 {
 	struct npcm_pspi *priv = spi_master_get_devdata(spi->master);
+	u8 bits_per_word = 8;
 
 	priv->tx_buf = t->tx_buf;
 	priv->rx_buf = t->rx_buf;
@@ -172,15 +173,14 @@ static void npcm_pspi_setup_transfer(struct spi_device *spi,
 	}
 
 	/*
-	 * If transfer is even length, and 8 bits per word transfer,
-	 * then implement 16 bits-per-word transfer.
+	 * If transfer is even length, change to use 16 bits-per-word transfer.
 	 */
-	if (priv->bits_per_word == 8 && !(t->len & 0x1))
-		t->bits_per_word = 16;
+	if (!(t->len & 0x1))
+		bits_per_word = 16;
 
-	if (!priv->is_save_param || priv->bits_per_word != t->bits_per_word) {
-		npcm_pspi_set_transfer_size(priv, t->bits_per_word);
-		priv->bits_per_word = t->bits_per_word;
+	if (!priv->is_save_param || priv->bits_per_word != bits_per_word) {
+		npcm_pspi_set_transfer_size(priv, bits_per_word);
+		priv->bits_per_word = bits_per_word;
 	}
 
 	if (!priv->is_save_param || priv->speed_hz != t->speed_hz) {
@@ -339,6 +339,7 @@ static int npcm_pspi_probe(struct platform_device *pdev)
 	priv = spi_master_get_devdata(master);
 	priv->master = master;
 	priv->is_save_param = false;
+	priv->bits_per_word = 8;
 
 	priv->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->base)) {
