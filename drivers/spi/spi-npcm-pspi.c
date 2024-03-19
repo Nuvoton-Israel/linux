@@ -303,7 +303,11 @@ static irqreturn_t npcm_pspi_handler(int irq, void *dev_id)
 
 	if (priv->tx_buf) {
 		if (stat & NPCM_PSPI_STAT_RBF) {
-			ioread8(NPCM_PSPI_DATA + priv->base);
+			if (priv->rx_buf && priv->rx_bytes)
+				npcm_pspi_recv(priv);
+			else
+				ioread8(NPCM_PSPI_DATA + priv->base);
+
 			if (priv->tx_bytes == 0) {
 				npcm_pspi_disable(priv);
 				complete(&priv->xfer_done);
@@ -311,9 +315,12 @@ static irqreturn_t npcm_pspi_handler(int irq, void *dev_id)
 			}
 		}
 
-		if ((stat & NPCM_PSPI_STAT_BSY) == 0)
-			if (priv->tx_bytes)
+		if ((stat & NPCM_PSPI_STAT_BSY) == 0) {
+			if (priv->tx_bytes) {
 				npcm_pspi_send(priv);
+				return IRQ_HANDLED;
+			}
+		}
 	}
 
 	if (priv->rx_buf) {
