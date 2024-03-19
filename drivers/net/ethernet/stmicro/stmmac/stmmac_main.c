@@ -867,7 +867,7 @@ static void stmmac_mac_link_down(struct phylink_config *config,
 	struct stmmac_priv *priv = netdev_priv(to_net_dev(config->dev));
 
 	stmmac_mac_set(priv, priv->ioaddr, false);
-	if (priv->dma_cap.eee)
+	if (priv->dma_cap.eee && !priv->plat->eee_force_disable)
 		stmmac_set_eee_pls(priv, priv->hw, false);
 
 	if (stmmac_fpe_supported(priv))
@@ -985,7 +985,7 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 	}
 
 	stmmac_mac_set(priv, priv->ioaddr, true);
-	if (priv->dma_cap.eee)
+	if (priv->dma_cap.eee && !priv->plat->eee_force_disable)
 		stmmac_set_eee_pls(priv, priv->hw, true);
 
 	if (stmmac_fpe_supported(priv))
@@ -1245,7 +1245,7 @@ static int stmmac_phy_setup(struct stmmac_priv *priv)
 				 config->supported_interfaces,
 				 pcs->supported_interfaces);
 
-	if (priv->dma_cap.eee) {
+	if (priv->dma_cap.eee && !priv->plat->eee_force_disable) {
 		/* Assume all supported interfaces also support LPI */
 		memcpy(config->lpi_interfaces, config->supported_interfaces,
 		       sizeof(config->lpi_interfaces));
