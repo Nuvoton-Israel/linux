@@ -49,6 +49,8 @@
 #define RECT_W		16
 #define RECT_H		16
 #define BITMAP_SIZE	32
+#define HSYNC_DEL_ADD	13
+#define VSYNC_DEL_ADD	3
 
 struct npcm_video_addr {
 	size_t size;
@@ -134,6 +136,10 @@ struct npcm_video {
 	unsigned int rect[VIDEO_MAX_FRAME];
 	unsigned int ctrl_cmd;
 	unsigned int op_cmd;
+	bool hsync_mode;
+	bool use_head1_source;
+	unsigned int hdelay_add; /* compensation for HSYNC delay */
+	unsigned int vdelay_add; /* compensation for VSYNC delay */
 };
 
 #define to_npcm_video(x) container_of((x), struct npcm_video, v4l2_dev)
@@ -578,7 +584,7 @@ static unsigned int npcm_video_hres(struct npcm_video *video)
 	regmap_read(gfxi, HVCNTL, &hvcntl);
 	apb_hor_res = (((hvcnth & HVCNTH_MASK) << 8) + (hvcntl & HVCNTL_MASK) + 1);
 
-	return apb_hor_res;
+	return (apb_hor_res > MAX_WIDTH) ? MAX_WIDTH : apb_hor_res;
 }
 
 static unsigned int npcm_video_vres(struct npcm_video *video)
@@ -591,7 +597,29 @@ static unsigned int npcm_video_vres(struct npcm_video *video)
 
 	apb_ver_res = (((vvcnth & VVCNTH_MASK) << 8) + (vvcntl & VVCNTL_MASK));
 
-	return apb_ver_res;
+	return (apb_ver_res > MAX_HEIGHT) ? MAX_HEIGHT : apb_ver_res;
+}
+
+static unsigned int npcm_video_hbp(struct npcm_video *video)
+{
+	struct regmap *gfxi = video->gfx_regmap;
+	unsigned int hbpcnth, hbpcntl;
+
+	regmap_read(gfxi, HBPCNTH, &hbpcnth);
+	regmap_read(gfxi, HBPCNTL, &hbpcntl);
+
+	return ((hbpcnth & HBPCNTH_MASK) << 8) + (hbpcntl & HBPCNTL_MASK);
+}
+
+static unsigned int npcm_video_vbp(struct npcm_video *video)
+{
+	struct regmap *gfxi = video->gfx_regmap;
+	unsigned int vbpcnth, vbpcntl;
+
+	regmap_read(gfxi, VBPCNTH, &vbpcnth);
+	regmap_read(gfxi, VBPCNTL, &vbpcntl);
+
+	return ((vbpcnth & VBPCNTH_MASK) << 8) + (vbpcntl & VBPCNTL_MASK);
 }
 
 static int npcm_video_capres(struct npcm_video *video, unsigned int hor_res,
@@ -613,6 +641,27 @@ static int npcm_video_capres(struct npcm_video *video, unsigned int hor_res,
 		return -EINVAL;
 
 	return 0;
+}
+
+static void npcm_video_adjust_dvodel(struct npcm_video *video)
+{
+	struct regmap *vcd = video->vcd_regmap;
+	unsigned int hact, hdelay, vdelay, val;
+
+	if (!video->hsync_mode)
+		return;
+
+	regmap_read(vcd, VCD_HOR_AC_TIM, &val);
+	hact = FIELD_GET(VCD_HOR_AC_TIME, val);
+
+	if (hact != 0x3fff) {
+		hdelay = npcm_video_hbp(video) + hact + video->hdelay_add;
+		vdelay = npcm_video_vbp(video) + video->vdelay_add;
+
+		regmap_write(vcd, VCD_DVO_DEL,
+			     FIELD_PREP(VCD_DVO_DEL_HSYNC_DEL, hdelay) |
+			     FIELD_PREP(VCD_DVO_DEL_VSYNC_DEL, vdelay));
+	}
 }
 
 static void npcm_video_vcd_ip_reset(struct npcm_video *video)
@@ -751,9 +800,6 @@ static void npcm_video_init_reg(struct npcm_video *video)
 {
 	struct regmap *gcr = video->gcr_regmap, *vcd = video->vcd_regmap;
 
-	/* Selects Data Enable */
-	regmap_update_bits(gcr, INTCR, INTCR_DEHS, 0);
-
 	/* Enable display of KVM GFX and access to memory */
 	regmap_update_bits(gcr, INTCR, INTCR_GFXIFDIS, 0);
 
@@ -766,7 +812,10 @@ static void npcm_video_init_reg(struct npcm_video *video)
 	npcm_video_gfx_reset(video);
 
 	/* Set the FIFO thresholds */
-	regmap_write(vcd, VCD_FIFO, VCD_FIFO_TH);
+	if (video->use_head1_source)
+		regmap_write(vcd, VCD_FIFO, VCD_FIFO_TH_HEAD1);
+	else
+		regmap_write(vcd, VCD_FIFO, VCD_FIFO_TH_HEAD2);
 
 	/* Set RCHG timer */
 	regmap_write(vcd, VCD_RCHG, FIELD_PREP(VCD_RCHG_TIM_PRSCL, 0xf) |
@@ -775,13 +824,19 @@ static void npcm_video_init_reg(struct npcm_video *video)
 	/* Set video mode */
 	regmap_write(vcd, VCD_MODE, VCD_MODE_VCDE | VCD_MODE_CM565 |
 		     VCD_MODE_IDBC | VCD_MODE_KVM_BW_SET);
+
+	/* Select DE or HSYNC mode */
+	if (video->hsync_mode)
+		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, VCD_MODE_DE_HS);
+	else
+		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_DE_HS, 0);
 }
 
 static int npcm_video_start_frame(struct npcm_video *video)
 {
 	struct npcm_video_buffer *buf;
 	struct regmap *vcd = video->vcd_regmap;
-	unsigned int val;
+	unsigned int val, status;
 	int ret;
 
 	if (video->v4l2_input_status) {
@@ -789,9 +844,10 @@ static int npcm_video_start_frame(struct npcm_video *video)
 		return 0;
 	}
 
+	regmap_read(vcd, VCD_STAT, &status);
 	ret = regmap_read_poll_timeout(vcd, VCD_STAT, val, !(val & VCD_STAT_BUSY),
 				       1000, VCD_TIMEOUT_US);
-	if (ret) {
+	if (ret && !(status & VCD_STAT_IFOR || status & VCD_STAT_IFOT)) {
 		dev_err(video->dev, "Wait for VCD_STAT_BUSY timeout\n");
 		return -EBUSY;
 	}
@@ -810,18 +866,27 @@ static int npcm_video_start_frame(struct npcm_video *video)
 
 	npcm_video_vcd_state_machine_reset(video);
 
-	regmap_read(vcd, VCD_HOR_AC_TIM, &val);
-	regmap_update_bits(vcd, VCD_HOR_AC_LST, VCD_HOR_AC_LAST,
-			   FIELD_GET(VCD_HOR_AC_TIME, val));
+	if (video->hsync_mode) {
+		regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE |
+				   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE,
+				   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
+				   VCD_INTE_IFOR_IE);
+	} else {
+		regmap_read(vcd, VCD_HOR_AC_TIM, &val);
+		regmap_update_bits(vcd, VCD_HOR_AC_LST, VCD_HOR_AC_LAST,
+				   FIELD_GET(VCD_HOR_AC_TIME, val));
 
-	regmap_read(vcd, VCD_VER_HI_TIM, &val);
-	regmap_update_bits(vcd, VCD_VER_HI_LST, VCD_VER_HI_LAST,
-			   FIELD_GET(VCD_VER_HI_TIME, val));
+		regmap_read(vcd, VCD_VER_HI_TIM, &val);
+		regmap_update_bits(vcd, VCD_VER_HI_LST, VCD_VER_HI_LAST,
+				   FIELD_GET(VCD_VER_HI_TIME, val));
 
-	regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
-			   VCD_INTE_IFOR_IE | VCD_INTE_HAC_IE | VCD_INTE_VHT_IE,
-			   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE |
-			   VCD_INTE_HAC_IE | VCD_INTE_VHT_IE);
+		regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE |
+				   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE |
+				   VCD_INTE_HAC_IE | VCD_INTE_VHT_IE,
+				   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
+				   VCD_INTE_IFOR_IE | VCD_INTE_HAC_IE |
+				   VCD_INTE_VHT_IE);
+	}
 
 	npcm_video_command(video, video->ctrl_cmd);
 
@@ -866,6 +931,7 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 	video->v4l2_input_status = V4L2_IN_ST_NO_SIGNAL;
 	det->width = npcm_video_hres(video);
 	det->height = npcm_video_vres(video);
+	npcm_video_adjust_dvodel(video);
 
 	if (act->width != det->width || act->height != det->height) {
 		dev_dbg(video->dev, "Resolution changed\n");
@@ -1700,6 +1766,7 @@ static int npcm_video_init(struct npcm_video *video)
 {
 	struct device *dev = video->dev;
 	int irq, rc;
+	unsigned int hdelay_add, vdelay_add;
 
 	irq = irq_of_parse_and_map(dev->of_node, 0);
 	if (!irq) {
@@ -1720,6 +1787,42 @@ static int npcm_video_init(struct npcm_video *video)
 		dev_err(dev, "Failed to set DMA mask\n");
 		of_reserved_mem_device_release(dev);
 	}
+
+	video->use_head1_source = of_property_read_bool(dev->of_node,
+							"nuvoton,use-head1-source");
+
+	if (of_device_is_compatible(video->dev->of_node, "nuvoton,npcm750-vcd")) {
+		if (video->use_head1_source)
+			regmap_update_bits(video->gcr_regmap, MFSEL1_NPCM7XX,
+					   MFSEL1_DVH1SEL, MFSEL1_DVH1SEL);
+		else
+			regmap_update_bits(video->gcr_regmap, MFSEL1_NPCM7XX,
+					   MFSEL1_DVH1SEL, 0);
+	} else {
+		if (video->use_head1_source)
+			regmap_update_bits(video->gcr_regmap, MFSEL1_NPCM8XX,
+					   MFSEL1_DVH1SEL, MFSEL1_DVH1SEL);
+		else
+			regmap_update_bits(video->gcr_regmap, MFSEL1_NPCM8XX,
+					   MFSEL1_DVH1SEL, 0);
+	}
+
+	video->hsync_mode = of_property_read_bool(dev->of_node, "nuvoton,hsync-mode");
+
+	if (video->hsync_mode)
+		regmap_update_bits(video->gcr_regmap, INTCR, INTCR_DEHS, INTCR_DEHS);
+	else
+		regmap_update_bits(video->gcr_regmap, INTCR, INTCR_DEHS, 0);
+
+	if (!of_property_read_u32(dev->of_node, "nuvoton,hsync-delay-add", &hdelay_add))
+		video->hdelay_add = hdelay_add;
+	else
+		video->hdelay_add = HSYNC_DEL_ADD;
+
+	if (!of_property_read_u32(dev->of_node, "nuvoton,vsync-delay-add", &vdelay_add))
+		video->vdelay_add = vdelay_add;
+	else
+		video->vdelay_add = VSYNC_DEL_ADD;
 
 	rc = npcm_video_ece_init(video);
 	if (rc) {
