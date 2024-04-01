@@ -21,10 +21,15 @@
 #define  VCD_CAP_RES_VERT_RES		GENMASK(10, 0)
 #define  VCD_CAP_RES_HOR_RES		GENMASK(26, 16)
 
+#define VCD_DVO_DEL			0x8010
+#define  VCD_DVO_DEL_HSYNC_DEL		GENMASK(10, 0)
+#define  VCD_DVO_DEL_VSYNC_DEL		GENMASK(26, 16)
+
 #define VCD_MODE			0x8014
 #define  VCD_MODE_VCDE			BIT(0)
 #define  VCD_MODE_CM565			BIT(1)
 #define  VCD_MODE_IDBC			BIT(3)
+#define  VCD_MODE_DE_HS			BIT(11)
 #define  VCD_MODE_KVM_BW_SET		BIT(16)
 
 #define VCD_CMD				0x8018
@@ -67,7 +72,8 @@
 #define  VCD_HOR_AC_LAST		GENMASK(13, 0)
 
 #define VCD_FIFO			0x805c
-#define  VCD_FIFO_TH			0x100350ff
+#define  VCD_FIFO_TH_HEAD1		0x35043
+#define  VCD_FIFO_TH_HEAD2		0x100350ff
 
 #define VCD_FB_SIZE			0x500000 /* support up to 1920 x 1200 */
 #define VCD_KVM_BW_PCLK			120000000UL
@@ -120,6 +126,10 @@
 #define  INTCR2_GIHCRST			BIT(5)
 #define  INTCR2_GIVCRST			BIT(6)
 
+#define MFSEL1_NPCM7XX			0x0c
+#define MFSEL1_NPCM8XX			0x260
+#define  MFSEL1_DVH1SEL			BIT(27)
+
 /* GFXI Register */
 #define DISPST				0x00
 #define  DISPST_HSCROFF			BIT(1)
@@ -131,11 +141,23 @@
 #define HVCNTH				0x14
 #define  HVCNTH_MASK			GENMASK(2, 0)
 
+#define HBPCNTL				0x18
+#define  HBPCNTL_MASK			GENMASK(7, 0)
+
+#define HBPCNTH				0x1c
+#define  HBPCNTH_MASK			BIT(0)
+
 #define VVCNTL				0x20
 #define  VVCNTL_MASK			GENMASK(7, 0)
 
 #define VVCNTH				0x24
 #define  VVCNTH_MASK			GENMASK(2, 0)
+
+#define VBPCNTL				0x28
+#define  VBPCNTL_MASK			GENMASK(7, 0)
+
+#define VBPCNTH				0x2c
+#define  VBPCNTH_MASK			BIT(0)
 
 #define GPLLINDIV			0x40
 #define  GPLLINDIV_MASK			GENMASK(5, 0)
