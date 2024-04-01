@@ -89,6 +89,7 @@
 			interrupt-map-mask = <0 0 0 7>;
 			interrupt-map = <0 0 0 1 &gic GIC_SPI 127 IRQ_TYPE_LEVEL_HIGH>;
 			nuvoton,sysgcr = <&gcr>;
+			status = "disabled";
 		};
 
 		ehci1: usb@f0828100 {
