@@ -11,6 +11,8 @@
 #include <linux/i3c/master.h>
 #include <linux/io.h>
 
+extern const struct device_type i3c_masterdev_type;
+
 void i3c_bus_normaluse_lock(struct i3c_bus *bus);
 void i3c_bus_normaluse_unlock(struct i3c_bus *bus);
 
@@ -68,4 +70,5 @@ static inline void i3c_readl_fifo(const void __iomem *addr, void *buf,
 	}
 }
 
+int i3c_for_each_dev(void *data, int (*fn)(struct device *, void *));
 #endif /* I3C_INTERNAL_H */
