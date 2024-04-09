@@ -200,6 +200,20 @@ void i3c_device_free_ibi(struct i3c_device *dev)
 }
 EXPORT_SYMBOL_GPL(i3c_device_free_ibi);
 
+int i3c_device_send_ccc_cmd(struct i3c_device *dev, u8 ccc_id)
+{
+	int ret;
+
+	if (dev->desc) {
+		i3c_bus_normaluse_lock(dev->bus);
+		ret = i3c_dev_send_ccc_cmd_locked(dev->desc, ccc_id);
+		i3c_bus_normaluse_unlock(dev->bus);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(i3c_device_send_ccc_cmd);
+
 /**
  * i3cdev_to_dev() - Returns the device embedded in @i3cdev
  * @i3cdev: I3C device

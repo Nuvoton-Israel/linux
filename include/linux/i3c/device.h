@@ -77,6 +77,7 @@ struct i3c_priv_xfer {
  */
 enum i3c_dcr {
 	I3C_DCR_GENERIC_DEVICE = 0,
+	I3C_DCR_HUB = 0xC2,
 };
 
 #define I3C_PID_MANUF_ID(pid)		(((pid) & GENMASK_ULL(47, 33)) >> 33)
@@ -342,7 +343,7 @@ int i3c_device_request_ibi(struct i3c_device *dev,
 void i3c_device_free_ibi(struct i3c_device *dev);
 int i3c_device_enable_ibi(struct i3c_device *dev);
 int i3c_device_disable_ibi(struct i3c_device *dev);
-
+int i3c_device_send_ccc_cmd(struct i3c_device *dev, u8 ccc_id);
 int i3c_device_getstatus_ccc(struct i3c_device *dev, struct i3c_device_info *info);
 int i3c_device_setmrl_ccc(struct i3c_device *dev, struct i3c_device_info *info, __be16 read_len,
 			  u8 ibi_len);
