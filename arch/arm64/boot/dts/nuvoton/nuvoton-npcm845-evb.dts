@@ -562,3 +562,11 @@
 		status = "okay";
 	};
 };
+
+&vcd {
+	status = "okay";
+};
+
+&ece {
+	status = "okay";
+};
