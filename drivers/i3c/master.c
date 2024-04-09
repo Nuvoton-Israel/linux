@@ -945,6 +945,40 @@ static int i3c_master_rstdaa_locked(struct i3c_master_controller *master,
 	return ret;
 }
 
+static int i3c_master_setaasa_locked(struct i3c_master_controller *master)
+{
+	struct i3c_ccc_cmd_dest dest;
+	struct i3c_ccc_cmd cmd;
+	int ret;
+
+	i3c_ccc_cmd_dest_init(&dest, I3C_BROADCAST_ADDR, 0);
+	i3c_ccc_cmd_init(&cmd, false, I3C_CCC_SETAASA, &dest, 1);
+	ret = i3c_master_send_ccc_cmd_locked(master, &cmd);
+	i3c_ccc_cmd_dest_cleanup(&dest);
+
+	return ret;
+}
+
+static int i3c_master_sethid_locked(struct i3c_master_controller *master)
+{
+	struct i3c_ccc_cmd_dest dest;
+	struct i3c_ccc_cmd cmd;
+	struct i3c_ccc_sethid *sethid;
+	int ret;
+
+	sethid = i3c_ccc_cmd_dest_init(&dest, I3C_BROADCAST_ADDR, 1);
+	if (!sethid)
+		return -ENOMEM;
+
+	sethid->hid = 0;
+	i3c_ccc_cmd_init(&cmd, false, I3C_CCC_SETHID, &dest, 1);
+
+	ret = i3c_master_send_ccc_cmd_locked(master, &cmd);
+	i3c_ccc_cmd_dest_cleanup(&dest);
+
+	return ret;
+}
+
 /**
  * i3c_master_entdaa_locked() - start a DAA (Dynamic Address Assignment)
  *				procedure
@@ -1609,6 +1643,36 @@ static void i3c_master_detach_i2c_dev(struct i2c_dev_desc *dev)
 		master->ops->detach_i2c_dev(dev);
 }
 
+static int i3c_master_add_static_i3c_dev(struct i3c_master_controller *master,
+					  struct i3c_dev_boardinfo *boardinfo)
+{
+	struct i3c_device_info info = {
+		.static_addr = boardinfo->static_addr,
+	};
+	struct i3c_dev_desc *i3cdev;
+	int ret;
+
+	i3cdev = i3c_master_alloc_i3c_dev(master, &info);
+	if (IS_ERR(i3cdev))
+		return -ENOMEM;
+
+	i3cdev->boardinfo = boardinfo;
+	i3cdev->info.static_addr = boardinfo->static_addr;
+	i3cdev->info.pid = boardinfo->pid;
+	i3cdev->info.dyn_addr = boardinfo->static_addr;
+
+	ret = i3c_master_attach_i3c_dev(master, i3cdev);
+	if (ret)
+		goto err_free_dev;
+
+	return 0;
+
+err_free_dev:
+	i3c_master_free_i3c_dev(i3cdev);
+
+	return ret;
+}
+
 static int i3c_master_early_i3c_dev_add(struct i3c_master_controller *master,
 					  struct i3c_dev_boardinfo *boardinfo)
 {
@@ -1939,6 +2003,18 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 	 * i3c_master_add_i3c_dev_locked().
 	 */
 	list_for_each_entry(i3cboardinfo, &master->boardinfo.i3c, node) {
+		if (!i3cboardinfo->init_dyn_addr && master->bus.jesd403) {
+			/* JESD403 devices only support setaasa */
+			ret = i3c_bus_get_addr_slot_status(&master->bus,
+					i3cboardinfo->static_addr);
+			if (ret != I3C_ADDR_SLOT_FREE) {
+				ret = -EBUSY;
+				goto err_rstdaa;
+			}
+			i3cboardinfo->init_dyn_addr = i3cboardinfo->static_addr;
+			i3c_master_add_static_i3c_dev(master, i3cboardinfo);
+			continue;
+		}
 
 		/*
 		 * We don't reserve a dynamic address for devices that
@@ -1970,6 +2046,16 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 
 		if (i3cboardinfo->static_addr)
 			i3c_master_early_i3c_dev_add(master, i3cboardinfo);
+	}
+
+	if (master->bus.jesd403) {
+		i3c_master_sethid_locked(master);
+		i3c_master_setaasa_locked(master);
+
+		i3c_bus_normaluse_lock(&master->bus);
+		i3c_master_register_new_i3c_devs(master);
+		i3c_bus_normaluse_unlock(&master->bus);
+		return 0;
 	}
 
 	ret = i3c_master_do_daa(master);
@@ -2324,6 +2410,9 @@ static int of_populate_i3c_bus(struct i3c_master_controller *master)
 
 	if (!of_property_read_u32(i3cbus_np, "i3c-scl-hz", &val))
 		master->bus.scl_rate.i3c = val;
+
+	if (of_property_read_bool(i3cbus_np, "jedec,jesd403"))
+		master->bus.jesd403 = true;
 
 	return 0;
 }
