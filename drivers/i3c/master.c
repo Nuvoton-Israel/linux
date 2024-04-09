@@ -684,6 +684,20 @@ static ssize_t hotjoin_show(struct device *dev, struct device_attribute *da, cha
 
 static DEVICE_ATTR_RW(hotjoin);
 
+static ssize_t discover_store(struct device *dev, struct device_attribute *da,
+			      const char *buf, size_t count)
+{
+	struct i3c_master_controller *master;
+	ssize_t ret = count;
+
+	master = dev_to_i3cmaster(dev);
+	dev_dbg(&master->dev, "Request master to do DAA\n");
+	i3c_master_do_daa(master);
+
+	return ret;
+}
+static DEVICE_ATTR_WO(discover);
+
 static struct attribute *i3c_masterdev_attrs[] = {
 	&dev_attr_mode.attr,
 	&dev_attr_current_master.attr,
@@ -695,6 +709,7 @@ static struct attribute *i3c_masterdev_attrs[] = {
 	&dev_attr_dynamic_address.attr,
 	&dev_attr_hdrcap.attr,
 	&dev_attr_hotjoin.attr,
+	&dev_attr_discover.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(i3c_masterdev);
