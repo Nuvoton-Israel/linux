@@ -22,6 +22,14 @@ config NPCM_SERIAL_PORT_CONTROL
 	  enables the SoC to snoop and take over the serial interface.
 	  Allow users to change the serial port mode via sysfs interface.
 
+config NPCM_ESPI_MMBI
+	tristate "NPCM MMBI Driver"
+	depends on ARCH_NPCM || COMPILE_TEST
+	help
+	  Provides a driver to implement the mmbi protocol that
+	  handle the data exchange between BMC and host over the
+	  eSPI interface.
+
 endmenu
 
 endif
