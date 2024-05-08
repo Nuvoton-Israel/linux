@@ -7,3 +7,11 @@ config VIDEO_NPCM_VCD_ECE
 	help
 	  Support for the Video Capture/Differentiation Engine (VCD) and
 	  Encoding Compression Engine (ECE) present on Nuvoton NPCM SoCs. 
+
+config VIDEO_NPCM_RES_CHANGE_INT
+	tristate "Support for resolution change interrupt"
+	depends on VIDEO_NPCM_VCD_ECE
+	default n
+	help
+	  Support for resolution change interrupt. Driver will send
+	  V4L2_EVENT_SRC_CH_RESOLUTION event when resolution has changed.
