@@ -121,6 +121,7 @@ struct npcm_video {
 	struct vb2_queue queue;
 	struct video_device vdev;
 	struct mutex video_lock; /* v4l2 and videobuf2 lock */
+	struct mutex capture_lock; /* capture command lock */
 
 	struct list_head buffers;
 	struct mutex buffer_lock; /* buffer list lock */
@@ -1244,8 +1245,13 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 		list_del(&buf->link);
 		mutex_unlock(&video->buffer_lock);
 
-		if (npcm_video_start_frame(video))
-			dev_err(video->dev, "Failed to capture next frame\n");
+		if (test_bit(VIDEO_STREAMING, &video->flags)) {
+			mutex_lock(&video->capture_lock);
+			if (npcm_video_start_frame(video))
+				dev_err(video->dev, "Failed to capture next frame\n");
+
+			mutex_unlock(&video->capture_lock);
+		}
 	}
 
 #if IS_ENABLED(CONFIG_VIDEO_NPCM_RES_CHANGE_INT)
@@ -1262,8 +1268,13 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 
 	if (status & VCD_STAT_IFOR || status & VCD_STAT_IFOT) {
 		dev_warn(video->dev, "VCD FIFO overrun or over thresholds\n");
-		if (npcm_video_start_frame(video))
-			dev_err(video->dev, "Failed to recover from FIFO overrun\n");
+		if (test_bit(VIDEO_STREAMING, &video->flags)) {
+			mutex_lock(&video->capture_lock);
+			if (npcm_video_start_frame(video))
+				dev_err(video->dev, "Failed to recover from FIFO overrun\n");
+
+			mutex_unlock(&video->capture_lock);
+		}
 	}
 
 	return IRQ_HANDLED;
@@ -1634,7 +1645,11 @@ static int npcm_video_start_streaming(struct vb2_queue *q, unsigned int count)
 	int rc;
 
 	video->sequence = 0;
+
+	mutex_lock(&video->capture_lock);
 	rc = npcm_video_start_frame(video);
+	mutex_unlock(&video->capture_lock);
+
 	if (rc) {
 		npcm_video_bufs_done(video, VB2_BUF_STATE_QUEUED);
 		return rc;
@@ -1672,8 +1687,11 @@ static void npcm_video_buf_queue(struct vb2_buffer *vb)
 
 	if (test_bit(VIDEO_STREAMING, &video->flags) &&
 	    !test_bit(VIDEO_CAPTURING, &video->flags) && empty) {
+		mutex_lock(&video->capture_lock);
 		if (npcm_video_start_frame(video))
 			dev_err(video->dev, "Failed to capture next frame\n");
+
+		mutex_unlock(&video->capture_lock);
 	}
 }
 
@@ -1937,6 +1955,7 @@ static int npcm_video_probe(struct platform_device *pdev)
 	video->dev = &pdev->dev;
 	mutex_init(&video->video_lock);
 	mutex_init(&video->buffer_lock);
+	mutex_init(&video->capture_lock);
 	INIT_LIST_HEAD(&video->buffers);
 	init_completion(&video->irq_cmp);
 	INIT_WORK(&video->irq_timeout_work, npcm_video_irq_timeout_work);
