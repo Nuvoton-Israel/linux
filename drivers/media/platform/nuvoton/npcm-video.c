@@ -142,6 +142,8 @@ struct npcm_video {
 	bool use_head1_source;
 	unsigned int hdelay_add; /* compensation for HSYNC delay */
 	unsigned int vdelay_add; /* compensation for VSYNC delay */
+	struct completion irq_cmp;
+	struct work_struct irq_timeout_work;
 };
 
 #define to_npcm_video(x) container_of((x), struct npcm_video, v4l2_dev)
@@ -796,6 +798,9 @@ static void npcm_video_command(struct npcm_video *video, unsigned int value)
 	regmap_write(vcd, VCD_CMD, cmd);
 	regmap_update_bits(vcd, VCD_CMD, VCD_CMD_GO, VCD_CMD_GO);
 	video->op_cmd = value;
+
+	reinit_completion(&video->irq_cmp);
+	schedule_work(&video->irq_timeout_work);
 }
 
 static void npcm_video_init_reg(struct npcm_video *video)
@@ -1040,6 +1045,7 @@ static void npcm_video_stop(struct npcm_video *video)
 	struct regmap *vcd = video->vcd_regmap;
 
 	set_bit(VIDEO_STOPPED, &video->flags);
+	cancel_work_sync(&video->irq_timeout_work);
 
 	regmap_write(vcd, VCD_INTE, 0);
 	regmap_write(vcd, VCD_MODE, 0);
@@ -1138,6 +1144,7 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 		return IRQ_NONE;
 
 	if (status & VCD_STAT_DONE) {
+		complete(&video->irq_cmp);
 		regmap_write(vcd, VCD_INTE, 0);
 		mutex_lock(&video->buffer_lock);
 		clear_bit(VIDEO_CAPTURING, &video->flags);
@@ -1465,6 +1472,21 @@ static const struct v4l2_ctrl_config npcm_ctrl_rect_count = {
 	.step = 1,
 	.def = 0,
 };
+
+static void npcm_video_irq_timeout_work(struct work_struct *w)
+{
+	struct npcm_video *video = container_of(w, struct npcm_video, irq_timeout_work);
+	long timeout;
+
+	timeout = wait_for_completion_interruptible_timeout(&video->irq_cmp,
+							    msecs_to_jiffies(1000));
+
+	if (timeout <= 0 && test_bit(VIDEO_STREAMING, &video->flags)) {
+		dev_warn(video->dev, "VCD IRQ timeout, restart capture command\n");
+		npcm_video_vcd_state_machine_reset(video);
+		npcm_video_command(video, video->ctrl_cmd);
+	}
+}
 
 static int npcm_video_open(struct file *file)
 {
@@ -1853,6 +1875,8 @@ static int npcm_video_probe(struct platform_device *pdev)
 	mutex_init(&video->video_lock);
 	mutex_init(&video->buffer_lock);
 	INIT_LIST_HEAD(&video->buffers);
+	init_completion(&video->irq_cmp);
+	INIT_WORK(&video->irq_timeout_work, npcm_video_irq_timeout_work);
 
 	regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(regs)) {
