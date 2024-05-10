@@ -13,3 +13,11 @@ config VIDEO_NPCM_VCD_ECE
 	  The VCD can capture a frame from digital video input and compare
 	  two frames in memory, and then the ECE can compress the frame
 	  data into HEXTILE format.
+
+config VIDEO_NPCM_RES_CHANGE_INT
+	tristate "Support for resolution change interrupt"
+	depends on VIDEO_NPCM_VCD_ECE
+	default n
+	help
+	  Support for resolution change interrupt. Driver will send
+	  V4L2_EVENT_SRC_CH_RESOLUTION event when resolution has changed.
