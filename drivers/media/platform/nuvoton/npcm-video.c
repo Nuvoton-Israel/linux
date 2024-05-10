@@ -166,6 +166,51 @@ static const struct npcm_fmt npcm_fmt_list[] = {
 
 #define NUM_FORMATS ARRAY_SIZE(npcm_fmt_list)
 
+struct res_tbl {
+	char *name;
+	unsigned int hdisp; /* displayed pixels (width) */
+	unsigned int vdisp; /* displayed lines (height) */
+};
+
+static const struct res_tbl res_tbls[] = {
+	{"320 x 200", 320, 200},
+	{"320 x 240", 320, 240},
+	{"640 x 480", 640, 480},
+	{"720 x 400", 720, 400},
+	{"768 x 576", 768, 576},
+	{"800 x 480", 800, 480},
+	{"800 x 600", 800, 600},
+	{"832 x 624", 832, 624},
+	{"848 x 480", 848, 480},
+	{"854 x 480", 854, 480},
+	{"1024 x 600", 1024, 600},
+	{"1024 x 768", 1024, 768},
+	{"1152 x 768", 1152, 768},
+	{"1152 x 864", 1152, 864},
+	{"1152 x 870", 1152, 870},
+	{"1152 x 900", 1152, 900},
+	{"1280 x 720", 1280, 720},
+	{"1280 x 768", 1280, 768},
+	{"1280 x 800", 1280, 800},
+	{"1280 x 854", 1280, 854},
+	{"1280 x 960", 1280, 960},
+	{"1280 x 1024", 1280, 1024},
+	{"1360 x 768", 1360, 768},
+	{"1366 x 768", 1366, 768},
+	{"1440 x 900", 1440, 900},
+	{"1440 x 960", 1440, 960},
+	{"1440 x 1050", 1440, 1050},
+	{"1440 x 1080", 1440, 1080},
+	{"1600 x 900", 1600, 900},
+	{"1600 x 1050", 1600, 1050},
+	{"1600 x 1200", 1600, 1200},
+	{"1680 x 1050", 1680, 1050},
+	{"1920 x 1080", 1920, 1080},
+	{"1920 x 1200", 1920, 1200},
+};
+
+#define RESTBL_CNT ARRAY_SIZE(res_tbls)
+
 static const struct v4l2_dv_timings_cap npcm_video_timings_cap = {
 	.type = V4L2_DV_BT_656_1120,
 	.bt = {
@@ -932,6 +977,8 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 	struct v4l2_bt_timings *det = &video->detected_timings;
 	struct regmap *gfxi = video->gfx_regmap;
 	unsigned int dispst;
+	unsigned int i, retry_count = 3;
+	bool valid_res = true;
 
 	det->width = npcm_video_hres(video);
 	det->height = npcm_video_vres(video);
@@ -939,6 +986,7 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 
 	if (act->width != det->width || act->height != det->height) {
 		dev_dbg(video->dev, "Resolution changed\n");
+		valid_res = false;
 
 		if (npcm_video_hres(video) > 0 && npcm_video_vres(video) > 0) {
 			if (test_bit(VIDEO_STREAMING, &video->flags)) {
@@ -954,9 +1002,21 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 					 (dispst & DISPST_HSCROFF));
 			}
 
-			det->width = npcm_video_hres(video);
-			det->height = npcm_video_vres(video);
-			det->pixelclock = npcm_video_pclk(video);
+			/* Wait for valid resolution */
+			while (retry_count--) {
+				det->width = npcm_video_hres(video);
+				det->height = npcm_video_vres(video);
+				det->pixelclock = npcm_video_pclk(video);
+				for (i = 0; i < RESTBL_CNT; i++) {
+					if ((res_tbls[i].hdisp == det->width) &&
+					    (res_tbls[i].vdisp == det->height)) {
+						valid_res = true;
+						break;
+					}
+				}
+				if (valid_res)
+					break;
+			}
 		}
 
 #if IS_ENABLED(CONFIG_VIDEO_NPCM_RES_CHANGE_INT)
@@ -964,7 +1024,7 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 #endif
 	}
 
-	if (det->width && det->height) {
+	if (valid_res && det->width && det->height) {
 		video->v4l2_input_status = 0;
 
 		dev_dbg(video->dev, "Got resolution[%dx%d] -> [%dx%d], status %d\n",
