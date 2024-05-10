@@ -851,6 +851,7 @@ static int npcm_video_start_frame(struct npcm_video *video)
 		return 0;
 	}
 
+	npcm_video_vcd_state_machine_reset(video);
 	regmap_read(vcd, VCD_STAT, &status);
 	ret = regmap_read_poll_timeout(vcd, VCD_STAT, val, !(val & VCD_STAT_BUSY),
 				       1000, VCD_TIMEOUT_US);
@@ -870,8 +871,6 @@ static int npcm_video_start_frame(struct npcm_video *video)
 
 	set_bit(VIDEO_CAPTURING, &video->flags);
 	mutex_unlock(&video->buffer_lock);
-
-	npcm_video_vcd_state_machine_reset(video);
 
 	regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
 			   VCD_INTE_IFOR_IE, VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
