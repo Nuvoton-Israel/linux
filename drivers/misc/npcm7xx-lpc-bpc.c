@@ -16,7 +16,6 @@
 #define DEVICE_NAME	"npcm7xx-lpc-bpc"
 
 #define NUM_BPC_CHANNELS		2
-#define DW_PAD_SIZE			3
 
 /* BIOS POST Code FIFO Registers */
 #define NPCM7XX_BPCFA2L_REG	0x2 //BIOS POST Code FIFO Address 2 LSB
@@ -127,7 +126,7 @@ static irqreturn_t npcm7xx_bpc_irq(int irq, void *arg)
 	u8 addr_index = 0;
 	u8 Data;
 	u8 padzero[3] = {0};
-	u8 last_addr_bit = 0;
+	u8 code_size = 0;
 	bool isr_flag = false;
 
 	fifo_st = ioread8(lpc_bpc->base + NPCM7XX_BPCFSTAT_REG);
@@ -136,7 +135,7 @@ static irqreturn_t npcm7xx_bpc_irq(int irq, void *arg)
 		if (!lpc_bpc->en_dwcap)
 			addr_index = fifo_st & FIFO_ADDR_DECODE;
 		else
-			last_addr_bit = fifo_st & FIFO_ADDR_DECODE;
+			code_size++;
 
 		/*Read data from FIFO to clear interrupt*/
 		Data = ioread8(lpc_bpc->base + NPCM7XX_BPCFDATA_REG);
@@ -147,14 +146,18 @@ static irqreturn_t npcm7xx_bpc_irq(int irq, void *arg)
 			pr_info("BIOS Post Codes FIFO Overflow!!!\n");
 
 		fifo_st = ioread8(lpc_bpc->base + NPCM7XX_BPCFSTAT_REG);
-		if (lpc_bpc->en_dwcap && last_addr_bit) {
+		if (lpc_bpc->en_dwcap) {
 			if ((fifo_st & FIFO_ADDR_DECODE) ||
 			    ((FIFO_DATA_VALID & fifo_st) == 0)) {
-				while (kfifo_avail(&lpc_bpc->ch[addr_index].fifo) < DW_PAD_SIZE)
+				while (kfifo_avail(&lpc_bpc->ch[addr_index].fifo) < (4 - code_size))
 					kfifo_skip(&lpc_bpc->ch[addr_index].fifo);
-				kfifo_in(&lpc_bpc->ch[addr_index].fifo,
-					 padzero, DW_PAD_SIZE);
+				if (4 - code_size > 0) {
+					kfifo_in(&lpc_bpc->ch[addr_index].fifo,
+						 padzero, 4 - code_size);
+				}
 			}
+			if (code_size == 4)
+				code_size = 0;
 		}
 		isr_flag = true;
 	}
@@ -364,7 +367,7 @@ static int npcm7xx_bpc_remove(struct platform_device *pdev)
 
 	reg_en = ioread8(lpc_bpc->base + NPCM7XX_BPCFEN_REG);
 
-	if (reg_en & FIFO_IOADDR1_ENABLE)
+	if ((reg_en & FIFO_IOADDR1_ENABLE) || (reg_en & FIFO_DWCAPTURE))
 		npcm7xx_disable_bpc(lpc_bpc, 0);
 	if (reg_en & FIFO_IOADDR2_ENABLE)
 		npcm7xx_disable_bpc(lpc_bpc, 1);
