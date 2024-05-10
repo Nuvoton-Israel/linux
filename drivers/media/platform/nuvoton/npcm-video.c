@@ -75,7 +75,9 @@ struct npcm_video_buffer {
 enum {
 	VIDEO_STREAMING,
 	VIDEO_CAPTURING,
+#if IS_ENABLED(CONFIG_VIDEO_NPCM_RES_CHANGE_INT)
 	VIDEO_RES_CHANGING,
+#endif
 	VIDEO_STOPPED,
 };
 
@@ -866,12 +868,13 @@ static int npcm_video_start_frame(struct npcm_video *video)
 
 	npcm_video_vcd_state_machine_reset(video);
 
-	if (video->hsync_mode) {
-		regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE |
-				   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE,
-				   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
-				   VCD_INTE_IFOR_IE);
-	} else {
+	regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
+			   VCD_INTE_IFOR_IE, VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
+			   VCD_INTE_IFOR_IE);
+
+#if IS_ENABLED(CONFIG_VIDEO_NPCM_RES_CHANGE_INT)
+	/* Only DE mode supports resolution change interrupt */
+	if (!video->hsync_mode) {
 		regmap_read(vcd, VCD_HOR_AC_TIM, &val);
 		regmap_update_bits(vcd, VCD_HOR_AC_LST, VCD_HOR_AC_LAST,
 				   FIELD_GET(VCD_HOR_AC_TIME, val));
@@ -880,13 +883,11 @@ static int npcm_video_start_frame(struct npcm_video *video)
 		regmap_update_bits(vcd, VCD_VER_HI_LST, VCD_VER_HI_LAST,
 				   FIELD_GET(VCD_VER_HI_TIME, val));
 
-		regmap_update_bits(vcd, VCD_INTE, VCD_INTE_DONE_IE |
-				   VCD_INTE_IFOT_IE | VCD_INTE_IFOR_IE |
-				   VCD_INTE_HAC_IE | VCD_INTE_VHT_IE,
-				   VCD_INTE_DONE_IE | VCD_INTE_IFOT_IE |
-				   VCD_INTE_IFOR_IE | VCD_INTE_HAC_IE |
+		regmap_update_bits(vcd, VCD_INTE, VCD_INTE_HAC_IE |
+				   VCD_INTE_VHT_IE, VCD_INTE_HAC_IE |
 				   VCD_INTE_VHT_IE);
 	}
+#endif
 
 	npcm_video_command(video, video->ctrl_cmd);
 
@@ -955,7 +956,9 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 			det->pixelclock = npcm_video_pclk(video);
 		}
 
+#if IS_ENABLED(CONFIG_VIDEO_NPCM_RES_CHANGE_INT)
 		clear_bit(VIDEO_RES_CHANGING, &video->flags);
+#endif
 	}
 
 	if (det->width && det->height)
@@ -1118,10 +1121,12 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 	unsigned int index, size, status, fmt;
 	dma_addr_t dma_addr;
 	void *addr;
+#if IS_ENABLED(CONFIG_VIDEO_NPCM_RES_CHANGE_INT)
 	static const struct v4l2_event ev = {
 		.type = V4L2_EVENT_SOURCE_CHANGE,
 		.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
 	};
+#endif
 
 	regmap_read(vcd, VCD_STAT, &status);
 	dev_dbg(video->dev, "VCD irq status 0x%x\n", status);
@@ -1173,6 +1178,7 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 			dev_err(video->dev, "Failed to capture next frame\n");
 	}
 
+#if IS_ENABLED(CONFIG_VIDEO_NPCM_RES_CHANGE_INT)
 	/* Resolution changed */
 	if (status & VCD_STAT_VHT_CHG || status & VCD_STAT_HAC_CHG) {
 		if (!test_bit(VIDEO_RES_CHANGING, &video->flags)) {
@@ -1182,6 +1188,7 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 			v4l2_event_queue(&video->vdev, &ev);
 		}
 	}
+#endif
 
 	if (status & VCD_STAT_IFOR || status & VCD_STAT_IFOT) {
 		dev_warn(video->dev, "VCD FIFO overrun or over thresholds\n");
