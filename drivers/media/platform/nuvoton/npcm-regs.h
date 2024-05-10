@@ -77,7 +77,7 @@
 
 #define VCD_FB_SIZE			0x500000 /* support up to 1920 x 1200 */
 #define VCD_KVM_BW_PCLK			120000000UL
-#define VCD_TIMEOUT_US			300000
+#define VCD_TIMEOUT_US			1000000
 
 /* ECE Registers */
 #define ECE_DDA_CTRL			0x0000
