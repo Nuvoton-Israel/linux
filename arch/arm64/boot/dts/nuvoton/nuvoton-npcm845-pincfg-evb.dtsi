@@ -2,7 +2,7 @@
 // Copyright (c) 2018 Nuvoton Technology
 
 / {
-	pinctrl: pinctrl@f0800260 {
+	pinctrl: pinctrl@f0010000 {
 		pin4_slew: pin4_slew {
 			pins = "GPIO4/IOX2_DI/SMB1D_SDA";
 			slew-rate = <1>;

@@ -1111,7 +1111,7 @@
 		};
 	};
 
-	pinctrl: pinctrl@f0800260 {
+	pinctrl: pinctrl@f0010000 {
 		compatible = "nuvoton,npcm845-pinctrl", "syscon", "simple-mfd";
 		ranges = <0x0 0x0 0xf0010000 0x8000>;
 		#address-cells = <1>;
