@@ -300,7 +300,6 @@
 		compatible = "jedec,spi-nor";
 		#address-cells = <1>;
 		#size-cells = <1>;
-		spi-rx-bus-width = <2>;
 		reg = <0>;
 		spi-max-frequency = <5000000>;
 		partitions@A0000000 {
