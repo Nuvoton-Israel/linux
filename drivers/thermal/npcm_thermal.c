@@ -241,18 +241,18 @@ static int npcm_configure_overheat_int(struct npcm_thermal_priv *tmps,
 				       int channel)
 {
 	/* Retrieve the critical trip point to enable the overheat interrupt */
-	const struct thermal_trip *trips = of_thermal_get_trip_points(tz);
+	const struct thermal_trip *trips = tz->trips;
 	int ctl;
 	int i;
 
 	if (!trips)
 		return -EINVAL;
 
-	for (i = 0; i < of_thermal_get_ntrips(tz); i++)
+	for (i = 0; i < tz->num_trips; i++)
 		if (trips[i].type == THERMAL_TRIP_CRITICAL)
 			break;
 
-	if (i == of_thermal_get_ntrips(tz))
+	if (i == tz->num_trips)
 		return -EINVAL;
 
 	tmps->current_channel = channel;
@@ -353,7 +353,7 @@ static int npcm_thermal_probe(struct platform_device *pdev)
 		if (irq > 0 && !priv->overheat_sensor)
 			npcm_configure_overheat_int(priv, tz, sensor->id);
 
-		if (devm_thermal_add_hwmon_sysfs(tz))
+		if (devm_thermal_add_hwmon_sysfs(dev, tz))
 			dev_warn(&pdev->dev, "failed to add hwmon sysfs attributes\n");
 
 	}
