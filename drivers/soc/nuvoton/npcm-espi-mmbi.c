@@ -35,6 +35,10 @@
 #define   SHM_ACC_IE	BIT(5)
 #define SHM_WIN_SIZE	0x7
 #define SHM_WIN_BASE1	0x20
+#define SHM_HOFS_STS	0x48
+#define   HOFS1W	BIT(1)
+#define SHM_HOFS_CTL	0x49
+#define   HOFS1W_IE	BIT(1)
 
 /* 20 Bits for H2B/B2H Write/Read Pointers */
 #define H2B_WRITE_POINTER_MASK GENMASK(19, 0)
@@ -49,7 +53,6 @@
 #define GET_B2H_READ_POINTER(x) ((x) & B2H_READ_POINTER_MASK)
 #define GET_HOST_RESET_REQ_BIT(x) ((x) & HOST_RESET_REQUEST_BIT)
 #define GET_HOST_READY_BIT(x) ((x) & HOST_READY_BIT)
-#define HOST_READ_SCI_STATUS_BIT(x) ((x) & ESPI_SCI_STATUS_BIT)
 
 #define MMBI_CRC8_POLYNOMIAL 0x07
 DECLARE_CRC8_TABLE(mmbi_crc8_table);
@@ -147,12 +150,11 @@ struct npcm_espi_mmbi {
 	dma_addr_t mmbi_phys_addr;
 	resource_size_t mmbi_size;
 	u8 __iomem *shm_vaddr;
-	struct delayed_work polling_work;
+	struct delayed_work work;
 	struct workqueue_struct *wq;
 	struct mutex lock;
 
 	struct npcm_mmbi_channel chan[MAX_NO_OF_SUPPORTED_CHANNELS];
-	unsigned long poll_timeout;
 	u32 poll_interval;
 };
 
@@ -186,47 +188,38 @@ struct npcm_mmbi_get_config {
 	_IOWR(__NPCM_MMBI_CTRL_IOCTL_MAGIC, 0x02,	\
 	      struct npcm_mmbi_get_config)
 
-static inline void npcm_mmbi_enable_interrupt(struct npcm_espi_mmbi *priv,
-					      bool enable)
+static void npcm_mmbi_enable_interrupt(struct npcm_espi_mmbi *priv,
+				       bool enable)
 {
+	u8 offset = SHM_HOFS_CTL;
 	u8 val;
 
-	val = readb(priv->regs + SHM_SMC_CTL);
+	val = readb(priv->regs + offset);
 	if (enable)
-		val |= SHM_ACC_IE;
+		val |= HOFS1W_IE;
 	else
-		val &= ~SHM_ACC_IE;
-	writeb(val, priv->regs + SHM_SMC_CTL);
+		val &= ~HOFS1W_IE;
+	writeb(val, priv->regs + offset);
 }
 
 static void raise_sci_interrupt(struct npcm_mmbi_channel *channel)
 {
-	struct regmap *espi_regmap = channel->priv->pmap;
-	int retry;
+	struct npcm_espi_mmbi *priv = channel->priv;
+	struct regmap *espi_regmap = priv->pmap;
 	u32 val;
+	int ret;
 
-	dev_dbg(channel->priv->dev, "Raising SCI interrupt...\n");
+	dev_dbg(priv->dev, "Raising SCI interrupt...\n");
 	regmap_set_bits(espi_regmap, NPCM_ESPI_VWEVSM2, WIRE(0));
 	regmap_clear_bits(espi_regmap, NPCM_ESPI_VWEVSM2, WIRE(0));
 
-	retry = 30;
-	while (retry) {
-		if (regmap_read(channel->priv->pmap, NPCM_ESPI_VWEVSM2,
-				&val)) {
-			dev_err(channel->priv->dev, "Unable to read VWEVSM2\n");
-			break;
-		}
-
-		if (HOST_READ_SCI_STATUS_BIT(val) == 0)
-			break;
-
-		retry--;
-		udelay(1);
-	}
-	dev_dbg(channel->priv->dev,
-		"Host SCI handler not invoked(VWEVSM2: 0x%0x), so retry(%d) after 1us...\n",
-		val, retry);
+	ret = regmap_read_poll_timeout_atomic(priv->pmap, NPCM_ESPI_VWEVSM2,
+					      val, !(val & ESPI_SCI_STATUS_BIT),
+					      1, 30);
+	/* Clear SCI interrupt */
 	regmap_set_bits(espi_regmap, NPCM_ESPI_VWEVSM2, WIRE(0));
+	if (ret)
+		dev_dbg(priv->dev, "Host SCI handler not invoked after 30us\n");
 }
 
 static int read_host_rwp_val(struct npcm_mmbi_channel *channel, u32 offset,
@@ -1089,22 +1082,17 @@ err_destroy_channel:
 	return -ENOMEM;
 }
 
-static void npcm_mmbi_poll_work(struct work_struct *work)
+static void npcm_mmbi_check_h2b(struct work_struct *work)
 {
 	struct npcm_espi_mmbi *priv = container_of(to_delayed_work(work),
-		struct npcm_espi_mmbi, polling_work);
+		struct npcm_espi_mmbi, work);
 	struct npcm_mmbi_channel *channel = &priv->chan[0];
 	u32 h2b_wp, h_rwp0;
-	bool h2b_changed = false;
 
 	mutex_lock(&priv->lock);
-	/* Clear Access status */
-	writeb(SHM_ACC, priv->regs + SHM_SMC_STS);
 
-	if (check_host_reset_request(channel)) {
-		h2b_changed = true;
+	if (check_host_reset_request(channel))
 		goto out;
-	}
 
 	if (read_host_rwp_val(channel, 0, &h_rwp0)) {
 		dev_dbg(channel->priv->dev, "Failed to read Host RWP0\n");
@@ -1115,39 +1103,28 @@ static void npcm_mmbi_poll_work(struct work_struct *work)
 		dev_dbg(priv->dev, "current h2b_wp 0x%x, new h2b_wp 0x%x\n",
 			channel->cur_h2b_wp, h2b_wp);
 		channel->cur_h2b_wp = h2b_wp;
-		h2b_changed = true;
 		wake_up_device(channel);
 	}
 out:
 	mutex_unlock(&priv->lock);
-	if (!priv->poll_timeout)
-		goto poll_again;
-
-	if (h2b_changed || time_after(jiffies, priv->poll_timeout)) {
-		dev_dbg(priv->dev, "End of polling work, h2b_changed %d\n", h2b_changed);
+	if (priv->poll_interval)
+		queue_delayed_work(priv->wq, &priv->work,
+				   msecs_to_jiffies(priv->poll_interval));
+	else
 		npcm_mmbi_enable_interrupt(priv, true);
-		return;
-	}
-
-poll_again:
-	queue_delayed_work(priv->wq, &priv->polling_work,
-			   msecs_to_jiffies(priv->poll_interval));
 }
 
 static irqreturn_t npcm_espi_mmbi_irq(int irq, void *arg)
 {
 	struct npcm_espi_mmbi *priv = arg;
-	u8 status;
 
+	dev_dbg(priv->dev, "MMBI IRQ Status: 0x%02x\n",
+		readb(priv->regs + SHM_HOFS_STS));
 	npcm_mmbi_enable_interrupt(priv, false);
-	/* Clear Access status */
-	status = readb(priv->regs + SHM_SMC_STS);
-	writeb(SHM_ACC, priv->regs + SHM_SMC_STS);
+	/* Clear interrupt status */
+	writeb(HOFS1W, priv->regs + SHM_HOFS_STS);
 
-	dev_dbg(priv->dev, "MMBI IRQ Status: 0x%x\n", status);
-	priv->poll_timeout = jiffies + msecs_to_jiffies(POLLING_TIMEOUT_MS);
-	queue_delayed_work(priv->wq, &priv->polling_work,
-			   msecs_to_jiffies(priv->poll_interval));
+	queue_delayed_work(priv->wq, &priv->work, 0);
 
 	return IRQ_HANDLED;
 }
@@ -1216,6 +1193,10 @@ static int npcm_espi_mmbi_probe(struct platform_device *pdev)
 		of_node_put(node);
 		if (!rc) {
 			priv->mmbi_size = resource_size(&resm);
+			if (priv->mmbi_size > NPCM_MAX_WIN_SIZE) {
+				dev_err(priv->dev, "Too large memory region\n");
+				return -EINVAL;
+			}
 			priv->mmbi_phys_addr = resm.start;
 			priv->shm_vaddr = devm_ioremap_resource_wc(priv->dev, &resm);
 			if (IS_ERR(priv->shm_vaddr)) {
@@ -1250,13 +1231,8 @@ static int npcm_espi_mmbi_probe(struct platform_device *pdev)
 	}
 
 	mutex_init(&priv->lock);
-	INIT_DELAYED_WORK(&priv->polling_work, npcm_mmbi_poll_work);
+	INIT_DELAYED_WORK(&priv->work, npcm_mmbi_check_h2b);
 
-	if (!of_property_read_u32(priv->dev->of_node, "poll-interval-ms", &val))
-		priv->poll_interval = val > POLLING_TIMEOUT_MS ? POLLING_TIMEOUT_MS : val;
-	else
-		priv->poll_interval = POLLING_INTERVAL_MS;
-	dev_dbg(priv->dev, "poll_interval=%dms\n", priv->poll_interval);
 	if (of_property_read_bool(priv->dev->of_node, "use-interrupt")) {
 		dev_info(priv->dev, "use interrupt\n");
 		/* Enable IRQ */
@@ -1274,9 +1250,14 @@ static int npcm_espi_mmbi_probe(struct platform_device *pdev)
 		}
 		npcm_mmbi_enable_interrupt(priv, true);
 	} else {
-		dev_info(priv->dev, "use polling, interval=%u ms\n", priv->poll_interval);
-		priv->poll_timeout = 0;
-		queue_delayed_work(priv->wq, &priv->polling_work,
+		if (!of_property_read_u32(priv->dev->of_node, "poll-interval-ms", &val))
+			priv->poll_interval = val > POLLING_TIMEOUT_MS ?
+				POLLING_TIMEOUT_MS : val;
+		else
+			priv->poll_interval = POLLING_INTERVAL_MS;
+		dev_info(priv->dev, "use polling, interval=%u ms\n",
+			 priv->poll_interval);
+		queue_delayed_work(priv->wq, &priv->work,
 				   msecs_to_jiffies(priv->poll_interval));
 	}
 	dev_info(priv->dev, "MMBI: npcm MMBI driver loaded successfully\n");
