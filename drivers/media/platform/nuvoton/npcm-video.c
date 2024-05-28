@@ -1033,7 +1033,7 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 			video->v4l2_input_status);
 	} else {
 		video->v4l2_input_status = V4L2_IN_ST_NO_SIGNAL;
-		dev_err(video->dev, "Got invalid resolution[%dx%d]\n", det->width,
+		dev_dbg(video->dev, "Got invalid resolution[%dx%d]\n", det->width,
 			det->height);
 	}
 }
@@ -1556,7 +1556,7 @@ static void npcm_video_irq_timeout_work(struct work_struct *w)
 							    msecs_to_jiffies(1000));
 
 	if (timeout <= 0 && test_bit(VIDEO_STREAMING, &video->flags)) {
-		dev_warn(video->dev, "VCD IRQ timeout, restart capture command\n");
+		dev_dbg(video->dev, "VCD IRQ timeout, restart capture command\n");
 		npcm_video_vcd_state_machine_reset(video);
 		npcm_video_command(video, video->ctrl_cmd);
 	}
