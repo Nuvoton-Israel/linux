@@ -693,10 +693,37 @@ static int npcm_video_capres(struct npcm_video *video, unsigned int hor_res,
 	return 0;
 }
 
+static unsigned int npcm_video_pclk(struct npcm_video *video)
+{
+	struct regmap *gfxi = video->gfx_regmap;
+	unsigned int tmp, pllfbdiv, pllinotdiv, gpllfbdiv;
+	unsigned int gpllfbdv109, gpllfbdv8, gpllindiv;
+	unsigned int gpllst_pllotdiv1, gpllst_pllotdiv2;
+
+	regmap_read(gfxi, GPLLST, &tmp);
+	gpllfbdv109 = FIELD_GET(GPLLST_GPLLFBDV109, tmp);
+	gpllst_pllotdiv1 = FIELD_GET(GPLLST_PLLOTDIV1, tmp);
+	gpllst_pllotdiv2 = FIELD_GET(GPLLST_PLLOTDIV2, tmp);
+
+	regmap_read(gfxi, GPLLINDIV, &tmp);
+	gpllfbdv8 = FIELD_GET(GPLLINDIV_GPLLFBDV8, tmp);
+	gpllindiv = FIELD_GET(GPLLINDIV_MASK, tmp);
+
+	regmap_read(gfxi, GPLLFBDIV, &tmp);
+	gpllfbdiv = FIELD_GET(GPLLFBDIV_MASK, tmp);
+
+	pllfbdiv = (512 * gpllfbdv109 + 256 * gpllfbdv8 + gpllfbdiv);
+	pllinotdiv = (gpllindiv * gpllst_pllotdiv1 * gpllst_pllotdiv2);
+	if (pllfbdiv == 0 || pllinotdiv == 0)
+		return 0;
+
+	return ((pllfbdiv * 25000) / pllinotdiv) * 1000;
+}
+
 static void npcm_video_adjust_dvodel(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
-	unsigned int hact, hdelay, vdelay, val;
+	unsigned int hact, hdelay, vdelay, val, detWidth, detHeight, detPixelclock;
 
 	if (!video->hsync_mode)
 		return;
@@ -704,14 +731,36 @@ static void npcm_video_adjust_dvodel(struct npcm_video *video)
 	regmap_read(vcd, VCD_HOR_AC_TIM, &val);
 	hact = FIELD_GET(VCD_HOR_AC_TIME, val);
 
-	if (hact != 0x3fff) {
-		hdelay = npcm_video_hbp(video) + hact + video->hdelay_add;
-		vdelay = npcm_video_vbp(video) + video->vdelay_add;
+	if (hact == 0x3fff)
+		return;
 
-		regmap_write(vcd, VCD_DVO_DEL,
-			     FIELD_PREP(VCD_DVO_DEL_HSYNC_DEL, hdelay) |
-			     FIELD_PREP(VCD_DVO_DEL_VSYNC_DEL, vdelay));
+	/* Get current resolution */
+	detWidth = npcm_video_hres(video);
+	detHeight = npcm_video_vres(video);
+	detPixelclock = npcm_video_pclk(video);
+
+	if (hact < detWidth)
+		hdelay = npcm_video_hbp(video) + video->hdelay_add + hact + 0x2;
+	else
+		hdelay = npcm_video_hbp(video) + video->hdelay_add + 0x2;
+
+	if (detWidth < 1440) {
+		if ((hact == 0x88) && (detWidth == 1024) && (detHeight == 768) &&
+		    (detPixelclock == 65000)) {
+			vdelay = npcm_video_vbp(video) + video->vdelay_add + 0x6;
+		} else if ((detWidth == 720) && (detHeight == 400)) {
+			vdelay = npcm_video_vbp(video) + video->vdelay_add + 0xa;
+			hdelay = npcm_video_hbp(video) + video->hdelay_add + 0x2e;
+		} else {
+			vdelay = npcm_video_vbp(video) + video->vdelay_add;
+		}
+	} else {
+		vdelay = npcm_video_vbp(video) + video->vdelay_add + 0x3;
 	}
+
+	regmap_write(vcd, VCD_DVO_DEL,
+		     FIELD_PREP(VCD_DVO_DEL_HSYNC_DEL, hdelay) |
+		     FIELD_PREP(VCD_DVO_DEL_VSYNC_DEL, vdelay));
 }
 
 static void npcm_video_vcd_ip_reset(struct npcm_video *video)
@@ -763,33 +812,6 @@ static void npcm_video_kvm_bw(struct npcm_video *video, bool set_bw)
 				   VCD_MODE_KVM_BW_SET);
 	else
 		regmap_update_bits(vcd, VCD_MODE, VCD_MODE_KVM_BW_SET, 0);
-}
-
-static unsigned int npcm_video_pclk(struct npcm_video *video)
-{
-	struct regmap *gfxi = video->gfx_regmap;
-	unsigned int tmp, pllfbdiv, pllinotdiv, gpllfbdiv;
-	unsigned int gpllfbdv109, gpllfbdv8, gpllindiv;
-	unsigned int gpllst_pllotdiv1, gpllst_pllotdiv2;
-
-	regmap_read(gfxi, GPLLST, &tmp);
-	gpllfbdv109 = FIELD_GET(GPLLST_GPLLFBDV109, tmp);
-	gpllst_pllotdiv1 = FIELD_GET(GPLLST_PLLOTDIV1, tmp);
-	gpllst_pllotdiv2 = FIELD_GET(GPLLST_PLLOTDIV2, tmp);
-
-	regmap_read(gfxi, GPLLINDIV, &tmp);
-	gpllfbdv8 = FIELD_GET(GPLLINDIV_GPLLFBDV8, tmp);
-	gpllindiv = FIELD_GET(GPLLINDIV_MASK, tmp);
-
-	regmap_read(gfxi, GPLLFBDIV, &tmp);
-	gpllfbdiv = FIELD_GET(GPLLFBDIV_MASK, tmp);
-
-	pllfbdiv = (512 * gpllfbdv109 + 256 * gpllfbdv8 + gpllfbdiv);
-	pllinotdiv = (gpllindiv * gpllst_pllotdiv1 * gpllst_pllotdiv2);
-	if (pllfbdiv == 0 || pllinotdiv == 0)
-		return 0;
-
-	return ((pllfbdiv * 25000) / pllinotdiv) * 1000;
 }
 
 static unsigned int npcm_video_get_bpp(struct npcm_video *video)
