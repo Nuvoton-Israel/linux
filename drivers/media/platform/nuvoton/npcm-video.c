@@ -145,6 +145,8 @@ struct npcm_video {
 	unsigned int vdelay_add; /* compensation for VSYNC delay */
 	struct completion irq_cmp;
 	struct work_struct irq_timeout_work;
+	unsigned int full_capture_cnt;
+	bool discard_frame;
 };
 
 #define to_npcm_video(x) container_of((x), struct npcm_video, v4l2_dev)
@@ -859,6 +861,11 @@ static void npcm_video_command(struct npcm_video *video, unsigned int value)
 	struct regmap *vcd = video->vcd_regmap;
 	unsigned int cmd;
 
+	if (video->full_capture_cnt) {
+		value = VCD_CMD_OPERATION_CAPTURE;
+		video->full_capture_cnt--;
+	}
+
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 	regmap_read(vcd, VCD_CMD, &cmd);
 	cmd |= FIELD_PREP(VCD_CMD_OPERATION, value);
@@ -1232,6 +1239,12 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 	if (status & VCD_STAT_DONE) {
 		complete(&video->irq_cmp);
 		regmap_write(vcd, VCD_INTE, 0);
+
+		if(video->discard_frame) {
+			video->discard_frame = false;
+			goto capture_next;
+		}
+
 		mutex_lock(&video->buffer_lock);
 		clear_bit(VIDEO_CAPTURING, &video->flags);
 		buf = list_first_entry_or_null(&video->buffers,
@@ -1267,6 +1280,7 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 		list_del(&buf->link);
 		mutex_unlock(&video->buffer_lock);
 
+capture_next:
 		if (test_bit(VIDEO_STREAMING, &video->flags)) {
 			mutex_lock(&video->capture_lock);
 			if (npcm_video_start_frame(video))
@@ -1289,8 +1303,14 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 #endif
 
 	if (status & VCD_STAT_IFOR || status & VCD_STAT_IFOT) {
-		dev_warn(video->dev, "VCD FIFO overrun or over thresholds\n");
+		dev_dbg(video->dev, "VCD FIFO overrun or over thresholds\n");
 		if (test_bit(VIDEO_STREAMING, &video->flags)) {
+			/*
+			 * Capture full frame 3 times and discard the first one
+			 * to avoid pixelated and shift issue.
+			 */
+			video->full_capture_cnt = 3;
+			video->discard_frame = true;
 			mutex_lock(&video->capture_lock);
 			if (npcm_video_start_frame(video))
 				dev_err(video->dev, "Failed to recover from FIFO overrun\n");
