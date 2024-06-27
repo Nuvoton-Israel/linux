@@ -921,6 +921,12 @@ static int npcm_video_start_frame(struct npcm_video *video)
 	unsigned int val, status;
 	int ret;
 
+	if (test_bit(VIDEO_STOPPED, &video->flags) ||
+	    !test_bit(VIDEO_STREAMING, &video->flags)) {
+		dev_dbg(video->dev, "Video stopped or not streaming\n");
+		return 0;
+	}
+
 	if (video->v4l2_input_status) {
 		dev_dbg(video->dev, "No video signal; skip capture frame\n");
 		return 0;
@@ -1137,13 +1143,13 @@ static void npcm_video_stop(struct npcm_video *video)
 {
 	struct regmap *vcd = video->vcd_regmap;
 
-	set_bit(VIDEO_STOPPED, &video->flags);
+	mutex_lock(&video->capture_lock);
 	cancel_work_sync(&video->irq_timeout_work);
 
 	regmap_write(vcd, VCD_INTE, 0);
 	regmap_write(vcd, VCD_MODE, 0);
 	regmap_write(vcd, VCD_RCHG, 0);
-	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
+	set_bit(VIDEO_STOPPED, &video->flags);
 
 	if (video->src.size)
 		npcm_video_free_fb(video, &video->src);
@@ -1158,6 +1164,7 @@ static void npcm_video_stop(struct npcm_video *video)
 		dev_dbg(video->dev, "ECE close: client %d\n",
 			atomic_read(&video->ece.clients));
 	}
+	mutex_unlock(&video->capture_lock);
 }
 
 static unsigned int npcm_video_raw(struct npcm_video *video, int index, void *addr)
@@ -1231,10 +1238,6 @@ static irqreturn_t npcm_video_irq(int irq, void *arg)
 	dev_dbg(video->dev, "VCD irq status 0x%x\n", status);
 
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
-
-	if (test_bit(VIDEO_STOPPED, &video->flags) ||
-	    !test_bit(VIDEO_STREAMING, &video->flags))
-		return IRQ_NONE;
 
 	if (status & VCD_STAT_DONE) {
 		complete(&video->irq_cmp);
@@ -1689,6 +1692,7 @@ static int npcm_video_start_streaming(struct vb2_queue *q, unsigned int count)
 	video->sequence = 0;
 
 	mutex_lock(&video->capture_lock);
+	set_bit(VIDEO_STREAMING, &video->flags);
 	rc = npcm_video_start_frame(video);
 	mutex_unlock(&video->capture_lock);
 
@@ -1697,7 +1701,6 @@ static int npcm_video_start_streaming(struct vb2_queue *q, unsigned int count)
 		return rc;
 	}
 
-	set_bit(VIDEO_STREAMING, &video->flags);
 	return 0;
 }
 
@@ -1706,13 +1709,16 @@ static void npcm_video_stop_streaming(struct vb2_queue *q)
 	struct npcm_video *video = vb2_get_drv_priv(q);
 	struct regmap *vcd = video->vcd_regmap;
 
-	clear_bit(VIDEO_STREAMING, &video->flags);
+	mutex_lock(&video->capture_lock);
+
 	regmap_write(vcd, VCD_INTE, 0);
-	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 	npcm_video_gfx_reset(video);
 	npcm_video_bufs_done(video, VB2_BUF_STATE_ERROR);
 	video->ctrl_cmd = VCD_CMD_OPERATION_CAPTURE;
 	v4l2_ctrl_s_ctrl(video->rect_cnt_ctrl, 0);
+	clear_bit(VIDEO_STREAMING, &video->flags);
+
+	mutex_unlock(&video->capture_lock);
 }
 
 static void npcm_video_buf_queue(struct vb2_buffer *vb)
