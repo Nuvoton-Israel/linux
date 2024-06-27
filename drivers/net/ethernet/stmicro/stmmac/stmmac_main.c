@@ -52,6 +52,7 @@
 #include "dwmac1000.h"
 #include "dwxgmac2.h"
 #include "hwif.h"
+#include <net/ncsi.h>
 
 /* As long as the interface is active, we keep the timestamping counter enabled
  * with fine resolution and binary rollover. This avoid non-monotonic behavior
@@ -1119,6 +1120,9 @@ static int stmmac_init_phy(struct net_device *dev)
 	struct fwnode_handle *fwnode;
 	struct ethtool_keee eee;
 	int ret;
+
+	if (priv->plat->use_ncsi)
+		return 0;
 
 	if (!phylink_expects_phy(priv->phylink))
 		return 0;
@@ -3061,10 +3065,12 @@ static int stmmac_init_dma_engine(struct stmmac_priv *priv)
 	if (priv->extend_desc && (priv->mode == STMMAC_RING_MODE))
 		priv->plat->dma_cfg->atds = 1;
 
-	ret = stmmac_reset(priv, priv->ioaddr);
-	if (ret) {
-		netdev_err(priv->dev, "Failed to reset the dma\n");
-		return ret;
+	if (!priv->plat->use_ncsi) {
+		ret = stmmac_reset(priv, priv->ioaddr);
+		if (ret) {
+			netdev_err(priv->dev, "Failed to reset the dma\n");
+			return ret;
+		}
 	}
 
 	/* DMA Configuration */
@@ -3425,7 +3431,7 @@ static int stmmac_hw_setup(struct net_device *dev)
 	int ret;
 
 	/* Make sure RX clock is enabled */
-	if (priv->hw->phylink_pcs)
+	if (!priv->plat->use_ncsi && priv->hw->phylink_pcs)
 		phylink_pcs_pre_init(priv->phylink, priv->hw->phylink_pcs);
 
 	/* Note that clk_rx_i must be running for reset to complete. This
@@ -3434,12 +3440,14 @@ static int stmmac_hw_setup(struct net_device *dev)
 	 * Block the receive clock stop for LPI mode at the PHY in case
 	 * the link is established with EEE mode active.
 	 */
-	phylink_rx_clk_stop_block(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_block(priv->phylink);
 
 	/* DMA initialization and SW reset */
 	ret = stmmac_init_dma_engine(priv);
 	if (ret < 0) {
-		phylink_rx_clk_stop_unblock(priv->phylink);
+		if (!priv->plat->use_ncsi)
+			phylink_rx_clk_stop_unblock(priv->phylink);
 		netdev_err(priv->dev, "%s: DMA engine initialization failed\n",
 			   __func__);
 		return ret;
@@ -3447,7 +3455,8 @@ static int stmmac_hw_setup(struct net_device *dev)
 
 	/* Copy the MAC addr into the HW  */
 	stmmac_set_umac_addr(priv, priv->hw, dev->dev_addr, 0);
-	phylink_rx_clk_stop_unblock(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_unblock(priv->phylink);
 
 	/* PS and related bits will be programmed according to the speed */
 	if (priv->hw->pcs) {
@@ -3542,11 +3551,22 @@ static int stmmac_hw_setup(struct net_device *dev)
 	/* Start the ball rolling... */
 	stmmac_start_all_dma(priv);
 
-	phylink_rx_clk_stop_block(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_block(priv->phylink);
 	stmmac_set_hw_vlan_mode(priv, priv->hw);
-	phylink_rx_clk_stop_unblock(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_unblock(priv->phylink);
 
 	return 0;
+}
+
+static void stmmac_ncsi_handler(struct ncsi_dev *nd)
+{
+	if (unlikely(nd->state != ncsi_dev_state_functional))
+		return;
+
+	netdev_info(nd->dev, "NCSI interface %s\n",
+		    nd->link_up ? "up" : "down");
 }
 
 static void stmmac_free_irq(struct net_device *dev,
@@ -3933,9 +3953,22 @@ static int __stmmac_open(struct net_device *dev,
 
 	stmmac_init_coalesce(priv);
 
-	phylink_start(priv->phylink);
-	/* We may have called phylink_speed_down before */
-	phylink_speed_up(priv->phylink);
+	if (priv->plat->use_ncsi) {
+		u32 ctrl;
+		stmmac_mac_flow_ctrl(priv, DUPLEX_FULL, FLOW_AUTO);
+		ctrl = readl(priv->ioaddr + MAC_CTRL_REG);
+		ctrl &= ~priv->hw->link.speed_mask;
+		ctrl |= priv->hw->link.speed100;
+		ctrl |= priv->hw->link.duplex;
+		writel(ctrl, priv->ioaddr + MAC_CTRL_REG);
+
+		/* If using NC-SI subsystem, set our carrier on and start the stack */
+		netif_carrier_on(dev);
+	} else {
+		phylink_start(priv->phylink);
+		/* We may have called phylink_speed_down before */
+		phylink_speed_up(priv->phylink);
+	}
 
 	stmmac_vlan_restore(priv);
 
@@ -3947,10 +3980,21 @@ static int __stmmac_open(struct net_device *dev,
 	netif_tx_start_all_queues(priv->dev);
 	stmmac_enable_all_dma_irq(priv);
 
-	return 0;
+	/* Start the NCSI device */
+	if (priv->plat->use_ncsi) {
+		ret = ncsi_start_dev(priv->ncsidev);
+		if (ret) {
+			netdev_err(priv->dev, "ERROR: start the ncsi device(%d)\n",ret);
+			goto ncsi_error;
+		}
+	}
 
+	return 0;
+ncsi_error:
+	stmmac_disable_all_queues(priv);
 irq_error:
-	phylink_stop(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_stop(priv->phylink);
 
 	for (chan = 0; chan < priv->plat->tx_queues_to_use; chan++)
 		hrtimer_cancel(&priv->dma_conf.tx_queue[chan].txtimer);
@@ -3991,7 +4035,8 @@ static int stmmac_open(struct net_device *dev)
 	return ret;
 
 err_disconnect_phy:
-	phylink_disconnect_phy(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_disconnect_phy(priv->phylink);
 err_runtime_pm:
 	pm_runtime_put(priv->device);
 err_dma_resources:
@@ -4005,15 +4050,19 @@ static void __stmmac_release(struct net_device *dev)
 	struct stmmac_priv *priv = netdev_priv(dev);
 	u32 chan;
 
-	/* If the PHY or MAC has WoL enabled, then the PHY will not be
-	 * suspended when phylink_stop() is called below. Set the PHY
-	 * to its slowest speed to save power.
-	 */
-	if (device_may_wakeup(priv->device))
-		phylink_speed_down(priv->phylink, false);
+	if (priv->plat->use_ncsi) {
+		ncsi_stop_dev(priv->ncsidev);
+	} else {
+		/* If the PHY or MAC has WoL enabled, then the PHY will not be
+		* suspended when phylink_stop() is called below. Set the PHY
+		* to its slowest speed to save power.
+		*/
+		if (device_may_wakeup(priv->device))
+			phylink_speed_down(priv->phylink, false);
 
-	/* Stop and disconnect the PHY */
-	phylink_stop(priv->phylink);
+		/* Stop and disconnect the PHY */
+		phylink_stop(priv->phylink);
+	}
 
 	stmmac_disable_all_queues(priv);
 
@@ -4053,9 +4102,9 @@ static int stmmac_release(struct net_device *dev)
 
 	__stmmac_release(dev);
 
-	phylink_disconnect_phy(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_disconnect_phy(priv->phylink);
 	pm_runtime_put(priv->device);
-
 	return 0;
 }
 
@@ -5961,9 +6010,11 @@ static int stmmac_set_features(struct net_device *netdev,
 	else
 		priv->hw->hw_vlan_en = false;
 
-	phylink_rx_clk_stop_block(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_block(priv->phylink);
 	stmmac_set_hw_vlan_mode(priv, priv->hw);
-	phylink_rx_clk_stop_unblock(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_unblock(priv->phylink);
 
 	return 0;
 }
@@ -6138,7 +6189,8 @@ static int stmmac_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	case SIOCGMIIPHY:
 	case SIOCGMIIREG:
 	case SIOCSMIIREG:
-		ret = phylink_mii_ioctl(priv->phylink, rq, cmd);
+		if (!priv->plat->use_ncsi)
+			ret = phylink_mii_ioctl(priv->phylink, rq, cmd);
 		break;
 	default:
 		break;
@@ -6232,9 +6284,11 @@ static int stmmac_set_mac_address(struct net_device *ndev, void *addr)
 	if (ret)
 		goto set_mac_error;
 
-	phylink_rx_clk_stop_block(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_block(priv->phylink);
 	stmmac_set_umac_addr(priv, priv->hw, ndev->dev_addr, 0);
-	phylink_rx_clk_stop_unblock(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_unblock(priv->phylink);
 
 set_mac_error:
 	pm_runtime_put(priv->device);
@@ -6603,6 +6657,9 @@ static int stmmac_vlan_rx_add_vid(struct net_device *ndev, __be16 proto, u16 vid
 	bool is_double = false;
 	int ret;
 
+	if (priv->plat->use_ncsi)
+		return ncsi_vlan_rx_add_vid(ndev, proto, vid);
+
 	ret = pm_runtime_resume_and_get(priv->device);
 	if (ret < 0)
 		return ret;
@@ -6644,6 +6701,9 @@ static int stmmac_vlan_rx_kill_vid(struct net_device *ndev, __be16 proto, u16 vi
 	unsigned int num_double_vlans;
 	bool is_double = false;
 	int ret;
+
+	if (priv->plat->use_ncsi)
+		return ncsi_vlan_rx_kill_vid(ndev, proto, vid);
 
 	ret = pm_runtime_resume_and_get(priv->device);
 	if (ret < 0)
@@ -7444,7 +7504,9 @@ int stmmac_dvr_probe(struct device *device,
 	if (!priv->xstats.pcpu_stats)
 		return -ENOMEM;
 
-	stmmac_set_ethtool_ops(ndev);
+	if (!plat_dat->use_ncsi)
+		stmmac_set_ethtool_ops(ndev);
+
 	priv->pause_time = pause;
 	priv->plat = plat_dat;
 	priv->ioaddr = res->addr;
@@ -7558,6 +7620,9 @@ int stmmac_dvr_probe(struct device *device,
 	 * host DMA width for allocation and the device DMA width for
 	 * register handling.
 	 */
+	if (priv->plat->use_ncsi)
+		ndev->hw_features |= NETIF_F_HW_VLAN_CTAG_FILTER;
+
 	if (priv->plat->host_dma_width)
 		priv->dma_cap.host_dma_width = priv->plat->host_dma_width;
 	else
@@ -7653,22 +7718,36 @@ int stmmac_dvr_probe(struct device *device,
 	if (!pm_runtime_enabled(device))
 		pm_runtime_enable(device);
 
-	ret = stmmac_mdio_register(ndev);
-	if (ret < 0) {
-		dev_err_probe(priv->device, ret,
-			      "MDIO bus (id: %d) registration failed\n",
-			      priv->plat->bus_id);
-		goto error_mdio_register;
-	}
+	if (!priv->plat->use_ncsi) {
+		ret = stmmac_mdio_register(ndev);
+		if (ret < 0) {
+			dev_err_probe(priv->device, ret,
+					"MDIO bus (id: %d) registration failed\n",
+					priv->plat->bus_id);
+			goto error_mdio_register;
+		}
 
-	ret = stmmac_pcs_setup(ndev);
-	if (ret)
-		goto error_pcs_setup;
+		ret = stmmac_pcs_setup(ndev);
+		if (ret)
+			goto error_pcs_setup;
 
-	ret = stmmac_phy_setup(priv);
-	if (ret) {
-		netdev_err(ndev, "failed to setup phy (%d)\n", ret);
-		goto error_phy_setup;
+		ret = stmmac_phy_setup(priv);
+		if (ret) {
+			netdev_err(ndev, "failed to setup phy (%d)\n", ret);
+			goto error_phy_setup;
+		}
+	} else {
+		if (!IS_ENABLED(CONFIG_NET_NCSI)) {
+			netdev_err(priv->dev, "CONFIG_NET_NCSI not enabled\n");
+			goto error_phy_setup;
+		}
+		dev_info(priv->device, "register NCSI dev\n");
+		priv->ncsidev = ncsi_register_dev(priv->dev,
+						   stmmac_ncsi_handler);
+		if (!priv->ncsidev)
+			goto error_phy_setup;
+
+		dev_info(priv->device, "Using NCSI interface\n");
 	}
 
 	ret = register_netdev(ndev);
@@ -7693,9 +7772,11 @@ int stmmac_dvr_probe(struct device *device,
 	return ret;
 
 error_netdev_register:
-	phylink_destroy(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_destroy(priv->phylink);
 error_phy_setup:
-	stmmac_pcs_clean(ndev);
+	if (!priv->plat->use_ncsi)
+		stmmac_pcs_clean(ndev);
 error_pcs_setup:
 	stmmac_mdio_unregister(ndev);
 error_mdio_register:
@@ -7729,13 +7810,18 @@ void stmmac_dvr_remove(struct device *dev)
 #ifdef CONFIG_DEBUG_FS
 	stmmac_exit_fs(ndev);
 #endif
-	phylink_destroy(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_destroy(priv->phylink);
 	if (priv->plat->stmmac_rst)
 		reset_control_assert(priv->plat->stmmac_rst);
 	reset_control_assert(priv->plat->stmmac_ahb_rst);
 
-	stmmac_pcs_clean(ndev);
-	stmmac_mdio_unregister(ndev);
+	if (!priv->plat->use_ncsi) {
+		stmmac_pcs_clean(ndev);
+		stmmac_mdio_unregister(ndev);
+	} else {
+		ncsi_unregister_dev(priv->ncsidev);
+	}
 
 	destroy_workqueue(priv->wq);
 	mutex_destroy(&priv->lock);
@@ -7793,12 +7879,14 @@ int stmmac_suspend(struct device *dev)
 
 	mutex_unlock(&priv->lock);
 
-	rtnl_lock();
-	if (stmmac_wol_enabled_phy(priv))
-		phylink_speed_down(priv->phylink, false);
+	if (!priv->plat->use_ncsi) {
+		rtnl_lock();
+		if (stmmac_wol_enabled_phy(priv))
+			phylink_speed_down(priv->phylink, false);
 
-	phylink_suspend(priv->phylink, stmmac_wol_enabled_mac(priv));
-	rtnl_unlock();
+		phylink_suspend(priv->phylink, stmmac_wol_enabled_mac(priv));
+		rtnl_unlock();
+	}
 
 	if (stmmac_fpe_supported(priv))
 		ethtool_mmsv_stop(&priv->fpe_cfg.mmsv);
@@ -7894,12 +7982,14 @@ int stmmac_resume(struct device *dev)
 			return ret;
 	}
 
-	rtnl_lock();
+	if (!priv->plat->use_ncsi) {
+		rtnl_lock();
 
-	/* Prepare the PHY to resume, ensuring that its clocks which are
-	 * necessary for the MAC DMA reset to complete are running
-	 */
-	phylink_prepare_resume(priv->phylink);
+		/* Prepare the PHY to resume, ensuring that its clocks which are
+		 * necessary for the MAC DMA reset to complete are running
+		 */
+		phylink_prepare_resume(priv->phylink);
+	}
 
 	mutex_lock(&priv->lock);
 
@@ -7912,33 +8002,39 @@ int stmmac_resume(struct device *dev)
 	if (ret < 0) {
 		netdev_err(priv->dev, "%s: Hw setup failed\n", __func__);
 		mutex_unlock(&priv->lock);
-		rtnl_unlock();
+		if (!priv->plat->use_ncsi)
+			rtnl_unlock();
 		return ret;
 	}
 
 	stmmac_init_timestamping(priv);
 
 	stmmac_init_coalesce(priv);
-	phylink_rx_clk_stop_block(priv->phylink);
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_block(priv->phylink);
 	stmmac_set_rx_mode(ndev);
-	phylink_rx_clk_stop_unblock(priv->phylink);
 
 	stmmac_vlan_restore(priv);
+
+	if (!priv->plat->use_ncsi)
+		phylink_rx_clk_stop_unblock(priv->phylink);
 
 	stmmac_enable_all_queues(priv);
 	stmmac_enable_all_dma_irq(priv);
 
 	mutex_unlock(&priv->lock);
 
-	/* phylink_resume() must be called after the hardware has been
-	 * initialised because it may bring the link up immediately in a
-	 * workqueue thread, which will race with initialisation.
-	 */
-	phylink_resume(priv->phylink);
-	if (stmmac_wol_enabled_phy(priv))
-		phylink_speed_up(priv->phylink);
+	if (!priv->plat->use_ncsi) {
+		/* phylink_resume() must be called after the hardware has been
+		 * initialised because it may bring the link up immediately in a
+		 * workqueue thread, which will race with initialisation.
+		 */
+		phylink_resume(priv->phylink);
+		if (stmmac_wol_enabled_phy(priv))
+			phylink_speed_up(priv->phylink);
 
-	rtnl_unlock();
+		rtnl_unlock();
+	}
 
 	netif_device_attach(ndev);
 
