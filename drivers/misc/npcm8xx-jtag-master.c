@@ -68,6 +68,14 @@ struct jtag_tap_state {
 	__u8	endstate;
 	__u8	tck;
 };
+
+struct jtag_tap_state2 {
+	__u8	reset;
+	__u8	from;
+	__u8	endstate;
+	__u32	tck;
+};
+
 enum jtagstates {
 	jtagtlr,
 	jtagrti,
@@ -106,6 +114,7 @@ enum jtag_xfer_direction {
 
 #define __JTAG_IOCTL_MAGIC	0xb2
 #define JTAG_SIOCSTATE	_IOW(__JTAG_IOCTL_MAGIC, 0, struct jtag_tap_state)
+#define JTAG_SIOCSTATE2	_IOW(__JTAG_IOCTL_MAGIC, 0, struct jtag_tap_state2)
 #define JTAG_SIOCFREQ	_IOW(__JTAG_IOCTL_MAGIC, 1, unsigned int)
 #define JTAG_GIOCFREQ	_IOR(__JTAG_IOCTL_MAGIC, 2, unsigned int)
 #define JTAG_IOCXFER	_IOWR(__JTAG_IOCTL_MAGIC, 3, struct jtag_xfer)
@@ -588,12 +597,14 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct npcm_jtm *priv = file->private_data;
 	struct jtag_tap_state tapstate;
+	struct jtag_tap_state2 tapstate2;
 	struct jtag_xfer xfer;
 	struct bitbang_packet bitbang;
 	struct tck_bitbang *bitbang_data;
 	u8 *xfer_data;
 	u32 data_size, print_size;
 	u32 value;
+	u32 runtcks;
 	int ret = 0;
 
 	switch (cmd) {
@@ -643,9 +654,21 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		break;
 	case JTAG_SIOCSTATE:
-		if (copy_from_user(&tapstate, (const void __user *)arg,
+	case JTAG_SIOCSTATE2:
+		if (cmd == JTAG_SIOCSTATE2) {
+			if (copy_from_user(&tapstate2, (const void __user *)arg,
+				   sizeof(struct jtag_tap_state2)))
+				return -EFAULT;
+			tapstate.from = tapstate2.from;
+			tapstate.endstate = tapstate2.endstate;
+			tapstate.reset = tapstate2.reset;
+			runtcks = tapstate2.tck;
+		} else {
+			if (copy_from_user(&tapstate, (const void __user *)arg,
 				   sizeof(struct jtag_tap_state)))
-			return -EFAULT;
+				return -EFAULT;
+			runtcks = tapstate.tck;
+		}
 
 		if (tapstate.from > JTAG_STATE_CURRENT)
 			return -EINVAL;
@@ -660,18 +683,17 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			"JTAG_SIOCSTATE(curr %d): from %d to %d reset %d tck %d",
 			priv->tapstate,
 			tapstate.from, tapstate.endstate,
-			tapstate.reset, tapstate.tck);
+			tapstate.reset, runtcks);
 		if (tapstate.reset == JTAG_FORCE_RESET)
 			jtag_reset_tapstate(priv);
-		jtag_set_tapstate(priv, tapstate.from,
-					  tapstate.endstate);
+		jtag_set_tapstate(priv, tapstate.from, tapstate.endstate);
 		if (tapstate.endstate == JTAG_STATE_CURRENT)
 			tapstate.endstate = priv->tapstate;
-		if (tapstate.tck && (tapstate.endstate == jtagtlr ||
+		if (runtcks && (tapstate.endstate == jtagtlr ||
 		    tapstate.endstate == jtagrti ||
 		    tapstate.endstate == jtagpaudr ||
 		    tapstate.endstate == jtagpauir))
-			jtag_run_state(priv, tapstate.endstate, tapstate.tck);
+			jtag_run_state(priv, tapstate.endstate, runtcks);
 		break;
 	case JTAG_GIOCSTATUS:
 		dev_dbg(priv->miscdev.parent, "JTAG_GIOCSTATUS: state %d",
