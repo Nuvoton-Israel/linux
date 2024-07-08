@@ -484,6 +484,12 @@ static int jtag_set_tapstate(struct npcm_jtm *jtag,
 	u8 count;
 	int ret;
 
+	jtag->end_tms_high = false;
+	if (to == jtagtlr) {
+		jtag_reset_tapstate(jtag);
+		return 0;
+	}
+
 	if (from == JTAG_STATE_CURRENT)
 		from = jtag->tapstate;
 
@@ -492,12 +498,6 @@ static int jtag_set_tapstate(struct npcm_jtm *jtag,
 
 	if (from > JTAG_STATE_CURRENT || to > JTAG_STATE_CURRENT)
 		return -1;
-
-	jtag->end_tms_high = false;
-	if (to == jtagtlr) {
-		jtag_reset_tapstate(jtag);
-		return 0;
-	}
 
 	tms[0] = tmscyclelookup[from][to].tmsbits;
 	count   = tmscyclelookup[from][to].count;
