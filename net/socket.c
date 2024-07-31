@@ -1688,22 +1688,30 @@ SYSCALL_DEFINE2(listen, int, fd, int, backlog)
 	return __sys_listen(fd, backlog);
 }
 
-struct file *do_accept(struct file *file, unsigned file_flags,
+int __sys_accept4_file(struct file *file, unsigned file_flags,
 		       struct sockaddr __user *upeer_sockaddr,
-		       int __user *upeer_addrlen, int flags)
+		       int __user *upeer_addrlen, int flags,
+		       unsigned long nofile)
 {
 	struct socket *sock, *newsock;
 	struct file *newfile;
-	int err, len;
+	int err, len, newfd;
 	struct sockaddr_storage address;
+
+	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
+		return -EINVAL;
+
+	if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
+		flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
 
 	sock = sock_from_file(file, &err);
 	if (!sock)
-		return ERR_PTR(err);
+		goto out;
 
+	err = -ENFILE;
 	newsock = sock_alloc();
 	if (!newsock)
-		return ERR_PTR(-ENFILE);
+		goto out;
 
 	newsock->type = sock->type;
 	newsock->ops = sock->ops;
@@ -1714,9 +1722,18 @@ struct file *do_accept(struct file *file, unsigned file_flags,
 	 */
 	__module_get(newsock->ops->owner);
 
+	newfd = __get_unused_fd_flags(flags, nofile);
+	if (unlikely(newfd < 0)) {
+		err = newfd;
+		sock_release(newsock);
+		goto out;
+	}
 	newfile = sock_alloc_file(newsock, flags, sock->sk->sk_prot_creator->name);
-	if (IS_ERR(newfile))
-		return newfile;
+	if (IS_ERR(newfile)) {
+		err = PTR_ERR(newfile);
+		put_unused_fd(newfd);
+		goto out;
+	}
 
 	err = security_socket_accept(sock, newsock);
 	if (err)
@@ -1741,38 +1758,16 @@ struct file *do_accept(struct file *file, unsigned file_flags,
 	}
 
 	/* File flags are not inherited via accept() unlike another OSes. */
-	return newfile;
+
+	fd_install(newfd, newfile);
+	err = newfd;
+out:
+	return err;
 out_fd:
 	fput(newfile);
-	return ERR_PTR(err);
-}
+	put_unused_fd(newfd);
+	goto out;
 
-int __sys_accept4_file(struct file *file, unsigned file_flags,
-		       struct sockaddr __user *upeer_sockaddr,
-		       int __user *upeer_addrlen, int flags,
-		       unsigned long nofile)
-{
-	struct file *newfile;
-	int newfd;
-
-	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
-		return -EINVAL;
-
-	if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
-		flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
-
-	newfd = __get_unused_fd_flags(flags, nofile);
-	if (unlikely(newfd < 0))
-		return newfd;
-
-	newfile = do_accept(file, file_flags, upeer_sockaddr, upeer_addrlen,
-			    flags);
-	if (IS_ERR(newfile)) {
-		put_unused_fd(newfd);
-		return PTR_ERR(newfile);
-	}
-	fd_install(newfd, newfile);
-	return newfd;
 }
 
 /*
@@ -2186,17 +2181,6 @@ SYSCALL_DEFINE5(getsockopt, int, fd, int, level, int, optname,
  *	Shutdown a socket.
  */
 
-int __sys_shutdown_sock(struct socket *sock, int how)
-{
-	int err;
-
-	err = security_socket_shutdown(sock, how);
-	if (!err)
-		err = sock->ops->shutdown(sock, how);
-
-	return err;
-}
-
 int __sys_shutdown(int fd, int how)
 {
 	int err, fput_needed;
@@ -2204,7 +2188,9 @@ int __sys_shutdown(int fd, int how)
 
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock != NULL) {
-		err = __sys_shutdown_sock(sock, how);
+		err = security_socket_shutdown(sock, how);
+		if (!err)
+			err = sock->ops->shutdown(sock, how);
 		fput_light(sock->file, fput_needed);
 	}
 	return err;
