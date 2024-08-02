@@ -5270,21 +5270,23 @@ int stmmac_dvr_probe(struct device *device,
 	pm_runtime_set_active(device);
 	pm_runtime_enable(device);
 
-	if (priv->hw->pcs != STMMAC_PCS_TBI &&
-	    priv->hw->pcs != STMMAC_PCS_RTBI) {
-		/* MDIO bus Registration */
-		ret = stmmac_mdio_register(ndev);
-		if (ret < 0) {
-			dev_err_probe(priv->device, ret,
-				      "%s: MDIO bus (id: %d) registration failed\n",
-				      __func__, priv->plat->bus_id);
-			goto error_mdio_register;
-		}
+	if (!priv->plat->use_ncsi) {
+		if (priv->hw->pcs != STMMAC_PCS_TBI &&
+			priv->hw->pcs != STMMAC_PCS_RTBI) {
+			/* MDIO bus Registration */
+			ret = stmmac_mdio_register(ndev);
+			if (ret < 0) {
+				dev_err_probe(priv->device, ret,
+						"%s: MDIO bus (id: %d) registration failed\n",
+						__func__, priv->plat->bus_id);
+				goto error_mdio_register;
+			}
 
-		ret = stmmac_phy_setup(priv);
-		if (ret) {
-			netdev_err(ndev, "failed to setup phy (%d)\n", ret);
-			goto error_phy_setup;
+			ret = stmmac_phy_setup(priv);
+			if (ret) {
+				netdev_err(ndev, "failed to setup phy (%d)\n", ret);
+				goto error_phy_setup;
+			}
 		}
 	} else {
 		if (!IS_ENABLED(CONFIG_NET_NCSI)) {
