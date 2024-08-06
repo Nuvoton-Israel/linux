@@ -110,6 +110,7 @@
 #define   SVC_I3C_MSTATUS_STATE_DAA(x) (SVC_I3C_MSTATUS_STATE(x) == 5)
 #define   SVC_I3C_MSTATUS_STATE_IDLE(x) (SVC_I3C_MSTATUS_STATE(x) == 0)
 #define   SVC_I3C_MSTATUS_STATE_SLVREQ(x) (SVC_I3C_MSTATUS_STATE(x) == 1)
+#define   SVC_I3C_MSTATUS_STATE_IBIACK(x) (SVC_I3C_MSTATUS_STATE(x) == 6)
 #define   SVC_I3C_MSTATUS_BETWEEN(x) FIELD_GET(BIT(4), (x))
 #define   SVC_I3C_MSTATUS_NACKED(x) FIELD_GET(BIT(5), (x))
 #define   SVC_I3C_MSTATUS_IBITYPE(x) FIELD_GET(GENMASK(7, 6), (x))
@@ -325,6 +326,13 @@ struct svc_i3c_master {
 	bool en_hj;
 	bool hdr_ddr;
 	bool hdr_mode;
+	bool dma_started;
+
+	/* Statistic report */
+	u8 err_code;
+	u64 err_cnt;
+	u64 rd_ibiwon_cnt;
+	u64 wr_ibiwon_cnt;
 };
 
 /**
@@ -341,6 +349,12 @@ struct svc_i3c_i2c_dev_data {
 
 static int svc_i3c_master_wait_for_complete(struct svc_i3c_master *master);
 static void svc_i3c_master_stop_dma(struct svc_i3c_master *master);
+
+static void svc_i3c_master_err_stats(struct svc_i3c_master *master, u8 code)
+{
+	master->err_cnt++;
+	master->err_code = code;
+}
 
 static bool svc_i3c_master_error(struct svc_i3c_master *master)
 {
@@ -403,6 +417,11 @@ static void svc_i3c_master_flush_fifo(struct svc_i3c_master *master)
 	       master->regs + SVC_I3C_MDATACTRL);
 }
 
+static void svc_i3c_master_flush_rx_fifo(struct svc_i3c_master *master)
+{
+	writel(SVC_I3C_MDATACTRL_FLUSHRB, master->regs + SVC_I3C_MDATACTRL);
+}
+
 static void svc_i3c_master_reset_fifo_trigger(struct svc_i3c_master *master)
 {
 	u32 reg;
@@ -454,13 +473,63 @@ svc_i3c_master_dev_from_addr(struct svc_i3c_master *master,
 	return master->descs[i];
 }
 
+static void svc_i3c_master_ack_ibi(struct svc_i3c_master *master,
+				   bool mandatory_byte)
+{
+	unsigned int ibi_ack_nack;
+	u32 reg;
+
+	ibi_ack_nack = SVC_I3C_MCTRL_REQUEST_IBI_ACKNACK;
+	if (mandatory_byte)
+		ibi_ack_nack |= SVC_I3C_MCTRL_IBIRESP_ACK_WITH_BYTE |
+			SVC_I3C_MCTRL_RDTERM(SVC_I3C_MAX_IBI_PAYLOAD_SIZE);
+	else
+		ibi_ack_nack |= SVC_I3C_MCTRL_IBIRESP_ACK_WITHOUT_BYTE;
+
+	writel(ibi_ack_nack, master->regs + SVC_I3C_MCTRL);
+	readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
+			   SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
+}
+
+static void svc_i3c_master_nack_ibi(struct svc_i3c_master *master)
+{
+	u32 reg;
+
+	writel(SVC_I3C_MCTRL_REQUEST_IBI_ACKNACK |
+	       SVC_I3C_MCTRL_IBIRESP_NACK,
+	       master->regs + SVC_I3C_MCTRL);
+	readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
+			   SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
+}
+
 static void svc_i3c_master_emit_stop(struct svc_i3c_master *master)
 {
+	u32 reg = readl(master->regs + SVC_I3C_MSTATUS);
+
+	/* Do not emit stop in the IDLE or SLVREQ state */
+	if (SVC_I3C_MSTATUS_STATE_IDLE(reg) || SVC_I3C_MSTATUS_STATE_SLVREQ(reg))
+		return;
+
+	/*
+	 * The spurious IBI event may change controller state to IBIACK, switch state
+	 * to NORMACT before emitSTOP request.
+	 */
+	if (SVC_I3C_MSTATUS_STATE_IBIACK(reg)) {
+		svc_i3c_master_nack_ibi(master);
+		writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
+	}
+
 	if (master->hdr_mode) {
 		writel(SVC_I3C_MCTRL_REQUEST_FORCE_EXIT, master->regs + SVC_I3C_MCTRL);
 		master->hdr_mode = false;
 	} else {
 		writel(SVC_I3C_MCTRL_REQUEST_STOP, master->regs + SVC_I3C_MCTRL);
+		/*
+		 * Wait for STOP condition to complete, in case the subsequent
+		 * EmitStartAddr request is issued too early.
+		 */
+		readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
+				   SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
 	}
 
 	/*
@@ -482,10 +551,20 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 	int ret;
 	u8 *buf;
 
+	if (!data) {
+		dev_err_ratelimited(master->dev, "No data for addr 0x%x\n",
+			dev->info.dyn_addr);
+		goto no_ibi_pool;
+	}
+	if (!data->ibi_pool) {
+		dev_err_ratelimited(master->dev, "No ibi pool for addr 0x%x\n",
+			master->addrs[data->index]);
+		goto no_ibi_pool;
+	}
 	slot = i3c_generic_ibi_get_free_slot(data->ibi_pool);
 	if (!slot) {
 		dev_err_ratelimited(master->dev, "No free ibi slot\n");
-		return -ENOSPC;
+		goto no_ibi_pool;
 	}
 
 	slot->len = 0;
@@ -501,6 +580,12 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 						0, 1000);
 	if (ret) {
 		dev_err(master->dev, "Timeout when polling for COMPLETE\n");
+		/* The event is wrong, do not deliver it to upper layer. */
+		if (SVC_I3C_MSTATUS_RXPEND(val))
+			svc_i3c_master_flush_rx_fifo(master);
+		i3c_generic_ibi_recycle_slot(data->ibi_pool, slot);
+		slot = NULL;
+		svc_i3c_master_err_stats(master, ETIMEDOUT);
 		goto handle_done;
 	}
 
@@ -517,28 +602,15 @@ handle_done:
 	master->ibi.tbq_slot = slot;
 
 	return ret;
-}
 
-static void svc_i3c_master_ack_ibi(struct svc_i3c_master *master,
-				   bool mandatory_byte)
-{
-	unsigned int ibi_ack_nack;
-
-	ibi_ack_nack = SVC_I3C_MCTRL_REQUEST_IBI_ACKNACK;
-	if (mandatory_byte)
-		ibi_ack_nack |= SVC_I3C_MCTRL_IBIRESP_ACK_WITH_BYTE |
-			SVC_I3C_MCTRL_RDTERM(SVC_I3C_MAX_IBI_PAYLOAD_SIZE);
-	else
-		ibi_ack_nack |= SVC_I3C_MCTRL_IBIRESP_ACK_WITHOUT_BYTE;
-
-	writel(ibi_ack_nack, master->regs + SVC_I3C_MCTRL);
-}
-
-static void svc_i3c_master_nack_ibi(struct svc_i3c_master *master)
-{
-	writel(SVC_I3C_MCTRL_REQUEST_IBI_ACKNACK |
-	       SVC_I3C_MCTRL_IBIRESP_NACK,
-	       master->regs + SVC_I3C_MCTRL);
+no_ibi_pool:
+	/* No ibi pool, drop the payload if received  */
+	readl_relaxed_poll_timeout(master->regs + SVC_I3C_MSTATUS, val,
+				   SVC_I3C_MSTATUS_COMPLETE(val) |
+				   SVC_I3C_MSTATUS_STATE_IDLE(val),
+				   0, 1000);
+	svc_i3c_master_flush_rx_fifo(master);
+	return -ENOSPC;
 }
 
 static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, bool autoibi)
@@ -546,7 +618,7 @@ static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, bool auto
 	struct svc_i3c_i2c_dev_data *data;
 	unsigned int ibitype, ibiaddr;
 	struct i3c_dev_desc *dev;
-	u32 status, val;
+	u32 status;
 	int ret = 0;
 
 	status = readl(master->regs + SVC_I3C_MSTATUS);
@@ -560,8 +632,22 @@ static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, bool auto
 	switch (ibitype) {
 	case SVC_I3C_MSTATUS_IBITYPE_IBI:
 		dev = svc_i3c_master_dev_from_addr(master, ibiaddr);
-		if (!dev) {
-			svc_i3c_master_nack_ibi(master);
+		/* Bypass the invalid ibi with address 0 */
+		if (!dev || ibiaddr == 0) {
+			if (!autoibi) {
+				svc_i3c_master_nack_ibi(master);
+				break;
+			}
+			/*
+			 * Wait for complete to make sure the subsequent emitSTOP
+			 * request will be performed in the correct state(NORMACT).
+			 */
+			readl_relaxed_poll_timeout(master->regs + SVC_I3C_MSTATUS, status,
+						   SVC_I3C_MSTATUS_COMPLETE(status),
+						   0, 1000);
+			/* Flush the garbage data */
+			if (SVC_I3C_MSTATUS_RXPEND(status))
+				svc_i3c_master_flush_rx_fifo(master);
 			break;
 		}
 		if (!autoibi) {
@@ -577,6 +663,12 @@ static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, bool auto
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
 		svc_i3c_master_nack_ibi(master);
+		status = readl(master->regs + SVC_I3C_MSTATUS);
+		/* Invalid event may be reported as MR request
+		 * and sometimes produce dummy bytes. Flush the garbage data.
+		 */
+		if (SVC_I3C_MSTATUS_RXPEND(status))
+			svc_i3c_master_flush_rx_fifo(master);
 		break;
 	default:
 		break;
@@ -596,37 +688,36 @@ static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, bool auto
 		}
 
 		dev_err(master->dev, "svc_i3c_master_error in ibiwon\n");
-		if (ibitype != SVC_I3C_MSTATUS_IBITYPE_IBI)
-			svc_i3c_master_emit_stop(master);
+		/*
+		 * No need to emit stop here because the caller should do it
+		 * if return error
+		 */
 		ret = -EIO;
+		svc_i3c_master_err_stats(master, EIO);
 		goto clear_ibiwon;
 	}
 
 	/* Handle the non critical tasks */
 	switch (ibitype) {
 	case SVC_I3C_MSTATUS_IBITYPE_IBI:
-		val = readl(master->regs + SVC_I3C_MSTATUS);
 		/*
 		 * Sometimes I3C HW returns to IDLE state after IBIRCV completed,
 		 * do not emit STOP in the idle state.
 		 */
-		if (!SVC_I3C_MSTATUS_STATE_IDLE(val))
-			svc_i3c_master_emit_stop(master);
+		svc_i3c_master_emit_stop(master);
 		if (dev && master->ibi.tbq_slot) {
 			i3c_master_queue_ibi(dev, master->ibi.tbq_slot);
 			master->ibi.tbq_slot = NULL;
 		}
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_HOT_JOIN:
-		readl_relaxed_poll_timeout(master->regs + SVC_I3C_MSTATUS, val,
-					   SVC_I3C_MSTATUS_MCTRLDONE(val), 0, 1000);
 		/* Emit stop to avoid the INVREQ error after DAA process */
 		svc_i3c_master_emit_stop(master);
 		queue_work(master->base.wq, &master->hj_work);
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
-		svc_i3c_master_emit_stop(master);
 		ret = -EOPNOTSUPP;
+		svc_i3c_master_err_stats(master, EOPNOTSUPP);
 	default:
 		break;
 	}
@@ -649,6 +740,19 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 	if (!SVC_I3C_MSTATUS_STATE_SLVREQ(mstatus))
 		goto ibi_out;
 
+	/*
+	 * IBIWON may be set before SVC_I3C_MCTRL_REQUEST_AUTO_IBI, causing
+	 * readl_relaxed_poll_timeout() to return immediately. Consequently,
+	 * ibitype will be 0 since it was last updated only after the 8th SCL
+	 * cycle, leading to missed client IBI handlers.
+	 *
+	 * A typical scenario is when IBIWON occurs and bus arbitration is lost
+	 * at svc_i3c_master_priv_xfers().
+	 *
+	 * Clear SVC_I3C_MINT_IBIWON before sending SVC_I3C_MCTRL_REQUEST_AUTO_IBI.
+	 */
+	writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
+
 	/* Acknowledge the incoming interrupt with the AUTOIBI mechanism */
 	writel(SVC_I3C_MCTRL_REQUEST_AUTO_IBI |
 	       SVC_I3C_MCTRL_IBIRESP_AUTO |
@@ -659,19 +763,20 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 	ret = readl_relaxed_poll_timeout_atomic(master->regs + SVC_I3C_MSTATUS, val,
 					 SVC_I3C_MSTATUS_IBIWON(val), 0, 1000);
 	if (ret) {
-		dev_err(master->dev, "Timeout when polling for IBIWON\n");
 		/* Cancle AUTOIBI if not started */
 		val = readl(master->regs + SVC_I3C_MCTRL);
 		if (SVC_I3C_MCTRL_REQUEST(val) == SVC_I3C_MCTRL_REQUEST_AUTO_IBI)
 			writel(0, master->regs + SVC_I3C_MCTRL);
+
+		dev_err(master->dev, "Timeout when polling for IBIWON\n");
 		svc_i3c_master_clear_merrwarn(master);
-		mstatus = readl(master->regs + SVC_I3C_MSTATUS);
-		if (!SVC_I3C_MSTATUS_STATE_IDLE(mstatus))
-			svc_i3c_master_emit_stop(master);
+		svc_i3c_master_emit_stop(master);
+		svc_i3c_master_err_stats(master, ETIMEDOUT);
 		goto ibi_out;
 	}
 
-	svc_i3c_master_handle_ibiwon(master, true);
+	if (svc_i3c_master_handle_ibiwon(master, true))
+		svc_i3c_master_emit_stop(master);
 ibi_out:
 	spin_unlock(&master->req_lock);
 }
@@ -1324,6 +1429,7 @@ static void svc_i3c_master_stop_dma(struct svc_i3c_master *master)
 
 	/* Disable COMPLETE interrupt */
 	writel(SVC_I3C_MINT_COMPLETE, master->regs + SVC_I3C_MINTCLR);
+	master->dma_started = false;
 }
 
 static void svc_i3c_master_write_dma_table(const u8 *src, u32 *dst, int len)
@@ -1383,6 +1489,7 @@ static int svc_i3c_master_start_dma(struct svc_i3c_master *master)
 	else
 		val |= NPCM_GDMA_CTL_DAFIX | NPCM_GDMA_CTL_GDMAMS(1) | NPCM_GDMA_CTL_TWS(2);
 	writel(val, master->dma_regs + NPCM_GDMA_CTL(ch));
+	master->dma_started = true;
 
 	return 0;
 }
@@ -1396,8 +1503,10 @@ static int svc_i3c_master_wait_for_complete(struct svc_i3c_master *master)
 
 	ret = wait_for_completion_timeout(&master->xfer_comp, msecs_to_jiffies(100));
 	if (!ret) {
+		svc_i3c_master_stop_dma(master);
 		dev_err(master->dev, "DMA transfer timeout (%s)\n", xfer->rnw ? "Read" : "write");
 		dev_err(master->dev, "mstatus = 0x%02x\n", readl(master->regs + SVC_I3C_MSTATUS));
+		svc_i3c_master_err_stats(master, ETIMEDOUT);
 		return -ETIMEDOUT;
 	}
 
@@ -1509,7 +1618,7 @@ retry_start:
 	ret = readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
 				 SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
 	if (ret)
-		goto unlock_exit;
+		goto emit_stop_locked;
 
 	mstatus = readl(master->regs + SVC_I3C_MSTATUS);
 	if (SVC_I3C_MSTATUS_IBIWON(mstatus)) {
@@ -1518,12 +1627,17 @@ retry_start:
 			svc_i3c_master_stop_dma(master);
 		ret = svc_i3c_master_handle_ibiwon(master, !rnw);
 		if (ret) {
-			dev_err(master->dev, "xfer read: handle ibi event fail, ret=%d\n", ret);
-			goto unlock_exit;
+			dev_err(master->dev, "xfer(rnw %d): handle ibi event fail, ret=%d\n",
+				rnw, ret);
+			goto emit_stop_locked;
 		}
+		if (rnw)
+			master->rd_ibiwon_cnt++;
+		else
+			master->wr_ibiwon_cnt++;
 		if (time_after(jiffies, start + msecs_to_jiffies(1000))) {
 			dev_info(master->dev, "abnormal ibiwon events\n");
-			goto unlock_exit;
+			goto emit_stop_locked;
 		}
 
 		if (use_dma && rnw)
@@ -1585,19 +1699,17 @@ retry_start:
 
 	return 0;
 
-unlock_exit:
-	spin_unlock_irqrestore(&master->req_lock, flags);
-
 emit_stop:
-	if (use_dma)
-		svc_i3c_master_stop_dma(master);
-	else
-		local_irq_enable();
 	spin_lock_irqsave(&master->req_lock, flags);
+emit_stop_locked:
+	if (master->dma_started)
+		svc_i3c_master_stop_dma(master);
 	svc_i3c_master_emit_stop(master);
 	svc_i3c_master_clear_merrwarn(master);
 	svc_i3c_master_flush_fifo(master);
 	spin_unlock_irqrestore(&master->req_lock, flags);
+	if (!use_dma)
+		local_irq_enable();
 
 	return ret;
 }
@@ -1647,12 +1759,6 @@ static void svc_i3c_master_start_xfer_locked(struct svc_i3c_master *master)
 	if (!xfer)
 		return;
 
-	ret = pm_runtime_resume_and_get(master->dev);
-	if (ret < 0) {
-		dev_err(master->dev, "<%s> Cannot get runtime PM.\n", __func__);
-		return;
-	}
-
 	/* Prevent fifo flush while IBI isr is running */
 	spin_lock_irqsave(&master->req_lock, flags);
 	svc_i3c_master_clear_merrwarn(master);
@@ -1669,9 +1775,6 @@ static void svc_i3c_master_start_xfer_locked(struct svc_i3c_master *master)
 		if (ret)
 			break;
 	}
-
-	pm_runtime_mark_last_busy(master->dev);
-	pm_runtime_put_autosuspend(master->dev);
 
 	xfer->ret = ret;
 	complete(&xfer->comp);
@@ -1692,13 +1795,25 @@ static void svc_i3c_master_start_xfer_locked(struct svc_i3c_master *master)
 static void svc_i3c_master_enqueue_xfer(struct svc_i3c_master *master,
 					struct svc_i3c_xfer *xfer)
 {
+	int ret;
+
+	ret = pm_runtime_resume_and_get(master->dev);
+	if (ret < 0) {
+		dev_err(master->dev, "<%s> Cannot get runtime PM.\n", __func__);
+		return;
+	}
+
 	init_completion(&xfer->comp);
+
 	if (master->xferqueue.cur) {
 		list_add_tail(&xfer->node, &master->xferqueue.list);
 	} else {
 		master->xferqueue.cur = xfer;
 		svc_i3c_master_start_xfer_locked(master);
 	}
+
+	pm_runtime_mark_last_busy(master->dev);
+	pm_runtime_put_autosuspend(master->dev);
 }
 
 static bool
@@ -2394,6 +2509,10 @@ static void svc_i3c_init_debugfs(struct platform_device *pdev,
 		return;
 
 	debugfs_create_file("debug", 0444, master->debugfs, master, &debug_fops);
+	debugfs_create_u64("err_cnt", 0444, master->debugfs, &master->err_cnt);
+	debugfs_create_u8("err_code", 0444, master->debugfs, &master->err_code);
+	debugfs_create_u64("rd_ibiwon_cnt", 0444, master->debugfs, &master->rd_ibiwon_cnt);
+	debugfs_create_u64("wr_ibiwon_cnt", 0444, master->debugfs, &master->wr_ibiwon_cnt);
 }
 
 static int svc_i3c_setup_dma(struct platform_device *pdev, struct svc_i3c_master *master)
