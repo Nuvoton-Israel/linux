@@ -699,7 +699,9 @@
 				      <0xf0850000 0x1000>,
 				      <0xf0800300 0x10>;
 				pinctrl-names = "default";
-				pinctrl-0 = <&i3c0_pins>;
+				pinctrl-0 = <&i3c0_pins
+						&i3c0_scl_slew
+						&i3c0_sda_slew>;
 				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&clk_refclk>;
 				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>;
@@ -714,7 +716,9 @@
 				compatible = "silvaco,i3c-master";
 				reg = <0xfff11000 0x1000>;
 				pinctrl-names = "default";
-				pinctrl-0 = <&i3c1_pins>;
+				pinctrl-0 = <&i3c1_pins
+						&i3c1_scl_slew
+						&i3c1_sda_slew>;
 				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&clk_refclk>;
 				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 225 IRQ_TYPE_LEVEL_HIGH>;
@@ -728,7 +732,9 @@
 				compatible = "silvaco,i3c-master";
 				reg = <0xfff12000 0x1000>;
 				pinctrl-names = "default";
-				pinctrl-0 = <&i3c2_pins>;
+				pinctrl-0 = <&i3c2_pins
+						&i3c2_scl_slew
+						&i3c2_sda_slew>;
 				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&clk_refclk>;
 				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 226 IRQ_TYPE_LEVEL_HIGH>;
@@ -742,7 +748,9 @@
 				compatible = "silvaco,i3c-master";
 				reg = <0xfff13000 0x1000>;
 				pinctrl-names = "default";
-				pinctrl-0 = <&i3c3_pins>;
+				pinctrl-0 = <&i3c3_pins
+						&i3c3_scl_slew
+						&i3c3_sda_slew>;
 				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&clk_refclk>;
 				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 227 IRQ_TYPE_LEVEL_HIGH>;
@@ -756,7 +764,9 @@
 				compatible = "silvaco,i3c-master";
 				reg = <0xfff14000 0x1000>;
 				pinctrl-names = "default";
-				pinctrl-0 = <&i3c4_pins>;
+				pinctrl-0 = <&i3c4_pins
+						&i3c4_scl_slew
+						&i3c4_sda_slew>;
 				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&clk_refclk>;
 				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 228 IRQ_TYPE_LEVEL_HIGH>;
@@ -770,7 +780,9 @@
 				compatible = "silvaco,i3c-master";
 				reg = <0xfff15000 0x1000>;
 				pinctrl-names = "default";
-				pinctrl-0 = <&i3c5_pins>;
+				pinctrl-0 = <&i3c5_pins
+						&i3c5_scl_slew
+						&i3c5_sda_slew>;
 				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&clk_refclk>;
 				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>;
@@ -1925,6 +1937,54 @@
 		gpo187_pins: gpo187-pins {
 			groups = "gpo187";
 			function = "gpo187";
+		};
+		i3c0_scl_slew: i3c0scl-slew {
+			pins = "GPIO240/I3C0_SCL";
+			slew-rate = <1>;
+		};
+		i3c0_sda_slew: i3c0sda-slew {
+			pins = "GPIO241/I3C0_SDA";
+			slew-rate = <1>;
+		};
+		i3c1_scl_slew: i3c1scl-slew {
+			pins = "GPIO242/I3C1_SCL";
+			slew-rate = <1>;
+		};
+		i3c1_sda_slew: i3c1sda-slew {
+			pins = "GPIO243/I3C1_SDA";
+			slew-rate = <1>;
+		};
+		i3c2_scl_slew: i3c2scl-slew {
+			pins = "GPIO244/I3C2_SCL";
+			slew-rate = <1>;
+		};
+		i3c2_sda_slew: i3c2sda-slew {
+			pins = "GPIO245/I3C2_SDA";
+			slew-rate = <1>;
+		};
+		i3c3_scl_slew: i3c3scl-slew {
+			pins = "GPIO246/I3C3_SCL";
+			slew-rate = <1>;
+		};
+		i3c3_sda_slew: i3c3sda-slew {
+			pins = "GPIO247/I3C3_SDA";
+			slew-rate = <1>;
+		};
+		i3c4_scl_slew: i3c4scl-slew {
+			pins = "GPIO33/I3C4_SCL";
+			slew-rate = <1>;
+		};
+		i3c4_sda_slew: i3c4sda-slew {
+			pins = "GPIO34/I3C4_SDA";
+			slew-rate = <1>;
+		};
+		i3c5_scl_slew: i3c5scl-slew {
+			pins = "GPIO106/I3C5_SCL";
+			slew-rate = <1>;
+		};
+		i3c5_sda_slew: i3c5sda-slew {
+			pins = "GPIO107/I3C5_SDA";
+			slew-rate = <1>;
 		};
 	};
 };
