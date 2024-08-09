@@ -168,9 +168,14 @@
 #define I3C_HUB_DT_TP_PULLUP_ENABLED			0x01
 #define I3C_HUB_DT_TP_PULLUP_NOT_DEFINED		0xFF
 
+/* TP connection setting */
+#define I3C_HUB_DT_TP_CONNECT_ENABLED			0x00
+#define I3C_HUB_DT_TP_CONNECT_DISABLED			0x01
+
 struct tp_setting {
 	u8 mode;
 	u8 pullup_en;
+	u8 connect;
 };
 
 struct dt_settings {
@@ -225,6 +230,11 @@ static const struct hub_setting tp_mode_settings[] = {
 static const struct hub_setting tp_pullup_settings[] = {
 	{"disabled",	I3C_HUB_DT_TP_PULLUP_DISABLED},
 	{"enabled",	I3C_HUB_DT_TP_PULLUP_ENABLED},
+};
+
+static const struct hub_setting tp_connect_settings[] = {
+	{"disabled",	I3C_HUB_DT_TP_CONNECT_DISABLED},
+	{"enabled",	I3C_HUB_DT_TP_CONNECT_ENABLED},
 };
 
 static u8 i3c_hub_ldo_dt_to_reg(u8 dt_value)
@@ -315,6 +325,12 @@ static void i3c_hub_tp_of_get_setting(struct device *dev, const struct device_no
 			dev_warn(dev,
 				 "Invalid or not specified setting for target port[%i].pullup\n",
 				 id);
+
+		/* TP connect default enabled */
+		tp_setting[id].connect = I3C_HUB_DT_TP_CONNECT_ENABLED;
+		i3c_hub_of_get_setting(tp_node, "connect", tp_connect_settings,
+				       ARRAY_SIZE(tp_connect_settings),
+				       &tp_setting[id].connect);
 	}
 }
 
@@ -608,6 +624,60 @@ err_remove:
 	return PTR_ERR(entry);
 }
 
+static ssize_t tp_connect_show(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	struct i3c_hub *priv = dev_get_drvdata(dev);
+	u32 reg_val;
+	int ret;
+	ret = regmap_read(priv->regmap, I3C_HUB_TP_NET_CON_CONF, &reg_val);
+	if (ret)
+		return -EIO;
+
+	return sprintf(buf, "%02x", reg_val & 0xFF);
+}
+
+static ssize_t tp_connect_store(struct device *dev, struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct i3c_hub *priv = dev_get_drvdata(dev);
+	u8 tp_en;
+	int ret;
+
+	if (kstrtou8(buf, 0, &tp_en))
+		return -EINVAL;
+
+	/* Unlock access to protected registers */
+	ret = regmap_write(priv->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_UNLOCK_CODE);
+	if (ret)
+		return -EIO;
+
+	ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, tp_en);
+	if (ret)
+		return -EIO;
+
+	/* Lock access to protected registers */
+	ret = regmap_write(priv->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
+	if (ret)
+		return -EIO;
+
+	return count;
+}
+static DEVICE_ATTR_RW(tp_connect);
+
+static int i3c_hub_connect_tp(struct device *dev)
+{
+	struct i3c_hub *priv = dev_get_drvdata(dev);
+	u32 tp_dis_val = 0;
+	int i;
+
+	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i)
+		if (priv->settings.tp[i].connect == I3C_HUB_DT_TP_CONNECT_DISABLED)
+			tp_dis_val |= TPn_NET_CON(i);
+
+	return regmap_clear_bits(priv->regmap, I3C_HUB_TP_NET_CON_CONF, tp_dis_val);
+}
+
 static int i3c_hub_probe(struct i3c_device *i3cdev)
 {
 	struct regmap_config i3c_hub_regmap_config = {
@@ -667,6 +737,13 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		goto error;
 	}
 
+	if (i3cdev->bus->jesd403) {
+		i3c_device_send_ccc_cmd(i3cdev, I3C_CCC_SETHID);
+		i3c_device_send_ccc_cmd(i3cdev, I3C_CCC_SETAASA);
+	}
+	/* Setup hub network connection according to dts setting */
+	i3c_hub_connect_tp(dev);
+
 	/* Lock access to protected registers */
 	ret = regmap_write(priv->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
 	if (ret) {
@@ -674,9 +751,11 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		goto error;
 	}
 
-	if (i3cdev->bus->jesd403) {
-		i3c_device_send_ccc_cmd(i3cdev, I3C_CCC_SETHID);
-		i3c_device_send_ccc_cmd(i3cdev, I3C_CCC_SETAASA);
+	ret = sysfs_create_file(&dev->kobj,
+				&dev_attr_tp_connect.attr);
+	if (ret) {
+		dev_err(dev, "Failed to create tp_connect sysfs file\n");
+		goto error;
 	}
 	/* TBD: Apply special/security lock here using DEV_CMD register */
 
@@ -692,6 +771,7 @@ static void i3c_hub_remove(struct i3c_device *i3cdev)
 	struct i3c_hub *priv = i3cdev_get_drvdata(i3cdev);
 
 	debugfs_remove_recursive(priv->debug_dir);
+	sysfs_remove_file(&i3cdev->dev.kobj, &dev_attr_tp_connect.attr);
 }
 
 static struct i3c_driver i3c_hub = {
