@@ -21,7 +21,8 @@
 #include <linux/ipmi_ssif_bmc.h>
 
 #define DEVICE_NAME                             "ipmi-ssif-host"
-
+#define SSIF_BMC_BUSY   0x01
+#define SSIF_BMC_READY  0x02
 #define GET_8BIT_ADDR(addr_7bit)                (((addr_7bit) << 1) & 0xff)
 
 /* A standard SMBus Transaction is limited to 32 data bytes */
@@ -41,7 +42,179 @@
 #define SSIF_IPMI_MULTIPART_READ_MIDDLE         0x9
 
 /* Max timeout is 15 seconds */
-#define RESPONSE_TIMEOUT                        15000 /*ms*/
+#define RESPONSE_TIMEOUT		15000 /*ms*/
+
+#define MAX_I2C_HW_FIFO_SIZE	32
+/* Common regs */
+#define NPCM_I2CCTL1			0x06
+#define NPCM_I2CADDR1			0x08
+#define NPCM_I2CCTL2            0x0A
+#define NPCM_I2CADDR2			0x0C
+#define NPCM_I2CCTL3			0x0E
+#define I2C_VER					0x1F
+
+ /* NPCM_I2CCTL3 reg fields */
+#define NPCM_I2CCTL3_ARPMEN		BIT(2)
+#define NPCM_I2CCTL3_BNK_SEL	BIT(5)
+
+ /* NPCM_I2CCTL1 reg fields */
+#define NPCM_I2CCTL1_START		BIT(0)
+#define NPCM_I2CCTL1_STOP		BIT(1)
+#define NPCM_I2CCTL1_INTEN		BIT(2)
+#define NPCM_I2CCTL1_EOBINTE	BIT(3)
+#define NPCM_I2CCTL1_ACK		BIT(4)
+#define NPCM_I2CCTL1_GCMEN		BIT(5)
+#define NPCM_I2CCTL1_NMINTE		BIT(6)
+#define NPCM_I2CCTL1_STASTRE	BIT(7)
+
+#define I2C_HW_FIFO_SIZE		16
+#define NPCM_I2CADDR_SAEN		BIT(7)
+
+  /* RW1S fields (inside a RW reg): */
+#define NPCM_I2CCTL1_RWS   \
+        (NPCM_I2CCTL1_START | NPCM_I2CCTL1_STOP | NPCM_I2CCTL1_ACK)
+
+#if IS_ENABLED(CONFIG_I2C_SLAVE)
+/*
+ * npcm_i2caddr array:
+ * The module supports having multiple own slave addresses.
+ * Since the addr regs are sprinkled all over the address space,
+ * use this array to get the address or each register.
+ */
+#define I2C_NUM_OWN_ADDR 10
+static const int npcm_i2caddr[I2C_NUM_OWN_ADDR] = {
+        NPCM_I2CADDR1,
+};
+#endif
+
+enum i2c_bank {
+        I2C_BANK_0 = 0,
+        I2C_BANK_1,
+};
+
+/* Module supports setting multiple own slave addresses */
+enum i2c_addr {
+        I2C_SLAVE_ADDR1 = 0,
+        I2C_SLAVE_ADDR2,
+        I2C_SLAVE_ADDR3,
+        I2C_SLAVE_ADDR4,
+        I2C_SLAVE_ADDR5,
+        I2C_SLAVE_ADDR6,
+        I2C_SLAVE_ADDR7,
+        I2C_SLAVE_ADDR8,
+        I2C_SLAVE_ADDR9,
+        I2C_SLAVE_ADDR10,
+        I2C_GC_ADDR,
+        I2C_ARP_ADDR,
+};
+
+enum i2c_mode {
+        I2C_MASTER,
+        I2C_SLAVE,
+};
+
+enum i2c_state_ind {
+        I2C_NO_STATUS_IND = 0,
+        I2C_SLAVE_RCV_IND,
+        I2C_SLAVE_XMIT_IND,
+        I2C_SLAVE_XMIT_MISSING_DATA_IND,
+        I2C_SLAVE_RESTART_IND,
+        I2C_SLAVE_DONE_IND,
+        I2C_MASTER_DONE_IND,
+        I2C_NACK_IND,
+        I2C_BUS_ERR_IND,
+        I2C_WAKE_UP_IND,
+        I2C_BLOCK_BYTES_ERR_IND,
+        I2C_SLAVE_RCV_MISSING_DATA_IND,
+};
+
+/* Internal I2C states values (for the I2C module state machine). */
+enum i2c_state {
+        I2C_DISABLE = 0,
+        I2C_IDLE,
+        I2C_MASTER_START,
+        I2C_SLAVE_MATCH,
+        I2C_OPER_STARTED,
+        I2C_STOP_PENDING,
+};
+
+/*
+ * Operation type values (used to define the operation currently running)
+ * module is interrupt driven, on each interrupt the current operation is
+ * checked to see if the module is currently reading or writing.
+ */
+enum i2c_oper {
+        I2C_NO_OPER = 0,
+        I2C_WRITE_OPER,
+        I2C_READ_OPER,
+};
+
+struct npcm_i2c_data {
+        u8 fifo_size;
+        u32 segctl_init_val;
+        u8 txf_sts_tx_bytes;
+        u8 rxf_sts_rx_bytes;
+        u8 rxf_ctl_last_pec;
+};
+
+static const struct npcm_i2c_data npxm7xx_i2c_data = {
+        .fifo_size = 16,
+        .segctl_init_val = 0x0333F000,
+        .txf_sts_tx_bytes = GENMASK(4, 0),
+        .rxf_sts_rx_bytes = GENMASK(4, 0),
+        .rxf_ctl_last_pec = BIT(5),
+};
+
+/* Status of one I2C module */
+struct npcm_i2c {
+	struct i2c_adapter adap;
+	struct device *dev;
+	unsigned char __iomem *reg;
+	const struct npcm_i2c_data *data;
+	spinlock_t lock;   /* IRQ synchronization */
+	struct completion cmd_complete;
+	int cmd_err;
+	struct i2c_msg *msgs;
+	int msgs_num;
+	int num;
+	u32 apb_clk;
+	struct i2c_bus_recovery_info rinfo;
+	enum i2c_state state;
+	enum i2c_oper operation;
+	enum i2c_mode master_or_slave;
+	enum i2c_state_ind stop_ind;
+	u8 dest_addr;
+	u8 *rd_buf;
+	u16 rd_size;
+	u16 rd_ind;
+	u8 *wr_buf;
+	u16 wr_size;
+	u16 wr_ind;
+	bool fifo_use;
+	u16 PEC_mask; /* PEC bit mask per slave address */
+	bool PEC_use;
+	bool read_block_use;
+	unsigned long int_time_stamp;
+	unsigned long bus_freq; /* in Hz */
+#if IS_ENABLED(CONFIG_I2C_SLAVE)
+	u8 own_slave_addr;
+	struct i2c_client *slave;
+	int slv_rd_size;
+	int slv_rd_ind;
+	int slv_wr_size;
+	int slv_wr_ind;
+	u8 slv_rd_buf[MAX_I2C_HW_FIFO_SIZE];
+	u8 slv_wr_buf[MAX_I2C_HW_FIFO_SIZE];
+#endif
+	struct dentry *debugfs; /* debugfs device directory */
+	u64 ber_cnt;
+	u64 rec_succ_cnt;
+	u64 rec_fail_cnt;
+	u64 nack_cnt;
+	u64 timeout_cnt;
+	u64 tx_complete_cnt;
+	bool ber_state;
+};
 
 struct ssif_part_buffer {
 	u8 address;
@@ -99,7 +272,83 @@ struct ssif_bmc_ctx {
 	struct ssif_part_buffer part_buf;
 	struct ipmi_ssif_msg    response;
 	struct ipmi_ssif_msg    request;
+	void                    *priv;
+	void (*set_ssif_bmc_status)(struct ssif_bmc_ctx *, unsigned int );
 };
+
+static void npcm_i2c_slave_int_enable(struct npcm_i2c *bus, bool enable)
+{
+        u8 i2cctl1;
+
+        /* enable interrupt on slave match: */
+        i2cctl1 = ioread8(bus->reg + NPCM_I2CCTL1);
+        i2cctl1 &= ~NPCM_I2CCTL1_RWS;
+        if (enable)
+                i2cctl1 |= NPCM_I2CCTL1_NMINTE;
+        else
+                i2cctl1 &= ~NPCM_I2CCTL1_NMINTE;
+
+        iowrite8(i2cctl1, bus->reg + NPCM_I2CCTL1);
+}
+
+static int npcm_i2c_slave_enable(struct npcm_i2c *bus, enum i2c_addr addr_type,
+                u8 addr, bool enable)
+{
+	u8 i2cctl1;
+	u8 i2cctl3;
+	u8 sa_reg;
+
+	sa_reg = (addr & 0x7F) | FIELD_PREP(NPCM_I2CADDR_SAEN, enable);
+	if (addr_type == I2C_GC_ADDR) {
+		i2cctl1 = ioread8(bus->reg + NPCM_I2CCTL1);
+		if (enable)
+			i2cctl1 |= NPCM_I2CCTL1_GCMEN;
+		else
+			i2cctl1 &= ~NPCM_I2CCTL1_GCMEN;
+		iowrite8(i2cctl1, bus->reg + NPCM_I2CCTL1);
+		return 0;
+	} else if (addr_type == I2C_ARP_ADDR) {
+		i2cctl3 = ioread8(bus->reg + NPCM_I2CCTL3);
+		if (enable)
+			i2cctl3 |= NPCM_I2CCTL3_ARPMEN;
+		else
+			i2cctl3 &= ~NPCM_I2CCTL3_ARPMEN;
+		iowrite8(i2cctl3, bus->reg + NPCM_I2CCTL3);
+		return 0;
+	}
+	if (addr_type > I2C_SLAVE_ADDR2 && addr_type <= I2C_SLAVE_ADDR10)
+		dev_err(bus->dev, "try to enable more than 2 SA not supported\n");
+
+	if (addr_type >= I2C_ARP_ADDR)
+		return -EFAULT;
+
+	/* Set and enable the address */
+	iowrite8(sa_reg, bus->reg + npcm_i2caddr[addr_type]);
+	npcm_i2c_slave_int_enable(bus, enable);
+
+	return 0;
+}
+void npcm_set_ssif_bmc_status(struct ssif_bmc_ctx *ssif_bmc, unsigned int status)
+{
+	struct npcm_i2c *bus;
+	unsigned long flags;
+
+	bus = (struct npcm_i2c *)ssif_bmc->priv;
+	if (!bus)
+		return;
+
+	spin_lock_irqsave(&bus->lock, flags);
+
+	if (status & SSIF_BMC_BUSY)
+		npcm_i2c_slave_enable(bus, I2C_SLAVE_ADDR1, ssif_bmc->client->addr, false);
+    else if (status & SSIF_BMC_READY)
+		npcm_i2c_slave_enable(bus, I2C_SLAVE_ADDR1, ssif_bmc->client->addr, true);
+
+
+	spin_unlock_irqrestore(&bus->lock, flags);
+
+
+}
 
 static inline struct ssif_bmc_ctx *to_ssif_bmc(struct file *file)
 {
@@ -194,6 +443,8 @@ static ssize_t ssif_bmc_write(struct file *file, const char __user *buf, size_t 
 			return ret;
 		spin_lock_irqsave(&ssif_bmc->lock, flags);
 	}
+	if (ssif_bmc->set_ssif_bmc_status)
+		ssif_bmc->set_ssif_bmc_status(ssif_bmc, SSIF_BMC_READY);
 
 	/*
 	 * The write must complete before the response timeout fired, otherwise
@@ -214,6 +465,7 @@ static ssize_t ssif_bmc_write(struct file *file, const char __user *buf, size_t 
 
 	/* ssif_bmc not busy */
 	ssif_bmc->busy = false;
+
 
 	/* Clean old request buffer */
 	memset(&ssif_bmc->request, 0, sizeof(struct ipmi_ssif_msg));
@@ -317,12 +569,17 @@ static void handle_request(struct ssif_bmc_ctx *ssif_bmc)
 {
 	/* set ssif_bmc to busy waiting for response */
 	ssif_bmc->busy = true;
+
 	/* Request message is available to process */
 	ssif_bmc->request_available = true;
 	/* Clean old response buffer */
 	memset(&ssif_bmc->response, 0, sizeof(struct ipmi_ssif_msg));
+
 	/* This is the new READ request.*/
 	wake_up_all(&ssif_bmc->wait_queue);
+
+	if (ssif_bmc->set_ssif_bmc_status)
+		ssif_bmc->set_ssif_bmc_status(ssif_bmc, SSIF_BMC_BUSY);
 
 	/* Armed timer to recover slave from busy state in case of no response */
 	if (!ssif_bmc->response_timer_inited) {
@@ -830,6 +1087,10 @@ static int ssif_bmc_probe(struct i2c_client *client)
 
 	ssif_bmc->client = client;
 	ssif_bmc->client->flags |= I2C_CLIENT_SLAVE;
+	ssif_bmc->priv = i2c_get_adapdata(client->adapter);
+	ssif_bmc->set_ssif_bmc_status = npcm_set_ssif_bmc_status;
+	if (ssif_bmc->set_ssif_bmc_status)
+		ssif_bmc->set_ssif_bmc_status(ssif_bmc, SSIF_BMC_READY);
 
 	/* Register I2C slave */
 	i2c_set_clientdata(client, ssif_bmc);
