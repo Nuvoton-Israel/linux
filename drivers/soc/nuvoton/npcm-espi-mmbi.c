@@ -922,8 +922,8 @@ static void mmbi_desc_init(struct npcm_mmbi_channel *channel,
 	ch_desc.nex_inst_base_addr = 0;
 	ch_desc.b2h_ba = sizeof(struct mmbi_cap_desc) + sizeof(struct host_rop);
 	ch_desc.h2b_ba = b2h_size + sizeof(struct host_rwp);
-	ch_desc.b2h_d = (b2h_size - (sizeof(struct mmbi_cap_desc) + sizeof(struct host_rop))) / 16;
-	ch_desc.h2b_d = (b2h_size - sizeof(struct host_rwp)) / 16; /* 32KB = 0x800 * 16 */
+	ch_desc.b2h_d = b2h_size / 16;
+	ch_desc.h2b_d = b2h_size / 16; /* 32KB = 0x800 * 16 */
 
 	ch_desc.buffer_type = 0x01; /* VMSCB */
 	ch_desc.bt_desc.host_rop_p = sizeof(struct mmbi_cap_desc);
