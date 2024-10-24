@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/iio/adc/nuvoton,nct720x.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton nct7202 and similar ADCs
+
+maintainers:
+  - Eason Yang <yhyang2@nuvoton.com>
+
+description: |
+   Family of ADCs with i2c interface.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,nct7201
+      - nuvoton,nct7202
+
+  reg:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+  - read-vin-data-size : number of data bits per read vin (either 8 or 16)
+
+additionalProperties: false
+
+examples:
+  - |
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        nct7202@1d {
+            compatible = "nuvoton,nct7202";
+            reg = <0x1d>;
+            read-vin-data-size = <8>;
+        };
+    };
