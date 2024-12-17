@@ -17,6 +17,7 @@
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
 #include <linux/reset.h>
+#include <linux/of.h>
 
 struct npcm_adc_info {
 	u32 data_mask;
@@ -438,6 +439,15 @@ static int npcm_adc_probe(struct platform_device *pdev)
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
+
+	if (of_device_is_compatible(dev->of_node, "nuvoton,npcm845-adc")) {
+		reg_con = ioread32(info->regs + NPCM_ADCCON);
+		iowrite32(reg_con | NPCM_ADCCON_ADC_EN, info->regs + NPCM_ADCCON);
+		reset_control_assert(info->reset);
+		udelay(1);
+		reset_control_deassert(info->reset);
+		udelay(1);
+	}
 
 	ret = devm_request_irq(&pdev->dev, irq, npcm_adc_isr, 0,
 			       "NPCM_ADC", indio_dev);
