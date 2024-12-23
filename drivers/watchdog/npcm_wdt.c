@@ -18,6 +18,7 @@
 /* NPCM7xx GCR module */
 #define NPCM7XX_RESSR_OFFSET		0x6C
 #define NPCM7XX_INTCR2_OFFSET		0x60
+#define NPCM8XX_SCRPAD10_OFFSET		0xE28
 
 #define NPCM7XX_PORST			BIT(31)
 #define NPCM7XX_CORST			BIT(30)
@@ -238,9 +239,14 @@ static void npcm_get_reset_status(struct npcm_wdt *wdt, struct device *dev)
 	}
 
 	/* In Arbel, after reading the INTCR2 Clear reset status */
-	if (of_device_is_compatible(dev->of_node, "nuvoton,npcm845-wdt"))
-		regmap_write(gcr_regmap, NPCM7XX_INTCR2_OFFSET,
-			     rstval & ~NPCM8XX_RST);
+	if (of_device_is_compatible(dev->of_node, "nuvoton,npcm845-wdt")) {
+		if (rstval & NPCM8XX_RST) {
+			regmap_write(gcr_regmap, NPCM7XX_INTCR2_OFFSET,
+				     rstval & ~NPCM8XX_RST);
+			regmap_write(gcr_regmap, NPCM8XX_SCRPAD10_OFFSET, rstval);
+		} else
+			regmap_read(gcr_regmap, NPCM8XX_SCRPAD10_OFFSET, &rstval);
+	}
 
 	if (rstval & wdt->card_reset)
 		wdt->wdd.bootstatus |= WDIOF_CARDRESET;
