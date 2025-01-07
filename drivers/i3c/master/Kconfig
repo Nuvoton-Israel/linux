@@ -44,6 +44,20 @@ config SVC_I3C_MASTER
 	help
 	  Support for Silvaco I3C Dual-Role Master Controller.
 
+config NPCM845_I3C_MASTER
+	tristate "Nuvoton NPCM845 I3C master driver"
+	depends on I3C
+	depends on HAS_IOMEM
+	depends on ARCH_NPCM || COMPILE_TEST
+	help
+	  Support for Nuvoton NPCM845 I3C Master Controller.
+
+	  This hardware is an instance of the SVC I3C controller; this
+	  driver adds platform specific support for NPCM845 hardware.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called npcm845-i3c-master.
+
 config MIPI_I3C_HCI
 	tristate "MIPI I3C Host Controller Interface driver (EXPERIMENTAL)"
 	depends on I3C
