@@ -3113,6 +3113,13 @@ F:	Documentation/userspace-api/media/drivers/npcm-video.rst
 F:	drivers/media/platform/nuvoton/
 F:	include/uapi/linux/npcm-video.h
 
+ARM/NUVOTON NPCM845 I3C MASTER DRIVER
+M:	Stanley Chu <yschu@nuvoton.com>
+M:	James Chiang <cpchiang1@nuvoton.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/i3c/nuvoton,i3c-master.yaml
+F:	drivers/i3c/master/npcm845-i3c-master.c
+
 ARM/NUVOTON WPCM450 ARCHITECTURE
 M:	Jonathan Neuschäfer <j.neuschaefer@gmx.net>
 L:	openbmc@lists.ozlabs.org (moderated for non-subscribers)
