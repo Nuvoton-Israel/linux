@@ -45,6 +45,19 @@
 
 #define I3C_HUB_DEV_CONF				0x13
 #define I3C_HUB_IO_STRENGTH				0x14
+#define  TP0145_IO_STRENGTH_MASK			GENMASK(1, 0)
+#define  TP0145_IO_STRENGTH(x)				(((x) << 0) & TP0145_IO_STRENGTH_MASK)
+#define  TP2367_IO_STRENGTH_MASK			GENMASK(3, 2)
+#define  TP2367_IO_STRENGTH(x)				(((x) << 2) & TP2367_IO_STRENGTH_MASK)
+#define  CP0_IO_STRENGTH_MASK				GENMASK(5, 4)
+#define  CP0_IO_STRENGTH(x)				(((x) << 4) & CP0_IO_STRENGTH_MASK)
+#define  CP1_IO_STRENGTH_MASK				GENMASK(7, 6)
+#define  CP1_IO_STRENGTH(x)				(((x) << 6) & CP1_IO_STRENGTH_MASK)
+#define  IO_STRENGTH_20_OHM				0x00
+#define  IO_STRENGTH_30_OHM				0x01
+#define  IO_STRENGTH_40_OHM				0x02
+#define  IO_STRENGTH_50_OHM				0x03
+
 #define I3C_HUB_NET_OPER_MODE_CONF			0x15
 #define I3C_HUB_LDO_CONF				0x16
 #define  CP0_LDO_VOLTAGE_MASK				GENMASK(1, 0)
@@ -168,6 +181,13 @@
 #define I3C_HUB_DT_TP_PULLUP_ENABLED			0x01
 #define I3C_HUB_DT_TP_PULLUP_NOT_DEFINED		0xFF
 
+/* CP/TP IO strength */
+#define I3C_HUB_DT_IO_STRENGTH_20_OHM			0x00
+#define I3C_HUB_DT_IO_STRENGTH_30_OHM			0x01
+#define I3C_HUB_DT_IO_STRENGTH_40_OHM			0x02
+#define I3C_HUB_DT_IO_STRENGTH_50_OHM			0x03
+#define I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED		0xFF
+
 /* TP connection setting */
 #define I3C_HUB_DT_TP_CONNECT_ENABLED			0x00
 #define I3C_HUB_DT_TP_CONNECT_DISABLED			0x01
@@ -185,6 +205,10 @@ struct dt_settings {
 	u8 tp2367_ldo;
 	u8 tp0145_pullup;
 	u8 tp2367_pullup;
+	u8 cp0_io_strength;
+	u8 cp1_io_strength;
+	u8 tp0145_io_strength;
+	u8 tp2367_io_strength;
 	struct tp_setting tp[I3C_HUB_TP_MAX_COUNT];
 };
 
@@ -232,6 +256,12 @@ static const struct hub_setting tp_pullup_settings[] = {
 	{"enabled",	I3C_HUB_DT_TP_PULLUP_ENABLED},
 };
 
+static const struct hub_setting io_strength_settings[] = {
+	{ "20Ohms",	I3C_HUB_DT_IO_STRENGTH_20_OHM },
+	{ "30Ohms",	I3C_HUB_DT_IO_STRENGTH_30_OHM },
+	{ "40Ohms",	I3C_HUB_DT_IO_STRENGTH_40_OHM },
+	{ "50Ohms",	I3C_HUB_DT_IO_STRENGTH_50_OHM },
+};
 static const struct hub_setting tp_connect_settings[] = {
 	{"disabled",	I3C_HUB_DT_TP_CONNECT_DISABLED},
 	{"enabled",	I3C_HUB_DT_TP_CONNECT_ENABLED},
@@ -262,6 +292,20 @@ static u8 i3c_hub_pullup_dt_to_reg(u8 dt_value)
 		return PULLUP_1K;
 	default:
 		return PULLUP_2K;
+	}
+}
+
+static u8 i3c_hub_io_strength_dt_to_reg(u8 dt_value)
+{
+	switch (dt_value) {
+	case I3C_HUB_DT_IO_STRENGTH_50_OHM:
+		return IO_STRENGTH_50_OHM;
+	case I3C_HUB_DT_IO_STRENGTH_40_OHM:
+		return IO_STRENGTH_40_OHM;
+	case I3C_HUB_DT_IO_STRENGTH_30_OHM:
+		return IO_STRENGTH_30_OHM;
+	default:
+		return IO_STRENGTH_20_OHM;
 	}
 }
 
@@ -369,6 +413,15 @@ static void i3c_hub_of_get_configuration(struct device *dev, const struct device
 	if (ret)
 		dev_warn(dev, "Invalid or not specified setting for tp2367-pullup\n");
 
+	i3c_hub_of_get_setting(node, "cp0-io-strength", io_strength_settings,
+			       ARRAY_SIZE(io_strength_settings), &priv->settings.cp0_io_strength);
+	i3c_hub_of_get_setting(node, "cp1-io-strength", io_strength_settings,
+			       ARRAY_SIZE(io_strength_settings), &priv->settings.cp1_io_strength);
+	i3c_hub_of_get_setting(node, "tp0145-io-strength", io_strength_settings,
+			       ARRAY_SIZE(io_strength_settings), &priv->settings.tp0145_io_strength);
+	i3c_hub_of_get_setting(node, "tp2367-io-strength", io_strength_settings,
+			       ARRAY_SIZE(io_strength_settings), &priv->settings.tp2367_io_strength);
+
 	i3c_hub_tp_of_get_setting(dev, node, priv->settings.tp);
 }
 
@@ -383,6 +436,10 @@ static void i3c_hub_of_default_configuration(struct device *dev)
 	priv->settings.tp2367_ldo = I3C_HUB_DT_LDO_NOT_DEFINED;
 	priv->settings.tp0145_pullup = I3C_HUB_DT_PULLUP_NOT_DEFINED;
 	priv->settings.tp2367_pullup = I3C_HUB_DT_PULLUP_NOT_DEFINED;
+	priv->settings.cp0_io_strength = I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED;
+	priv->settings.cp1_io_strength = I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED;
+	priv->settings.tp0145_io_strength = I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED;
+	priv->settings.tp2367_io_strength = I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED;
 
 	for (id = 0; id < I3C_HUB_TP_MAX_COUNT; ++id) {
 		priv->settings.tp[id].mode = I3C_HUB_DT_TP_MODE_NOT_DEFINED;
@@ -473,6 +530,46 @@ static int i3c_hub_hw_configure_ldo(struct device *dev)
 	return regmap_update_bits(priv->regmap, I3C_HUB_LDO_AND_PULLUP_CONF, ldo_en, ldo_en);
 }
 
+static int i3c_hub_hw_configure_io_strength(struct device *dev)
+{
+	struct i3c_hub *priv = dev_get_drvdata(dev);
+	u8 mask_all = 0, val_all = 0;
+	u32 reg_val;
+	u8 val;
+	struct dt_settings tmp;
+	int ret;
+
+	/* Get IO strength configuration to figure out what needs to be changed */
+	ret = regmap_read(priv->regmap, I3C_HUB_IO_STRENGTH, &reg_val);
+	if (ret)
+		return ret;
+
+	tmp = priv->settings;
+	if (tmp.cp0_io_strength != I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED) {
+		val = CP0_IO_STRENGTH(i3c_hub_io_strength_dt_to_reg(tmp.cp0_io_strength));
+		mask_all |= CP0_IO_STRENGTH_MASK;
+		val_all |= val;
+	}
+	if (tmp.cp1_io_strength != I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED) {
+		val = CP1_IO_STRENGTH(i3c_hub_io_strength_dt_to_reg(tmp.cp1_io_strength));
+		mask_all |= CP1_IO_STRENGTH_MASK;
+		val_all |= val;
+	}
+	if (tmp.tp0145_io_strength != I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED) {
+		val = TP0145_IO_STRENGTH(i3c_hub_io_strength_dt_to_reg(tmp.tp0145_io_strength));
+		mask_all |= TP0145_IO_STRENGTH_MASK;
+		val_all |= val;
+	}
+	if (tmp.tp2367_io_strength != I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED) {
+		val = TP2367_IO_STRENGTH(i3c_hub_io_strength_dt_to_reg(tmp.tp2367_io_strength));
+		mask_all |= TP2367_IO_STRENGTH_MASK;
+		val_all |= val;
+	}
+
+	/* Set IO strength if required */
+	return regmap_update_bits(priv->regmap, I3C_HUB_IO_STRENGTH, mask_all, val_all);
+}
+
 static int i3c_hub_hw_configure_tp(struct device *dev)
 {
 	struct i3c_hub *priv = dev_get_drvdata(dev);
@@ -539,6 +636,10 @@ static int i3c_hub_configure_hw(struct device *dev)
 		return ret;
 
 	ret = i3c_hub_hw_configure_ldo(dev);
+	if (ret)
+		return ret;
+
+	ret = i3c_hub_hw_configure_io_strength(dev);
 	if (ret)
 		return ret;
 
