@@ -846,8 +846,10 @@ static void process_smbus_cmd(struct ssif_bmc_ctx *ssif_bmc, u8 *val)
 		 * to timeout and resend a new request. In such case check for
 		 * pending response and clear it
 		 */
-		if (ssif_bmc->response_in_progress)
+		if (ssif_bmc->response_in_progress) {
 			complete_response(ssif_bmc);
+			ssif_bmc->part_buf.smbus_cmd = *val;
+		}
 
 		/* This is new request, flip aborting flag if set */
 		if (ssif_bmc->aborting)
