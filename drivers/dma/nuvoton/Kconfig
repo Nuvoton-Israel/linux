@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config NPCM_GDMA
+	tristate "Nuvoton NPCM GDMA support"
+	depends on ARCH_NPCM || COMPILE_TEST
+	select DMA_ENGINE
+	help
+	  Enable support for GDMA controller on Nuvoton NPCM SoCs.
