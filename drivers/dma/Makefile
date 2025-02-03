@@ -83,6 +83,7 @@ obj-$(CONFIG_FSL_DPAA2_QDMA) += fsl-dpaa2-qdma/
 obj-$(CONFIG_INTEL_LDMA) += lgm/
 
 obj-y += mediatek/
+obj-y += nuvoton/
 obj-y += qcom/
 obj-y += ti/
 obj-y += xilinx/
