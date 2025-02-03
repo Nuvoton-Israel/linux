@@ -215,6 +215,36 @@
 			status = "disabled";
 		};
 
+		gdma0: gdma@f0850000 {
+			compatible = "nuvoton,npcm-gdma";
+			reg = <0 0xf0850000 0 0x1000>,
+			      <0 0xf0800300 0 0x4>;
+			reg-names = "gdmac", "reqc";
+			interrupts = <GIC_SPI 88 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			status = "disabled";
+		};
+
+		gdma1: gdma@f0851000 {
+			compatible = "nuvoton,npcm-gdma";
+			reg = <0 0xf0851000 0 0x1000>,
+			      <0 0xf0800304 0 0x4>;
+			reg-names = "gdmac", "reqc";
+			interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			status = "disabled";
+		};
+
+		gdma2: gdma@f0852000 {
+			compatible = "nuvoton,npcm-gdma";
+			reg = <0 0xf0852000 0 0x1000>,
+			      <0 0xf0800308 0 0x4>;
+			reg-names = "gdmac", "reqc";
+			interrupts = <GIC_SPI 90 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			status = "disabled";
+		};
+
 		apb {
 			#address-cells = <1>;
 			#size-cells = <1>;
