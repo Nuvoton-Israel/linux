@@ -293,6 +293,12 @@
 					#gpio-cells = <2>;
 					status = "disabled";
 				};
+
+				espi_slave: espi_slave {
+					compatible = "nuvoton,npcm845-espi-slave";
+					interrupts = <GIC_SPI 18 IRQ_TYPE_LEVEL_HIGH>;
+					status = "disabled";
+				};
 			};
 
 			peci: peci-controller@100000 {
