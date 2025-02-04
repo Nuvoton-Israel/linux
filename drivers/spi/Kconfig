@@ -662,6 +662,11 @@ config SPI_NPCM_PSPI
 	  This driver provides support for Nuvoton NPCM BMC
 	  Peripheral SPI controller in master mode.
 
+config SPI_NPCM_FLASH
+	tristate "Nuvoton ESPI Flash support"
+	help
+	  Enable Nuvoton ESPI Flash
+
 config SPI_LANTIQ_SSC
 	tristate "Lantiq SSC SPI controller"
 	depends on LANTIQ || X86 || COMPILE_TEST
