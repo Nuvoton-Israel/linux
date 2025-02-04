@@ -2379,6 +2379,19 @@ static void npcm_i2c_init_debugfs(struct platform_device *pdev,
 	bus->debugfs = d;
 }
 
+void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable)
+{
+	struct npcm_i2c *bus = i2c_get_adapdata(client->adapter);
+	unsigned long flags;
+
+	spin_lock_irqsave(&bus->lock, flags);
+
+	npcm_i2c_slave_enable(bus, I2C_SLAVE_ADDR1, client->addr, enable);
+
+	spin_unlock_irqrestore(&bus->lock, flags);
+}
+EXPORT_SYMBOL(npcm_i2c_client_slave_enable);
+
 static int npcm_i2c_probe_bus(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
