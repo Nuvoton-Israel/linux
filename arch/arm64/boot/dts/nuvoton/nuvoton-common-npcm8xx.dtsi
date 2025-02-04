@@ -299,6 +299,13 @@
 					interrupts = <GIC_SPI 18 IRQ_TYPE_LEVEL_HIGH>;
 					status = "disabled";
 				};
+
+				espi_flash: espi_flash {
+					compatible = "nuvoton,npcm845-espi-flash";
+					interrupts = <GIC_SPI 18 IRQ_TYPE_LEVEL_HIGH>;
+					nuvoton,sysgcr = <&gcr>;
+					status = "disabled";
+				};
 			};
 
 			peci: peci-controller@100000 {
