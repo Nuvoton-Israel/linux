@@ -38,6 +38,13 @@ config NPCM_PCI_MMBI
 	  handle the data exchange between BMC and host over the
 	  PCI Mailbox interface.
 
+config NPCM_ESPI_SLAVE
+	tristate "NPCM SLAVE Driver"
+	depends on ARCH_NPCM || COMPILE_TEST
+	help
+	  Provides a driver to implement the espi slave driver that
+	  handle the espi events.
+
 endmenu
 
 endif
