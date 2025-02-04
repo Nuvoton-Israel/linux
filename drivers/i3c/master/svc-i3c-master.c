@@ -11,7 +11,9 @@
 #include <linux/clk.h>
 #include <linux/completion.h>
 #include <linux/debugfs.h>
+#include <linux/dmaengine.h>
 #include <linux/dma-mapping.h>
+#include <linux/dma/npcm_gdma.h>
 #include <linux/errno.h>
 #include <linux/i3c/master.h>
 #include <linux/i3c/target.h>
@@ -200,23 +202,7 @@
 
 /* DMA definitions */
 #define MAX_DMA_COUNT		1024
-#define DMA_CH_TX		0
-#define DMA_CH_RX		1
-#define NPCM_GDMA_CTL(n)	(n * 0x20 + 0x00)
-#define   NPCM_GDMA_CTL_GDMAMS(x) FIELD_PREP(GENMASK(3, 2), (x))
-#define   NPCM_GDMA_CTL_TWS(x) FIELD_PREP(GENMASK(13, 12), (x))
-#define   NPCM_GDMA_CTL_GDMAEN	BIT(0)
-#define   NPCM_GDMA_CTL_DAFIX	BIT(6)
-#define   NPCM_GDMA_CTL_SAFIX	BIT(7)
-#define   NPCM_GDMA_CTL_SIEN	BIT(8)
-#define   NPCM_GDMA_CTL_DM	BIT(15)
-#define   NPCM_GDMA_CTL_TC	BIT(18)
-#define NPCM_GDMA_SRCB(n)	(n * 0x20 + 0x04)
-#define NPCM_GDMA_DSTB(n)	(n * 0x20 + 0x08)
-#define NPCM_GDMA_TCNT(n)	(n * 0x20 + 0x0C)
-#define NPCM_GDMA_CSRC(n)	(n * 0x20 + 0x10)
-#define NPCM_GDMA_CDST(n)	(n * 0x20 + 0x14)
-#define NPCM_GDMA_CTCNT(n)	(n * 0x20 + 0x18)
+#define SVC_I3C_GDMA_MUX(n)	(((n & 0xFFFF) >> 12) * 2 + 6)
 
 struct svc_i3c_cmd {
 	u8 addr;
@@ -318,8 +304,9 @@ struct svc_i3c_master {
 	} slave;
 
 	/* For DMA */
-	void __iomem *dma_regs;
-	void __iomem *dma_mux_regs;
+	struct dma_chan *chan_tx;
+	struct dma_chan *chan_rx;
+	dma_cookie_t cookie;
 	bool use_dma;
 	struct completion xfer_comp;
 	char *dma_tx_buf;
@@ -790,8 +777,9 @@ static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 	struct svc_i3c_master *master = (struct svc_i3c_master *)dev_id;
 	u32 active = readl(master->regs + SVC_I3C_MINTMASKED), mstatus;
 	struct npcm_dma_xfer_desc *xfer = &master->dma_xfer;
-	int ch = xfer->rnw ? DMA_CH_RX : DMA_CH_TX;
 	u32 count;
+	struct dma_chan *dma_chan;
+	struct dma_tx_state state;
 
 	if (SVC_I3C_MSTATUS_COMPLETE(active)) {
 		/* Clear COMPLETE status before emit STOP */
@@ -804,7 +792,9 @@ static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 			svc_i3c_master_emit_stop(master);
 
 		/* Get the DMA transfer count */
-		count = readl(master->dma_regs + NPCM_GDMA_CTCNT(ch));
+		dma_chan = xfer->rnw ? master->chan_rx : master->chan_tx;
+		dmaengine_tx_status(dma_chan, master->cookie, &state);
+		count = state.residue;
 		count = (count > xfer->len) ? 0 :
 			(xfer->len - count);
 		dev_dbg(master->dev, "dma xfer count %u\n", count);
@@ -1460,8 +1450,8 @@ static int svc_i3c_master_write(struct svc_i3c_master *master,
 
 static void svc_i3c_master_stop_dma(struct svc_i3c_master *master)
 {
-	writel(0, master->dma_regs + NPCM_GDMA_CTL(DMA_CH_TX));
-	writel(0, master->dma_regs + NPCM_GDMA_CTL(DMA_CH_RX));
+	dmaengine_terminate_all(master->chan_tx);
+	dmaengine_terminate_all(master->chan_rx);
 	writel(0, master->regs + SVC_I3C_MDMACTRL);
 
 	/* Disable COMPLETE interrupt */
@@ -1483,21 +1473,22 @@ static void svc_i3c_master_write_dma_table(const u8 *src, u32 *dst, int len)
 	dst[len - 1] |= 0x100;
 }
 
-static int svc_i3c_master_start_dma(struct svc_i3c_master *master)
+static bool svc_i3c_master_start_dma(struct svc_i3c_master *master)
 {
 	struct npcm_dma_xfer_desc *xfer = &master->dma_xfer;
-	int ch = xfer->rnw ? DMA_CH_RX : DMA_CH_TX;
+	struct dma_async_tx_descriptor *dma_desc;
+	struct dma_chan *dma_chan;
+	struct scatterlist sg;
+	enum dma_transfer_direction dir;
 	u32 val;
 
 	if (!xfer->len)
-		return 0;
+		return false;
 
 	dev_dbg(master->dev, "start dma for %s, count %d\n",
 		xfer->rnw ? "R" : "W", xfer->len);
 
-	/* Set DMA transfer count */
 	xfer->actual_len = 0;
-	writel(xfer->len, master->dma_regs + NPCM_GDMA_TCNT(ch));
 
 	/* Write data to DMA TX table */
 	if (!xfer->rnw)
@@ -1508,27 +1499,34 @@ static int svc_i3c_master_start_dma(struct svc_i3c_master *master)
 	/*
 	 * Setup I3C DMA control
 	 * 1 byte DMA width
-	 * Enable DMA util dsiabled
+	 * Enable DMA util disabled
 	 */
 	val = SVC_I3C_MDMACTRL_DMAWIDTH(1);
 	val |= xfer->rnw ? SVC_I3C_MDMACTRL_DMAFB(2) : SVC_I3C_MDMACTRL_DMATB(2);
 	writel(val, master->regs + SVC_I3C_MDMACTRL);
 
-	/*
-	 * Enable DMA
-	 * Source Address Fixed for RX
-	 * Destination Address Fixed for TX
-	 * Use 32-bit transfer width for TX (queal to MWDATAB register width)
-	 */
-	val = NPCM_GDMA_CTL_GDMAEN;
-	if (xfer->rnw)
-		val |= NPCM_GDMA_CTL_SAFIX | NPCM_GDMA_CTL_GDMAMS(2);
-	else
-		val |= NPCM_GDMA_CTL_DAFIX | NPCM_GDMA_CTL_GDMAMS(1) | NPCM_GDMA_CTL_TWS(2);
-	writel(val, master->dma_regs + NPCM_GDMA_CTL(ch));
+	sg_init_table(&sg, 1);
+	sg_dma_len(&sg) = xfer->len;
+
+	if (xfer->rnw) {
+		dma_chan = master->chan_rx;
+		sg_dma_address(&sg) = master->dma_rx_addr;
+		dir = DMA_DEV_TO_MEM;
+	} else {
+		dma_chan = master->chan_tx;
+		sg_dma_address(&sg) = master->dma_tx_addr;
+		dir = DMA_MEM_TO_DEV;
+	}
+
+	dma_desc = dmaengine_prep_slave_sg(dma_chan, &sg, 1, dir, DMA_CTRL_ACK);
+	if (!dma_desc)
+		return false;
+
+	master->cookie = dmaengine_submit(dma_desc);
+	dma_async_issue_pending(dma_chan);
 	master->dma_started = true;
 
-	return 0;
+	return true;
 }
 
 static int svc_i3c_master_xfer(struct svc_i3c_master *master,
@@ -1615,7 +1613,11 @@ retry_start:
 		master->dma_xfer.len = xfer_len;
 		master->dma_xfer.rnw = rnw;
 		master->dma_xfer.end = !continued;
-		svc_i3c_master_start_dma(master);
+		ret = svc_i3c_master_start_dma(master);
+		if (!ret) {
+			ret = -EIO;
+			goto emit_stop;
+		}
 	}
 
 	ret = readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
@@ -1669,8 +1671,13 @@ retry_start:
 			goto emit_stop;
 		}
 
-		if (use_dma && rnw)
-			svc_i3c_master_start_dma(master);
+		if (use_dma && rnw) {
+			ret = svc_i3c_master_start_dma(master);
+			if (!ret) {
+				ret = -EIO;
+				goto emit_stop;
+			}
+		}
 
 		/* Clear COMPLETE status of this IBI transaction */
 		writel(SVC_I3C_MINT_COMPLETE, master->regs + SVC_I3C_MSTATUS);
@@ -2266,29 +2273,29 @@ static void svc_i3c_slave_enable_interrupts(struct svc_i3c_master *master,
 
 static void svc_i3c_slave_stop_dma(struct svc_i3c_master *master)
 {
-	writel(0, master->dma_regs + NPCM_GDMA_CTL(DMA_CH_TX));
-	writel(0, master->dma_regs + NPCM_GDMA_CTL(DMA_CH_RX));
+	dmaengine_terminate_all(master->chan_tx);
+	dmaengine_terminate_all(master->chan_rx);
 	writel(0, master->regs + SVC_I3C_MDMACTRL);
 }
 
-static int svc_i3c_slave_start_dma(struct svc_i3c_master *master,
+static bool svc_i3c_slave_start_dma(struct svc_i3c_master *master,
 				   struct svc_i3c_xfer *xfer)
 {
 	struct svc_i3c_cmd *cmd = &xfer->cmds[0];
-	int ch = cmd->rnw ? DMA_CH_RX : DMA_CH_TX;
+	struct dma_async_tx_descriptor *dma_desc;
+	struct dma_chan *dma_chan;
+	struct scatterlist sg;
+	enum dma_transfer_direction dir;
 	u32 val;
 
 	if (!cmd->len)
-		return 0;
+		return false;
 
 	dev_dbg(master->dev, "slave start dma for %s, count %d\n",
 		cmd->rnw ? "R" : "W", cmd->len);
 
-	/* Set DMA transfer count */
-	writel(cmd->len, master->dma_regs + NPCM_GDMA_TCNT(ch));
-
 	/* Write data to DMA TX table */
-	if (ch == DMA_CH_TX)
+	if (!cmd->rnw)
 		svc_i3c_master_write_dma_table(cmd->out,
 					       (u32 *)master->dma_tx_buf,
 					       cmd->len);
@@ -2299,38 +2306,47 @@ static int svc_i3c_slave_start_dma(struct svc_i3c_master *master,
 	 * Enable DMA util dsiabled
 	 */
 	val = SVC_I3C_DMACTRL_DMAWIDTH(1);
-	val |= (ch == DMA_CH_RX) ? SVC_I3C_DMACTRL_DMAFB(2) : SVC_I3C_DMACTRL_DMATB(2);
+	val |= cmd->rnw ? SVC_I3C_DMACTRL_DMAFB(2) : SVC_I3C_DMACTRL_DMATB(2);
 	writel(val, master->regs + SVC_I3C_DMACTRL);
 
 	/* Clear STOP status because this will be used as check point of transaction end */
 	writel(SVC_I3C_STATUS_STOP, master->regs + SVC_I3C_STATUS);
 
-	/*
-	 * Enable DMA
-	 * Source Address Fixed for RX
-	 * Destination Address Fixed for TX
-	 * Use 32-bit transfer width for TX (queal to MWDATAB register width)
-	 */
-	val = NPCM_GDMA_CTL_GDMAEN;
-	if (ch == DMA_CH_RX)
-		val |= NPCM_GDMA_CTL_SAFIX | NPCM_GDMA_CTL_GDMAMS(2);
-	else
-		val |= NPCM_GDMA_CTL_DAFIX | NPCM_GDMA_CTL_GDMAMS(1) | NPCM_GDMA_CTL_TWS(2);
-	writel(val, master->dma_regs + NPCM_GDMA_CTL(ch));
+	sg_init_table(&sg, 1);
+	sg_dma_len(&sg) = cmd->len;
 
-	return 0;
+	if (cmd->rnw) {
+		dma_chan = master->chan_rx;
+		sg_dma_address(&sg) = master->dma_rx_addr;
+		dir = DMA_DEV_TO_MEM;
+	} else {
+		dma_chan = master->chan_tx;
+		sg_dma_address(&sg) = master->dma_tx_addr;
+		dir = DMA_MEM_TO_DEV;
+	}
+
+	dma_desc = dmaengine_prep_slave_sg(dma_chan, &sg, 1, dir, DMA_CTRL_ACK);
+	if (!dma_desc)
+		return false;
+
+	master->cookie = dmaengine_submit(dma_desc);
+	dma_async_issue_pending(dma_chan);
+
+	return true;
 }
 
 static void svc_i3c_slave_check_complete(struct svc_i3c_master *master)
 {
 	struct svc_i3c_xfer *xfer = master->slave.cur;
 	struct svc_i3c_cmd *cmd = &xfer->cmds[0];
-	int ch = cmd->rnw ? DMA_CH_RX : DMA_CH_TX;
 	u32 count, reg;
 	bool hdr_mode = false;
+	struct dma_chan *dma_chan;
+	struct dma_tx_state state;
 
-	/* Get the DMA transfer count */
-	count = readl(master->dma_regs + NPCM_GDMA_CTCNT(ch));
+	dma_chan = cmd->rnw ? master->chan_rx : master->chan_tx;
+	dmaengine_tx_status(dma_chan, master->cookie, &state);
+	count = state.residue;
 
 	/* No rx data transferred */
 	if (cmd->rnw && cmd->len == count)
@@ -2589,66 +2605,89 @@ static void svc_i3c_init_debugfs(struct platform_device *pdev,
 	debugfs_create_u64("ibiwon_cnt", 0444, master->debugfs, &master->ibiwon_cnt);
 }
 
+static void svc_i3c_release_dma_chan(struct svc_i3c_master *master)
+{
+	if (master->chan_tx)
+		dma_release_channel(master->chan_tx);
+
+	if (master->chan_rx)
+		dma_release_channel(master->chan_rx);
+}
+
 static int svc_i3c_setup_dma(struct platform_device *pdev, struct svc_i3c_master *master)
 {
 	struct device *dev = &pdev->dev;
-	u32 dma_conn, reg_base;
+	struct dma_slave_config tx_slave_cfg = {}, rx_slave_cfg = {};
+	struct npcm_gdma_peripheral_config tx_pcfg = {}, rx_pcfg = {};
+	u32 reg_base;
 	int ret;
 
-	if (!of_property_read_bool(dev->of_node, "use-dma"))
+	if (!of_property_read_bool(dev->of_node, "dmas") ||
+	    !of_property_read_bool(dev->of_node, "dma-names"))
 		return 0;
 
-	ret = of_property_read_u32(dev->of_node, "dma-mux", &dma_conn);
-	if (ret) {
-		dev_dbg(dev, "no DMA channel mux configured\n");
-		return 0;
+	master->chan_tx = dma_request_chan(dev, "tx");
+	if (IS_ERR(master->chan_tx)) {
+		dev_err(dev, "Failed to request DMA tx channel\n");
+		return PTR_ERR(master->chan_tx);
 	}
 
-	master->dma_regs = devm_platform_ioremap_resource(pdev, 1);
-	if (IS_ERR(master->dma_regs))
-		return 0;
+	master->chan_rx = dma_request_chan(dev, "rx");
+	if (IS_ERR(master->chan_rx)) {
+		dev_err(dev, "Failed to request DMA rx channel\n");
+		ret = PTR_ERR(master->chan_rx);
+		goto release_chan;
+	}
 
-	master->dma_mux_regs = devm_platform_ioremap_resource(pdev, 2);
-	if (IS_ERR(master->dma_mux_regs))
-		return 0;
+	of_property_read_u32_index(dev->of_node, "reg", 0, &reg_base);
+
+	tx_slave_cfg.dst_addr = reg_base + SVC_I3C_MWDATAB;
+	tx_pcfg.connectivity = SVC_I3C_GDMA_MUX(reg_base);
+	tx_slave_cfg.peripheral_config = &tx_pcfg;
+	tx_slave_cfg.peripheral_size = sizeof(tx_pcfg);
+
+	ret = dmaengine_slave_config(master->chan_tx, &tx_slave_cfg);
+	if (ret) {
+		dev_err(dev, "Failed to configure DMA tx channel\n");
+		goto release_chan;
+	}
+
+	rx_slave_cfg.src_addr = reg_base + SVC_I3C_MRDATAB;
+	rx_pcfg.connectivity = SVC_I3C_GDMA_MUX(reg_base) + 1;
+	rx_slave_cfg.peripheral_config = &rx_pcfg;
+	rx_slave_cfg.peripheral_size = sizeof(rx_pcfg);
+
+	ret = dmaengine_slave_config(master->chan_rx, &rx_slave_cfg);
+	if (ret) {
+		dev_err(dev, "Failed to configure DMA rx channel\n");
+		goto release_chan;
+	}
 
 	/* DMA TX transfer width is 32 bits(MWDATAB width) for each byte sent to I3C bus */
 	master->dma_tx_buf = dma_alloc_coherent(dev, MAX_DMA_COUNT * 4,
 						&master->dma_tx_addr, GFP_KERNEL);
-	if (!master->dma_tx_buf)
-		return -ENOMEM;
+	if (!master->dma_tx_buf) {
+		ret = -ENOMEM;
+		goto release_chan;
+	}
 
 	master->dma_rx_buf = dma_alloc_coherent(dev, MAX_DMA_COUNT,
 						&master->dma_rx_addr, GFP_KERNEL);
 	if (!master->dma_rx_buf) {
 		dma_free_coherent(master->dev, MAX_DMA_COUNT * 4, master->dma_tx_buf,
 				  master->dma_tx_addr);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto release_chan;
 	}
 
-	/*
-	 * Set DMA channel connectivity
-	 * channel 0: I3C TX, channel 1: I3C RX
-	 */
-	writel(0x00600060 | (dma_conn + 1) << 16 | dma_conn, master->dma_mux_regs);
 	master->use_dma = true;
-	dev_info(dev, "Using DMA (mux %d)\n", dma_conn);
-
-	of_property_read_u32_index(dev->of_node, "reg", 0, &reg_base);
-	/*
-	 * Setup GDMA Channel for TX (Memory to I3C FIFO)
-	 */
-	writel(master->dma_tx_addr, master->dma_regs + NPCM_GDMA_SRCB(DMA_CH_TX));
-	writel(reg_base + SVC_I3C_MWDATAB, master->dma_regs +
-	       NPCM_GDMA_DSTB(DMA_CH_TX));
-	/*
-	 * Setup GDMA Channel for RX (I3C FIFO to Memory)
-	 */
-	writel(reg_base + SVC_I3C_MRDATAB, master->dma_regs +
-	       NPCM_GDMA_SRCB(DMA_CH_RX));
-	writel(master->dma_rx_addr, master->dma_regs + NPCM_GDMA_DSTB(DMA_CH_RX));
+	dev_info(dev, "Using GDMA\n");
 
 	return 0;
+
+release_chan:
+	svc_i3c_release_dma_chan(master);
+	return ret;
 }
 
 static int svc_i3c_master_probe(struct platform_device *pdev)
@@ -2755,7 +2794,10 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 	svc_i3c_master_clear_merrwarn(master);
 	svc_i3c_master_flush_fifo(master);
 
-	svc_i3c_setup_dma(pdev, master);
+	ret = svc_i3c_setup_dma(pdev, master);
+	if (ret)
+		goto rpm_disable;
+
 	svc_i3c_init_debugfs(pdev, master);
 
 	/* Register the master */

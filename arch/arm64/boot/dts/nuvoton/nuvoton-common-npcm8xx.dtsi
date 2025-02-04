@@ -251,8 +251,7 @@
 			compatible = "simple-bus";
 			interrupt-parent = <&gic>;
 			ranges = <0x0 0x0 0xf0000000 0x00300000>,
-				<0xfff00000 0x0 0xfff00000 0x00016000>,
-				<0xf0800000 0x0 0xf0800000 0x00060000>;
+				<0xfff00000 0x0 0xfff00000 0x00016000>;
 
 			lpc_kcs: lpc_kcs@7000 {
 				compatible = "nuvoton,npcm845-lpc-kcs",
@@ -565,9 +564,7 @@
 
 			i3c0: i3c@fff10000 {
 				compatible = "silvaco,i3c-master";
-				reg = <0xfff10000 0x1000>,
-				      <0xf0850000 0x1000>,
-				      <0xf0800300 0x4>;
+				reg = <0xfff10000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c0_pins
 						&i3c0_scl_slew
@@ -579,7 +576,6 @@
 				resets = <&rstc 0x74 8>;
 				#address-cells = <3>;
 				#size-cells = <0>;
-				dma-mux = <6>;
 				status = "disabled";
 			};
 
