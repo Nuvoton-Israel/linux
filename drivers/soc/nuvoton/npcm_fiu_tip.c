@@ -133,9 +133,11 @@ static int npcm_fiu_tip_write(struct mtd_info *mtd, loff_t to, size_t len,
 		return err;
 	}
 
-	mutex_unlock(&flash->head->mutex);
+	err = readl(flash->head->reg + NPCM_FIU_TIP_CMD);
 
-	return readl(flash->head->reg + NPCM_FIU_TIP_CMD);
+	mutex_unlock(&flash->head->mutex);
+	
+	return err;
 }
 
 static int npcm_fiu_tip_read(struct mtd_info *mtd, loff_t from, size_t len,
@@ -167,10 +169,11 @@ static int npcm_fiu_tip_read(struct mtd_info *mtd, loff_t from, size_t len,
 	}
 
 	memcpy_fromio(buf, flash->head->virt_off, len);
+	err = readl(flash->head->reg + NPCM_FIU_TIP_CMD);
 
 	mutex_unlock(&flash->head->mutex);
 
-	return readl(flash->head->reg + NPCM_FIU_TIP_CMD);
+	return err;
 }
 
 static int npcm_fiu_tip_erase(struct mtd_info *mtd, struct erase_info *instr)
