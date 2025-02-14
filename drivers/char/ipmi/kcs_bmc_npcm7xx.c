@@ -205,7 +205,6 @@ static int npcm7xx_kcs_probe(struct platform_device *pdev)
 	rc = npcm7xx_kcs_config_irq(kcs_bmc, pdev);
 	if (rc)
 		return rc;
-	npcm7xx_kcs_enable_channel(kcs_bmc, true);
 
 	npcm7xx_kcs_irq_mask_update(kcs_bmc, (KCS_BMC_EVENT_TYPE_IBF | KCS_BMC_EVENT_TYPE_OBE), 0);
 	npcm7xx_kcs_enable_channel(kcs_bmc, true);
