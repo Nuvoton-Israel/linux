@@ -51,6 +51,16 @@ config MCTP_TRANSPORT_I3C_PEC
 	  calculate the result of PEC.
 	  Provides a choice to enable/disable append pec byte.
 
+config MCTP_TRANSPORT_USB
+	tristate "MCTP USB transport"
+	depends on USB
+	help
+	  Provides a driver to access MCTP devices over USB transport,
+	  defined by DMTF specification DSP0283.
+
+	  MCTP-over-USB interfaces are peer-to-peer, so each interface
+	  represents a physical connection to one remote MCTP endpoint.
+
 endmenu
 
 endif
