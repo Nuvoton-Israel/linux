@@ -323,6 +323,8 @@ static void response_timeout(struct timer_list *t)
 		ssif_bmc->aborting = true;
 	}
 
+	if (ssif_bmc->set_ssif_bmc_status)
+		ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_READY);
 	spin_unlock_irqrestore(&ssif_bmc->lock, flags);
 }
 
