@@ -31,6 +31,27 @@ config TTY_PRINTK_LEVEL
 	help
 	  Printk log level to use for ttyprintk messages.
 
+config NPCM750_OTP
+	tristate "BMC NPCM750 On-Chip OTP Memory Support"
+	depends on ARCH_NPCM
+	default n
+	help
+	  Support NPCM750 BMC OTP memory (fuse).
+	  To compile this driver as a module, choose M here: the module
+	  will be called npcm750_otp.
+
+
+config NPCM750_OTP_WRITE_ENABLE
+	bool "BMC NPCM750 On-Chip OTP : Enable writing support of OTP pages"
+	depends on NPCM750_OTP
+	default n
+	help
+	  If you say Y here, you will enable support for writing of the
+	  OTP pages.  This is dangerous by nature as you can only program
+	  the pages once, so only enable this option when you actually
+	  need it so as to not inadvertently clobber data.
+	  If unsure, say N.
+
 config PRINTER
 	tristate "Parallel printer support"
 	depends on PARPORT
