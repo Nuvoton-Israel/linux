@@ -22,4 +22,11 @@ config WPCM450_SOC
 	  This driver provides information such as the SoC model and
 	  revision.
 
+config MTD_NPCM_TIP_FIU
+	tristate "Support NPCM TIP FIU"
+	depends on ARCH_NPCM || COMPILE_TEST
+	depends on MAILBOX
+	depends on MTD
+	help
+	  This enables access to NOR device thourgh TIP in NPCM BMC's.
 endmenu
