@@ -38,6 +38,13 @@ config MTD_NPCM_TIP_FIU
 	help
 	  This enables access to NOR device thourgh TIP in NPCM BMC's.
 
+config NPCM_ESPI_SLAVE
+	tristate "NPCM SLAVE Driver"
+	depends on ARCH_NPCM || COMPILE_TEST
+	help
+	  Provides a driver to implement the espi slave driver that
+	  handle the espi events.
+
 config NPCM_TIP_RNG
 	tristate "Support NPCM TIP RNG"
 	depends on ARCH_NPCM || COMPILE_TEST
