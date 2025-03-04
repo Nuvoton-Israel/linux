@@ -22,6 +22,14 @@ config WPCM450_SOC
 	  This driver provides information such as the SoC model and
 	  revision.
 
+config NPCM_ESPI_MMBI
+	tristate "NPCM MMBI Driver"
+	depends on ARCH_NPCM || COMPILE_TEST
+	help
+	  Provides a driver to implement the mmbi protocol that
+	  handle the data exchange between BMC and host over the
+	  eSPI interface.
+
 config MTD_NPCM_TIP_FIU
 	tristate "Support NPCM TIP FIU"
 	depends on ARCH_NPCM || COMPILE_TEST
