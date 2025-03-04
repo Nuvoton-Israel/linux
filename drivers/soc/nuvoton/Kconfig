@@ -38,6 +38,14 @@ config MTD_NPCM_TIP_FIU
 	help
 	  This enables access to NOR device thourgh TIP in NPCM BMC's.
 
+config NPCM_PCI_MMBI
+	tristate "NPCM PCI Mailbox MMBI"
+	depends on ARCH_NPCM || COMPILE_TEST
+	help
+	  Provides a driver to implement the mmbi protocol that
+	  handle the data exchange between BMC and host over the
+	  PCI Mailbox interface.
+
 config NPCM_ESPI_SLAVE
 	tristate "NPCM SLAVE Driver"
 	depends on ARCH_NPCM || COMPILE_TEST
