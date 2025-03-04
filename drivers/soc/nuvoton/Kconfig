@@ -1,5 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0
-menuconfig WPCM450_SOC
+
+menu "NUVOTON SoC drivers"
+
+config NPCM_BPC
+	tristate "NPCM BIOS Post Code support"
+	depends on (ARCH_NPCM || COMPILE_TEST)
+	help
+	  Provides NPCM driver to control the BIOS Post Code
+	  interface which allows the BMC to monitor and save
+	  the data written by the host to an arbitrary I/O port,
+	  the BPC is connected to the host thourgh LPC or eSPI bus.
+
+config WPCM450_SOC
 	tristate "Nuvoton WPCM450 SoC driver"
 	default y if ARCH_WPCM450
 	select SOC_BUS
@@ -9,3 +21,5 @@ menuconfig WPCM450_SOC
 
 	  This driver provides information such as the SoC model and
 	  revision.
+
+endmenu
