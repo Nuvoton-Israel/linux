@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2018 Nuvoton Technology
+
+/ {
+	pinctrl: pinctrl@f0010000 {
+		pin4_slew: pin4_slew {
+			pins = "GPIO4/IOX2_DI/SMB1D_SDA";
+			slew-rate = <1>;
+		};
+		pin5_slew: pin5_slew {
+			pins = "GPIO5/IOX2_LD/SMB1D_SCL";
+			slew-rate = <1>;
+		};
+		pin6_slew: pin6_slew {
+			pins = "GPIO6/IOX2_CK/SMB2D_SDA";
+			slew-rate = <1>;
+		};
+		pin7_slew: pin7_slew {
+			pins = "GPIO7/IOX2_DO/SMB2D_SCL";
+			slew-rate = <1>;
+		};
+		pin33_slew: pin33-slew {
+			pins = "GPIO33/I3C4_SCL";
+			slew-rate = <1>;
+		};
+		pin34_slew: pin34-slew {
+			pins = "GPIO34/I3C4_SDA";
+			slew-rate = <1>;
+		};
+		pin106_slew: pin106-slew {
+			pins = "GPIO106/I3C5_SCL";
+			slew-rate = <1>;
+		};
+		pin107_slew: pin107-slew {
+			pins = "GPIO107/I3C5_SDA";
+			slew-rate = <1>;
+		};
+		pin108_slew: pin108-slew {
+			pins = "GPIO108/SG1_MDC";
+			slew-rate = <1>;
+		};
+		pin109_slew: pin109-slew {
+			pins = "GPIO109/SG1_MDIO";
+			slew-rate = <1>;
+		};
+		gpo187ol_pins: gpo187ol-pins {
+			pins = "GPO187/SPI3_nCS1_SMB14B_SDA";
+			bias-disable;
+			output-low;
+		};
+		gpio114ol_pins: gpio114ol-pins {
+			pins = "GPIO114/SMB0_SCL";
+			bias-disable;
+			output-low;
+		};
+		pin240_slew: pin240-slew {
+			pins = "GPIO240/I3C0_SCL";
+			slew-rate = <1>;
+		};
+		pin241_slew: pin241-slew {
+			pins = "GPIO241/I3C0_SDA";
+			slew-rate = <1>;
+		};
+		pin242_slew: pin242-slew {
+			pins = "GPIO242/I3C1_SCL";
+			slew-rate = <1>;
+		};
+		pin243_slew: pin243-slew {
+			pins = "GPIO243/I3C1_SDA";
+			slew-rate = <1>;
+		};
+		pin244_slew: pin244-slew {
+			pins = "GPIO244/I3C2_SCL";
+			slew-rate = <1>;
+		};
+		pin245_slew: pin245-slew {
+			pins = "GPIO245/I3C2_SDA";
+			slew-rate = <1>;
+		};
+		pin246_slew: pin246-slew {
+			pins = "GPIO246/I3C3_SCL";
+			slew-rate = <1>;
+		};
+		pin247_slew: pin247-slew {
+			pins = "GPIO247/I3C3_SDA";
+			slew-rate = <1>;
+		};
+	};
+};
