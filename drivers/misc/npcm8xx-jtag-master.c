@@ -913,19 +913,17 @@ out_free_mem:
 	return ret;
 }
 
-static int npcm_jtm_remove(struct platform_device *pdev)
+static void npcm_jtm_remove(struct platform_device *pdev)
 {
 	struct npcm_jtm *jtag = platform_get_drvdata(pdev);
 
 	if (!jtag)
-		return 0;
+		return;
 
 	misc_deregister(&jtag->miscdev);
 	kfree(jtag->miscdev.name);
 	kfree(jtag);
 	ida_simple_remove(&jtag_ida, jtag->id);
-
-	return 0;
 }
 
 static const struct of_device_id npcm_jtm_id[] = {
