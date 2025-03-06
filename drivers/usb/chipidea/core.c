@@ -1050,6 +1050,9 @@ static int ci_hdrc_probe(struct platform_device *pdev)
 	void __iomem	*base;
 	int		ret;
 	enum usb_dr_mode dr_mode;
+#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+	void __iomem	*baseram;
+#endif
 
 	if (!dev_get_platdata(dev)) {
 		dev_err(dev, "platform data missing\n");
@@ -1063,6 +1066,24 @@ static int ci_hdrc_probe(struct platform_device *pdev)
 	ci = devm_kzalloc(dev, sizeof(*ci), GFP_KERNEL);
 	if (!ci)
 		return -ENOMEM;
+
+#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+	/* alloc SRAM for QH */
+	baseram = devm_platform_get_and_ioremap_resource(pdev, 1, &res);
+	if (IS_ERR(baseram)) 
+		return PTR_ERR(baseram);
+	ci->qh_baseram = baseram;
+	ci->qh_start = res->start;
+	ci->qh_blocksize = res->end - res->start + 1;
+
+	/* alloc SRAM for TD */
+	baseram = devm_platform_get_and_ioremap_resource(pdev, 2, &res);
+	if (IS_ERR(baseram))
+		return PTR_ERR(baseram);
+	ci->td_baseram = baseram;
+	ci->td_start = res->start;
+	ci->td_blocksize = res->end - res->start + 1;
+#endif
 
 	spin_lock_init(&ci->lock);
 	mutex_init(&ci->mutex);
