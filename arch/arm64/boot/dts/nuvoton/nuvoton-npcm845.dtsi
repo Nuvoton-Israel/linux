@@ -75,4 +75,176 @@
 			     <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
 			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
 	};
+
+	firmware {
+		optee {
+			compatible = "linaro,optee-tz";
+			method = "smc";
+		};
+	};
+
+	udc0_phy: usb-phy {
+		#phy-cells = <0>;
+		compatible = "usb-nop-xceiv";
+	};
+
+	ahb {
+		mc: memory-controller@f0824000 {
+			compatible = "nuvoton,npcm845-memory-controller";
+			reg = <0x0 0xf0824000 0x0 0x1000>;
+			interrupts = <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		udc0:udc@f0830000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0830000 0x0 0x1000
+			       0x0 0xfffe6000 0x0 0x180
+			       0x0 0xfffe6180 0x0 0xE80>;
+			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc1:udc@f0831000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0831000 0x0 0x1000
+			       0x0 0xfffe7000 0x0 0x180
+			       0x0 0xfffe7180 0x0 0xE80>;
+			interrupts = <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc2:udc@f0832000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0832000 0x0 0x1000
+			       0x0 0xfffe8000 0x0 0x180
+			       0x0 0xfffe8180 0x0 0xE80>;
+			interrupts = <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc3:udc@f0833000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0833000 0x0 0x1000
+			       0x0 0xfffe9000 0x0 0x180
+			       0x0 0xfffe9180 0x0 0xE80>;
+			interrupts = <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc4:udc@f0834000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0834000 0x0 0x1000
+			       0x0 0xfffea000 0x0 0x180
+			       0x0 0xfffea180 0x0 0xE80>;
+			interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc5:udc@f0835000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0835000 0x0 0x1000
+			       0x0 0xfffeb000 0x0 0x180
+			       0x0 0xfffeb180 0x0 0xE80>;
+			interrupts = <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc6:udc@f0836000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0836000 0x0 0x1000
+			       0x0 0xfffec000 0x0 0x180
+			       0x0 0xfffec180 0x0 0xE80>;
+			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc7:udc@f0837000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0837000 0x0 0x1000
+			       0x0 0xfffed000 0x0 0x180
+			       0x0 0xfffed180 0x0 0xE80>;
+			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc8:udc@f0838000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0838000 0x0 0x1000
+			       0x0 0xfffee000 0x0 0x380
+			       0x0 0xfffee380 0x0 0xC80>;
+			interrupts = <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			nuvoton,sysgcr = <&gcr 0x9C 0xC000 0xC000>;
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+
+		udc9:udc@f0839000 {
+			compatible = "nuvoton,npcm845-udc";
+			reg = <0x0 0xf0839000 0x0 0x1000
+			       0x0 0xfffef000 0x0 0x380
+			       0x0 0xfffef380 0x0 0xC80>;
+			interrupts = <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk NPCM8XX_CLK_SU>;
+			clock-names = "clk_usb_bridge";
+
+			nuvoton,sysgcr = <&gcr 0x9C 0x3000 0x3000>;
+			phys = <&udc0_phy>;
+			phy_type = "utmi_wide";
+			dr_mode = "peripheral";
+			status = "disabled";
+		};
+	};
 };
