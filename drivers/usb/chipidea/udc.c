@@ -239,12 +239,18 @@ static int hw_ep_get_halt(struct ci_hdrc *ci, int num, int dir)
  *
  * This function returns an error code
  */
-static int hw_ep_prime(struct ci_hdrc *ci, int num, int dir, int is_ctrl)
+static int hw_ep_prime(struct ci_hdrc *ci, struct ci_hw_ep *hwep, int num, int dir, int is_ctrl)
 {
 	int n = hw_ep_bit(num, dir);
 
 	/* Synchronize before ep prime */
 	wmb();
+	
+	/* We add the read from qh.ptr->td.token to make sure the previous
+	   write to it indeed got into the mamory so when we prime the DMA
+	   will read the updated data */
+	if (hwep->qh.ptr->td.token & 0x80000000)
+		pr_info("%s(): hwep->qh.ptr->td.token=%08x\n", __func__, hwep->qh.ptr->td.token);
 
 	if (is_ctrl && dir == RX && hw_read(ci, OP_ENDPTSETUPSTAT, BIT(num)))
 		return -EAGAIN;
@@ -832,7 +838,7 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 		hwep->qh.ptr->cap |= cpu_to_le32(mul << __ffs(QH_MULT));
 	}
 
-	ret = hw_ep_prime(ci, hwep->num, hwep->dir,
+	ret = hw_ep_prime(ci, hwep, hwep->num, hwep->dir,
 			   hwep->type == USB_ENDPOINT_XFER_CONTROL);
 done:
 	return ret;
@@ -862,7 +868,7 @@ static int reprime_dtd(struct ci_hdrc *ci, struct ci_hw_ep *hwep,
 	hwep->qh.ptr->td.token &=
 		cpu_to_le32(~(TD_STATUS_HALTED | TD_STATUS_ACTIVE));
 
-	return hw_ep_prime(ci, hwep->num, hwep->dir,
+	return hw_ep_prime(ci, hwep, hwep->num, hwep->dir,
 				hwep->type == USB_ENDPOINT_XFER_CONTROL);
 }
 
