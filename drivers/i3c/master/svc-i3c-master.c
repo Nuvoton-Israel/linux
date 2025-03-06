@@ -1653,6 +1653,12 @@ static int svc_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 		svc_i3c_master_dequeue_xfer(master, xfer);
 	mutex_unlock(&master->lock);
 
+	for (i = 0; i < nxfers; i++) {
+		struct svc_i3c_cmd *cmd = &xfer->cmds[i];
+		if (xfers[i].rnw)
+			xfers[i].len = cmd->actual_len;
+	}
+
 	ret = xfer->ret;
 	svc_i3c_master_free_xfer(xfer);
 
