@@ -11,6 +11,16 @@ config NPCM_BPC
 	  the data written by the host to an arbitrary I/O port,
 	  the BPC is connected to the host thourgh LPC or eSPI bus.
 
+config NPCM_MBOX_CERBERUS
+	tristate "NPCM CERBERUS Mailbox"
+	depends on ARCH_NPCM || COMPILE_TEST
+	depends on MAILBOX
+	help
+	  An implementation of the NPCM mailbox controller.
+	  It is used to send message between the Core processor and other 
+	  processors on the BMC such as TIP and CP. 
+	  Select Y here if you want to use NPCM mailbox controller.
+
 config WPCM450_SOC
 	tristate "Nuvoton WPCM450 SoC driver"
 	default y if ARCH_WPCM450
