@@ -96,7 +96,7 @@ struct npcm_thermal_sensor {
 	int id;
 };
 
-void npcm_thermal_initialize(struct npcm_thermal_priv *tmps)
+static void npcm_thermal_initialize(struct npcm_thermal_priv *tmps)
 {
 	u32 ctl;
 
@@ -240,23 +240,27 @@ static int npcm_configure_overheat_int(struct npcm_thermal_priv *tmps,
 				       struct thermal_zone_device *tz,
 				       int channel)
 {
-	const struct thermal_trip *trips = tz->trips;
+	const struct thermal_trip_desc *td;
+	int ret = -EINVAL;
+	int temp[2];
 	int ctl;
-	int i;
 
-	if (!trips)
-		return -EINVAL;
+	for_each_trip_desc(tz, td) {
+		const struct thermal_trip *trip = &td->trip;
 
-	for (i = 0; i < tz->num_trips; i++)
-		if (trips[i].type == THERMAL_TRIP_CRITICAL)
+		if (trip->type == THERMAL_TRIP_CRITICAL) {
+			temp[0] = trip->temperature;
+			temp[1] = trip->hysteresis;
+			ret = 0;
 			break;
+		}
+	}
 
-	if (i == tz->num_trips)
-		return -EINVAL;
+	if (ret)
+		return ret;
 
 	tmps->current_channel = channel;
-	npcm_set_overheat_thresholds(tmps, trips[channel].temperature,
-				     trips[channel].hysteresis, channel);
+	npcm_set_overheat_thresholds(tmps, temp[0], temp[1], channel);
 	tmps->overheat_sensor = tz;
 
 	ctl = ioread32(tmps->base + NPCM_THRM_INTEN_REG);
@@ -397,7 +401,7 @@ static struct platform_driver npcm_thermal_driver = {
 		.of_match_table = of_npcm_thermal_match,
 	},
 	.probe	= npcm_thermal_probe,
-	.remove_new	= npcm_thermal_remove,
+	.remove	= npcm_thermal_remove,
 };
 
 module_platform_driver(npcm_thermal_driver);
