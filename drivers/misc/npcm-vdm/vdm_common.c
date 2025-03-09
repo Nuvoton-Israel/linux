@@ -569,7 +569,8 @@ int vdm_init_common(uint32_t *apVdma_rx_buff,uint32_t *apVdma_rx_buff_virt_addr,
 			BIT(VDMA_ECTL_REG_RETRIGGER_IF_BUFF_NOT_EMPTY_BIT_POS) + 					//(Retrigger if Source Size not Zero )
 			BIT(VDMA_ECTL_REG_AUTO_STATUS_UPDATE_BIT_POS) + 							//(automatic update status register0)
 			(VDMA_SIZE_MODIFIER_BITS_16_23_USED << VDMA_ECTL_REG_SIZE_MODIFIER_POS)+		//    (size in bits 16-23)
-			BIT(VDMA_ECTL_REG_SIZE_CYCLIC_BUF_EN_BIT_POS);								// ciclyc buffer;
+			BIT(VDMA_ECTL_REG_SIZE_CYCLIC_BUF_EN_BIT_POS) +								// ciclyc buffer;
+			BIT(VDMA_ECTL_REG_LVLTRIG_POS);								
 	iowrite32(reg_val, vdma_virt_addr + VDMA_ECTL_REG);
 
 	reg_val= BIT(VDMA_CNT_REG_BUS_LOCK_BIT_POS)+  	// bus-lock
