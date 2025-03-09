@@ -1,0 +1,16 @@
+#
+# NPCMX50 MISC drivers
+#
+menu "Nuvoton Miscellaneous optional drivers"
+
+config NPCM_VDM
+	tristate "support npcmx50 VDM on PCIe"
+	depends on ARCH_NPCM
+	default y
+	help
+	  Say Y here if you want ioctl npcmx50 VDM on PCIe.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called npcmx50_vdm.
+
+endmenu
