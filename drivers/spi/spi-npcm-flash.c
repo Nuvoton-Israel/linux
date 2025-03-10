@@ -379,22 +379,6 @@ static irqreturn_t npcm_espi_flash_irq_handler(int irq, void *arg)
 
 	regmap_read(priv->espi_regmap, ESPISTS, &val);
 
-	if (val & ESPISTS_CFGUPD) {
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_CFGUPD);
-		regmap_read(priv->espi_regmap, ESPICFG, &reg);
-		if (reg & ESPICFG_HFLASHCHANEN) {
-			regmap_update_bits(priv->espi_regmap, FLASHCTL,
-					   FLASHCTL_SAF_AUTO_READ, 0);
-			regmap_update_bits(priv->espi_regmap, FLASHCFG,
-					   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68),
-					   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68));
-			regmap_read(priv->espi_regmap, FLASHCTL, &reg);
-			regmap_update_bits(priv->espi_regmap, ESPICFG,
-					   ESPICFG_FLASHCHANEN,
-					   ESPICFG_FLASHCHANEN);
-		}	
-	}
-
 	if (val & ESPISTS_SFLASHRD) {
 		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_SFLASHRD);
 		regmap_update_bits(priv->espi_regmap, FLASHCTL,
@@ -438,6 +422,21 @@ static irqreturn_t npcm_espi_flash_irq_handler(int irq, void *arg)
 			npcm_espi_flash_write(priv, tag, address, length, tovr);
 		else if (command == ESPI_SAF_CMD_ERASE)
 			npcm_espi_flash_erase(priv, tag, address, length, tovr);
+	}
+
+	if (val & ESPISTS_CFGUPD) {
+		regmap_read(priv->espi_regmap, ESPICFG, &reg);
+		if (reg & ESPICFG_HFLASHCHANEN) {
+			regmap_update_bits(priv->espi_regmap, FLASHCTL,
+					   FLASHCTL_SAF_AUTO_READ, 0);
+			regmap_update_bits(priv->espi_regmap, FLASHCFG,
+					   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68),
+					   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68));
+			regmap_read(priv->espi_regmap, FLASHCTL, &reg);
+			regmap_update_bits(priv->espi_regmap, ESPICFG,
+					   ESPICFG_FLASHCHANEN, ESPICFG_FLASHCHANEN);
+		}
+		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_CFGUPD);
 	}
 
 	return IRQ_HANDLED;
@@ -587,7 +586,6 @@ static int npcm_espi_flash_probe(struct platform_device *pdev)
 	}
 
 	priv->dev = &pdev->dev;
-	npcm_espi_flash_enable(priv);
 
 	/* Bus lock */
 	mutex_init(&priv->lock);
@@ -595,6 +593,8 @@ static int npcm_espi_flash_probe(struct platform_device *pdev)
 	spin_lock_init(&priv->spinlock);
 
 	dev_set_drvdata(dev, priv);
+
+	npcm_espi_flash_enable(priv);
 
 	return 0;
 }
