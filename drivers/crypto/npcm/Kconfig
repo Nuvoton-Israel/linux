@@ -1,0 +1,7 @@
+config CRYPTO_DEV_NPCM_AES
+	tristate "NPCM AES acceleration support"
+	depends on CRYPTO_DEV_NPCM
+	default y
+	select CRYPTO_AES
+	help
+	  Support for Nuvoton BMC NPCM AES HW.

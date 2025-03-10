@@ -878,4 +878,15 @@ source "drivers/crypto/starfive/Kconfig"
 source "drivers/crypto/inside-secure/eip93/Kconfig"
 source "drivers/crypto/ti/Kconfig"
 
+config CRYPTO_DEV_NPCM
+	bool "Support Nuvoton BMC NPCM HW crypto engines"
+	depends on ARCH_NPCM || COMPILE_TEST
+	select CRYPTO_AES
+	select CRYPTO_SHA
+	default n
+	help
+	  Support Nuvoton BMC NPCM HW crypto engines.
+
+source "drivers/crypto/npcm/Kconfig"
+
 endif # CRYPTO_HW
