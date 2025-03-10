@@ -635,14 +635,14 @@
 			};
 
 			i3c0: i3c@fff10000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff10000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c0_pins
 						&i3c0_scl_slew
 						&i3c0_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 8>;
 				#address-cells = <3>;
@@ -651,14 +651,14 @@
 			};
 
 			i3c1: i3c@fff11000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff11000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c1_pins
 						&i3c1_scl_slew
 						&i3c1_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 225 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 9>;
 				#address-cells = <3>;
@@ -667,14 +667,14 @@
 			};
 
 			i3c2: i3c@fff12000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff12000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c2_pins
 						&i3c2_scl_slew
 						&i3c2_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 226 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 10>;
 				#address-cells = <3>;
@@ -683,14 +683,14 @@
 			};
 
 			i3c3: i3c@fff13000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff13000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c3_pins
 						&i3c3_scl_slew
 						&i3c3_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 227 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 11>;
 				#address-cells = <3>;
@@ -699,14 +699,14 @@
 			};
 
 			i3c4: i3c@fff14000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff14000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c4_pins
 						&i3c4_scl_slew
 						&i3c4_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 228 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 12>;
 				#address-cells = <3>;
@@ -715,14 +715,14 @@
 			};
 
 			i3c5: i3c@fff15000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff15000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c5_pins
 						&i3c5_scl_slew
 						&i3c5_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 13>;
 				#address-cells = <3>;
