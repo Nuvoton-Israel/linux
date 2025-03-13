@@ -1050,7 +1050,7 @@ static int ci_hdrc_probe(struct platform_device *pdev)
 	void __iomem	*base;
 	int		ret;
 	enum usb_dr_mode dr_mode;
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	void __iomem	*baseram;
 #endif
 
@@ -1067,7 +1067,7 @@ static int ci_hdrc_probe(struct platform_device *pdev)
 	if (!ci)
 		return -ENOMEM;
 
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	/* alloc SRAM for QH */
 	baseram = devm_platform_get_and_ioremap_resource(pdev, 1, &res);
 	if (IS_ERR(baseram)) 

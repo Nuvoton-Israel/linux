@@ -9,7 +9,7 @@
 
 #include <linux/delay.h>
 #include <linux/device.h>
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 #include <linux/mempool.h>
 #else
 #include <linux/dmapool.h>
@@ -53,7 +53,7 @@ ctrl_endpt_in_desc = {
 	.wMaxPacketSize  = cpu_to_le16(CTRL_PAYLOAD_MAX),
 };
 
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 static void *udc_alloc_sram_qh(struct ci_hdrc *ci, dma_addr_t *dma)
 {
 	void *ptr;
@@ -418,7 +418,7 @@ static int add_td_to_list(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq,
 
 	if (node == NULL)
 		return -ENOMEM;
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	node->ptr = mempool_alloc(hwep->ci->td_pool, GFP_ATOMIC);
 	node->dma = (dma_addr_t)((void *)hwep->ci->td_start + ((void *)node->ptr - (void *)hwep->ci->td_baseram));
 #else
@@ -704,7 +704,7 @@ static void free_pending_td(struct ci_hw_ep *hwep)
 {
 	struct td_node *pending = hwep->pending_td;
 
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	mempool_free(pending->ptr, hwep->ci->td_pool);
 #else
 	dma_pool_free(hwep->td_pool, pending->ptr, pending->dma);
@@ -826,7 +826,7 @@ __acquires(hwep->lock)
 						     struct ci_hw_req, queue);
 
 		list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 			mempool_free(node->ptr, hwep->ci->td_pool);
 #else
 			dma_pool_free(hwep->td_pool, node->ptr, node->dma);
@@ -1571,7 +1571,7 @@ static void ep_free_request(struct usb_ep *ep, struct usb_request *req)
 	spin_lock_irqsave(hwep->lock, flags);
 
 	list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 		mempool_free(node->ptr, hwep->td_pool);
 #else
 		dma_pool_free(hwep->td_pool, node->ptr, node->dma);
@@ -1633,7 +1633,7 @@ static int ep_dequeue(struct usb_ep *ep, struct usb_request *req)
 		hw_ep_flush(hwep->ci, hwep->num, hwep->dir);
 
 	list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 		mempool_free(node->ptr, hwep->td_pool);
 #else
 		dma_pool_free(hwep->td_pool, node->ptr, node->dma);
@@ -1961,7 +1961,7 @@ static int init_eps(struct ci_hdrc *ci)
 			usb_ep_set_maxpacket_limit(&hwep->ep, (unsigned short)~0);
 
 			INIT_LIST_HEAD(&hwep->qh.queue);
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 			hwep->qh.ptr = (struct ci_hw_qh *)udc_alloc_sram_qh(ci, &hwep->qh.dma);
 #else
 			hwep->qh.ptr = dma_pool_zalloc(ci->qh_pool, GFP_KERNEL,
@@ -1999,7 +1999,7 @@ static void destroy_eps(struct ci_hdrc *ci)
 
 		if (hwep->pending_td)
 			free_pending_td(hwep);
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 		udc_free_sram_qh(ci);
 #else
 		dma_pool_free(ci->qh_pool, hwep->qh.ptr, hwep->qh.dma);
@@ -2196,7 +2196,7 @@ static int udc_start(struct ci_hdrc *ci)
 	INIT_LIST_HEAD(&ci->gadget.ep_list);
 
 	/* alloc resources */
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	ci->td_pool = mempool_create(ci->td_blocksize / 0x40, udc_alloc_sram_td,
 				     udc_free_sram_td, ci);
 	if (ci->td_pool == NULL) {
@@ -2234,7 +2234,7 @@ static int udc_start(struct ci_hdrc *ci)
 destroy_eps:
 	destroy_eps(ci);
 free_pools:
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	mempool_destroy(ci->td_pool);
 #else
 	dma_pool_destroy(ci->td_pool);
@@ -2258,7 +2258,7 @@ void ci_hdrc_gadget_destroy(struct ci_hdrc *ci)
 
 	destroy_eps(ci);
 
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	mempool_destroy(ci->td_pool);
 #else
 	dma_pool_destroy(ci->td_pool);
