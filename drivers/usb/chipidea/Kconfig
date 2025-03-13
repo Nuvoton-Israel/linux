@@ -43,6 +43,12 @@ config USB_CHIPIDEA_MSM
 	tristate "Enable MSM hsusb glue driver" if EXPERT
 	default USB_CHIPIDEA
 
+config NPCM_CHIPIDEA_SRAM_ALLOC
+    bool "Enable SRAM allocation for NPCM Chipidea"
+    default n
+    help
+      This option enables SRAM allocation for NPCM Chipidea.
+
 config USB_CHIPIDEA_NPCM
 	tristate "Enable NPCM hsusb glue driver" if EXPERT
 	default USB_CHIPIDEA

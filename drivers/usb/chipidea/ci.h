@@ -18,7 +18,9 @@
 #include <linux/usb/otg.h>
 #include <linux/usb/role.h>
 #include <linux/ulpi/interface.h>
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 #include <linux/mempool.h>
+#endif
 
 /******************************************************************************
  * DEFINE
@@ -28,7 +30,6 @@
 #define ENDPT_MAX          32
 #define CI_MAX_BUF_SIZE	(TD_PAGE_COUNT * CI_HDRC_PAGE_SIZE)
 
-#define NPCM_CHIPIDEA_SRAM_ALLOC /* enable SRAM allocation use for qh and td */
 /******************************************************************************
  * REGISTERS
  *****************************************************************************/
@@ -103,7 +104,7 @@ struct ci_hw_ep {
 	/* global resources */
 	struct ci_hdrc				*ci;
 	spinlock_t				*lock;
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	mempool_t				*td_pool;
 #else
 	struct dma_pool				*td_pool;
@@ -229,8 +230,8 @@ struct ci_hdrc {
 	struct usb_role_switch		*role_switch;
 	struct work_struct		work;
 	struct workqueue_struct		*wq;
-	
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	mempool_t			*td_pool;
 #else
 	struct dma_pool			*qh_pool;
@@ -268,8 +269,7 @@ struct ci_hdrc {
 	bool				wakeup_int;
 	enum ci_revision		rev;
 	struct mutex                    mutex;
-
-#ifdef NPCM_CHIPIDEA_SRAM_ALLOC
+#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
 	resource_size_t 		td_start;
 	void __iomem			*td_baseram;
 	size_t 				td_blocksize;
