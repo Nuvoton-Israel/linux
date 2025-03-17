@@ -1289,15 +1289,16 @@ static int npcm_i3c_master_read(struct npcm_i3c_master *master,
 	u32 mdctrl, mstatus;
 	bool completed = false;
 	unsigned int count;
-	unsigned long start = jiffies;
+	ktime_t timeout;
 
+	timeout = ktime_add_ms(ktime_get(), 1000);
 	while (!completed) {
 		mstatus = readl(master->regs + NPCM_I3C_MSTATUS);
 		if (NPCM_I3C_MSTATUS_COMPLETE(mstatus) != 0)
 			completed = true;
 
-		if (time_after(jiffies, start + msecs_to_jiffies(1000))) {
-			dev_dbg(master->dev, "I3C read timeout\n");
+		if (ktime_compare(ktime_get(), timeout) > 0) {
+			dev_err(master->dev, "I3C read timeout, count=%d/%d\n", offset, len);
 			return -ETIMEDOUT;
 		}
 
@@ -1488,7 +1489,7 @@ static int npcm_i3c_master_xfer(struct npcm_i3c_master *master,
 	u32 reg, rdterm = *read_len, mstatus, ibiresp;
 	int ret, i, count, space;
 	unsigned long flags;
-	unsigned long start;
+	ktime_t timeout;
 	bool bus_locked = false;
 
 	if (rdterm > NPCM_I3C_MAX_RDTERM)
@@ -1550,7 +1551,7 @@ static int npcm_i3c_master_xfer(struct npcm_i3c_master *master,
 		init_completion(&master->xfer_comp);
 	}
 
-	start = jiffies;
+	timeout = ktime_add_ms(ktime_get(), 1000);
 
 broadcast_start:
 	if (first && rnw) {
@@ -1560,7 +1561,7 @@ broadcast_start:
 			dev_info(master->dev, "send 7e error\n");
 			goto emit_stop;
 		}
-		if (time_after(jiffies, start + msecs_to_jiffies(1000))) {
+		if (ktime_after(ktime_get(), timeout)) {
 			dev_info(master->dev, "abnormal ibiwon events\n");
 			goto emit_stop;
 		}
@@ -1581,6 +1582,7 @@ broadcast_start:
 	if (use_dma)
 		npcm_i3c_master_start_dma(master);
 
+	timeout = ktime_add_ms(ktime_get(), 1000);
 retry_start:
 	writel(NPCM_I3C_MCTRL_REQUEST_START_ADDR |
 	       xfer_type |
@@ -1613,7 +1615,7 @@ retry_start:
 			goto emit_stop;
 		}
 
-		if (time_after(jiffies, start + msecs_to_jiffies(1000))) {
+		if (ktime_after(ktime_get(), timeout)) {
 			dev_info(master->dev, "abnormal ibiwon events\n");
 			goto emit_stop;
 		}
