@@ -231,6 +231,15 @@ config PCI_HYPERV_INTERFACE
 	  drivers to have a common interface with the Hyper-V PCI frontend
 	  driver.
 
+config PCIE_NPCM
+	tristate "NPCM PCIe controller"
+	depends on ARCH_NPCM || COMPILE_TEST
+	depends on OF
+	depends on PCI_MSI
+	help
+	  Say Y here if you want to enable PCIe controller support on
+	  Nuvoton BMC SoCs.
+
 config PCI_TEGRA
 	bool "NVIDIA Tegra PCIe controller"
 	depends on ARCH_TEGRA || COMPILE_TEST
