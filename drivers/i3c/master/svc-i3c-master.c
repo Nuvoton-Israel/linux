@@ -593,6 +593,7 @@ static void svc_i3c_master_ibi_work(struct work_struct *work)
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
 		svc_i3c_master_emit_stop(master);
+		break;
 	default:
 		break;
 	}
@@ -2066,13 +2067,13 @@ static const struct dev_pm_ops svc_i3c_pm_ops = {
 			   svc_i3c_runtime_resume, NULL)
 };
 
-const struct svc_i3c_drvdata npcm845_drvdata = {
+static const struct svc_i3c_drvdata npcm845_drvdata = {
 	.quirks = SVC_I3C_QUIRK_FIFO_EMPTY |
 		SVC_I3C_QUIRK_FALSE_SLVSTART |
 		SVC_I3C_QUIRK_DAA_CORRUPT,
 };
 
-const struct svc_i3c_drvdata svc_default_drvdata = {};
+static const struct svc_i3c_drvdata svc_default_drvdata = {};
 
 static const struct of_device_id svc_i3c_master_of_match_tbl[] = {
 	{ .compatible = "nuvoton,npcm845-i3c-v1", .data = &npcm845_drvdata },
