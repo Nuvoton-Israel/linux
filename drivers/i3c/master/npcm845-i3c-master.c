@@ -238,6 +238,8 @@ struct svc_i3c_master {
 	bool probe_done;
 
 	/* Statistic report */
+	u8 err_code;
+	u64 err_cnt;
 	u64 ibiwon_cnt;
 };
 
@@ -252,6 +254,12 @@ struct svc_i3c_i2c_dev_data {
 	int ibi;
 	struct i3c_generic_ibi_pool *ibi_pool;
 };
+
+static void svc_i3c_master_err_stats(struct svc_i3c_master *master, u8 code)
+{
+	master->err_cnt++;
+	master->err_code = code;
+}
 
 static inline bool is_events_enabled(struct svc_i3c_master *master, u32 mask)
 {
@@ -434,6 +442,7 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 			svc_i3c_master_flush_rx_fifo(master);
 		i3c_generic_ibi_recycle_slot(data->ibi_pool, slot);
 		slot = NULL;
+		svc_i3c_master_err_stats(master, ETIMEDOUT);
 		goto handle_done;
 	}
 
@@ -517,19 +526,25 @@ static int svc_i3c_master_handle_ibi_won(struct svc_i3c_master *master, bool aut
 	switch (ibitype) {
 	case SVC_I3C_MSTATUS_IBITYPE_IBI:
 		dev = svc_i3c_master_dev_from_addr(master, ibiaddr);
-		if (!autoibi) {
-			/* Ignore the invalid ibi with address 0 */
-			if (!dev || ibiaddr == 0 ||
-			    !is_events_enabled(master, SVC_I3C_EVENT_IBI)) {
+		if (!dev || ibiaddr == 0) {
+			if (!autoibi) {
 				svc_i3c_master_nack_ibi(master);
 				break;
 			}
-
-			if (dev->info.bcr & I3C_BCR_IBI_PAYLOAD)
-				svc_i3c_master_ack_ibi(master, true);
-			else
-				svc_i3c_master_ack_ibi(master, false);
+			/*
+			 * Wait for complete to make sure the subsequent emitSTOP
+			 * request will be performed in the correct state(NORMACT).
+			 */
+			readl_relaxed_poll_timeout(master->regs + SVC_I3C_MSTATUS, status,
+						   SVC_I3C_MSTATUS_COMPLETE(status),
+						   0, 1000);
+			/* Flush the garbage data */
+			if (SVC_I3C_MSTATUS_RXPEND(status))
+				svc_i3c_master_flush_rx_fifo(master);
+			break;
 		}
+		if (!autoibi)
+			svc_i3c_master_ack_ibi(master, !!(dev->info.bcr & I3C_BCR_IBI_PAYLOAD));
 		svc_i3c_master_handle_ibi(master, dev);
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_HOT_JOIN:
@@ -537,15 +552,13 @@ static int svc_i3c_master_handle_ibi_won(struct svc_i3c_master *master, bool aut
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
 		svc_i3c_master_nack_ibi(master);
+		status = readl(master->regs + SVC_I3C_MSTATUS);
+		if (SVC_I3C_MSTATUS_RXPEND(status))
+			svc_i3c_master_flush_rx_fifo(master);
 		break;
 	default:
 		break;
 	}
-
-	/* Flush the garbage data if any */
-	status = readl(master->regs + SVC_I3C_MSTATUS);
-	if (SVC_I3C_MSTATUS_RXPEND(status))
-		svc_i3c_master_flush_rx_fifo(master);
 
 	/*
 	 * The spurious IBI event may change controller state to IBIACK, switch state
@@ -570,6 +583,7 @@ static int svc_i3c_master_handle_ibi_won(struct svc_i3c_master *master, bool aut
 		}
 
 		dev_err(master->dev, "svc_i3c_master_error in ibiwon\n");
+		svc_i3c_master_err_stats(master, EIO);
 		return -EIO;
 	}
 
@@ -587,6 +601,7 @@ static int svc_i3c_master_handle_ibi_won(struct svc_i3c_master *master, bool aut
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
 		ret = -EOPNOTSUPP;
+		svc_i3c_master_err_stats(master, EOPNOTSUPP);
 		break;
 	default:
 		break;
@@ -638,8 +653,15 @@ static int svc_i3c_master_start_autoibi(struct svc_i3c_master *master)
 	ret = readl_relaxed_poll_timeout_atomic(master->regs + SVC_I3C_MSTATUS, val,
 					 SVC_I3C_MSTATUS_IBIWON(val), 0, 100);
 	if (ret) {
+		/* Cancle AUTOIBI if not started */
+		val = readl(master->regs + SVC_I3C_MCTRL);
+		if (SVC_I3C_MCTRL_REQUEST(val) == SVC_I3C_MCTRL_REQUEST_AUTO_IBI)
+			writel(0, master->regs + SVC_I3C_MCTRL);
+
 		dev_err(master->dev, "Timeout when polling for IBIWON\n");
+		svc_i3c_master_clear_merrwarn(master);
 		svc_i3c_master_emit_stop(master);
+		svc_i3c_master_err_stats(master, ETIMEDOUT);
 		return -ETIMEDOUT;
 	}
 
@@ -1937,6 +1959,8 @@ static void svc_i3c_init_debugfs(struct platform_device *pdev,
 		return;
 
 	debugfs_create_file("debug", 0444, master->debugfs, master, &debug_fops);
+	debugfs_create_u64("err_cnt", 0444, master->debugfs, &master->err_cnt);
+	debugfs_create_u8("err_code", 0444, master->debugfs, &master->err_code);
 	debugfs_create_u64("ibiwon_cnt", 0444, master->debugfs, &master->ibiwon_cnt);
 }
 
