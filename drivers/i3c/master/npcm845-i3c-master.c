@@ -2089,7 +2089,7 @@ static struct platform_driver svc_i3c_master = {
 	.probe = svc_i3c_master_probe,
 	.remove = svc_i3c_master_remove,
 	.driver = {
-		.name = "npcm845-i3c-master",
+		.name = "silvaco-i3c-master",
 		.of_match_table = svc_i3c_master_of_match_tbl,
 	},
 };
