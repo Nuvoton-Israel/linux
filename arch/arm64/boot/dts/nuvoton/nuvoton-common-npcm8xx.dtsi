@@ -381,6 +381,24 @@
 				};
 			};
 
+			lpc_bt: lpc_bt@3000 {
+				compatible = "nuvoton,npcm845-lpc-bt",
+						"simple-mfd", "syscon";
+				reg = <0x30000 0xc>;
+				reg-io-width = <4>;
+
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0x0 0x30000 0xc>;
+
+				bt1: bt1@0 {
+					compatible = "nuvoton,npcm845-bt-bmc";
+					reg = <0x0 0xc>;
+					interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>;
+					status = "disabled";
+				};
+			};
+
 			lpc_host: lpc_host@7000 {
 				compatible = "nuvoton,npcm845-lpc-host",
 						"simple-mfd", "syscon";
