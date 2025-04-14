@@ -2787,6 +2787,45 @@ static inline void dev_lstats_add(struct net_device *dev, unsigned int len)
 	u64_stats_update_end(&lstats->syncp);
 }
 
+static inline void dev_dstats_rx_add(struct net_device *dev,
+				     unsigned int len)
+{
+	struct pcpu_dstats *dstats = this_cpu_ptr(dev->dstats);
+	struct net_device_stats *stats = &dev->stats;
+
+	u64_stats_update_begin(&dstats->syncp);
+	u64_stats_inc((u64_stats_t *)&dstats->rx_packets);
+	u64_stats_add((u64_stats_t *)&dstats->rx_bytes, len);
+	u64_stats_update_end(&dstats->syncp);
+	stats->rx_packets++;
+	stats->rx_bytes += len;
+}
+
+static inline void dev_dstats_tx_add(struct net_device *dev,
+				     unsigned int len)
+{
+	struct pcpu_dstats *dstats = this_cpu_ptr(dev->dstats);
+	struct net_device_stats *stats = &dev->stats;
+
+	u64_stats_update_begin(&dstats->syncp);
+	u64_stats_inc((u64_stats_t *)&dstats->tx_packets);
+	u64_stats_add((u64_stats_t *)&dstats->tx_bytes, len);
+	u64_stats_update_end(&dstats->syncp);
+	stats->tx_bytes += len;
+	stats->tx_packets++;
+}
+
+static inline void dev_dstats_tx_dropped(struct net_device *dev)
+{
+	struct pcpu_dstats *dstats = this_cpu_ptr(dev->dstats);
+	struct net_device_stats *stats = &dev->stats;
+
+	u64_stats_update_begin(&dstats->syncp);
+	u64_stats_inc((u64_stats_t *)&dstats->tx_drops);
+	u64_stats_update_end(&dstats->syncp);
+	stats->tx_dropped++;
+}
+
 #define __netdev_alloc_pcpu_stats(type, gfp)				\
 ({									\
 	typeof(type) __percpu *pcpu_stats = alloc_percpu_gfp(type, gfp);\
