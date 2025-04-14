@@ -2710,6 +2710,31 @@ static inline void dev_lstats_add(struct net_device *dev, unsigned int len)
 	u64_stats_update_end(&lstats->syncp);
 }
 
+static inline void dev_dstats_rx_add(struct net_device *dev,
+				     unsigned int len)
+{
+	struct net_device_stats *stats = &dev->stats;
+
+	stats->rx_packets++;
+	stats->rx_bytes += len;
+}
+
+static inline void dev_dstats_tx_add(struct net_device *dev,
+				     unsigned int len)
+{
+	struct net_device_stats *stats = &dev->stats;
+
+	stats->tx_bytes += len;
+	stats->tx_packets++;
+}
+
+static inline void dev_dstats_tx_dropped(struct net_device *dev)
+{
+	struct net_device_stats *stats = &dev->stats;
+
+	stats->tx_dropped++;
+}
+
 #define __netdev_alloc_pcpu_stats(type, gfp)				\
 ({									\
 	typeof(type) __percpu *pcpu_stats = alloc_percpu_gfp(type, gfp);\
