@@ -20,6 +20,10 @@
 #define   ESPISTS_VWUPD		BIT(8)
 #define ESPI_ESPIIE		0x00C
 #define   ESPIIE_VWUPDIE	BIT(8)
+#define ESPI_VWEVMS(n)		(0x140 + (4*(n)))
+#define   VWEVMS_INDEX_EN	BIT(15)
+#define   VWEVMS_MODIFIED	BIT(16)
+#define   VWEVMS_IE		BIT(18)
 #define ESPI_VWGPSM(n)		(0x180 + (4*(n)))
 #define   VWGPSM_INDEX_EN	BIT(15)
 #define ESPI_ESPIERR		0x03C
@@ -41,6 +45,8 @@
 #define VW_SMGPIO_NUM		64
 #define VM_MSGPIO_START		64
 #define VW_MSGPIO_NUM		64
+#define VW_MSEV_START		128
+#define VW_MSEV_NUM		48
 
 /* vwgpio_event type */
 #define VW_GPIO_EVENT_EDGE_RISING	0
@@ -59,10 +65,11 @@ struct npcm_vwgpio {
 	struct gpio_chip chip;
 	struct device *dev;
 	struct regmap *map;
-	struct vwgpio_event events[VW_MSGPIO_NUM];
+	struct vwgpio_event events[VW_MSGPIO_NUM + VW_MSEV_NUM];
 	int irq;
 	raw_spinlock_t lock;
 	u64 mswire_default;
+	u64 evmswire_default;
 };
 
 static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
@@ -74,10 +81,10 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 
 	dev_dbg(gc->parent, "%s: offset=%u\n", __func__, offset);
 	/* Accept SM/MS GPIO */
-	if (offset >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
+	if (offset >= (VM_MSGPIO_START + VW_MSGPIO_NUM + VW_MSEV_NUM))
 		return -EINVAL;
 
-	if (offset >= VM_MSGPIO_START) {
+	if (offset >= VM_MSGPIO_START && offset < VW_MSEV_START) {
 		index = (offset - VM_MSGPIO_START) / 4;
 		regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
 		/* Check wire valid bit, invalid return default value */
@@ -85,12 +92,19 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 			return !!(vwgpio->mswire_default &
 				  BIT(offset - VM_MSGPIO_START));
 	}
-	else {
+	else if (offset < VM_MSGPIO_START) {
 		index = offset / 4;
 		regmap_read(vwgpio->map, ESPI_VWGPSM(index), &val);
 		/* Check wire valid bit*/
 		if (!(val & BIT(wire + 4)))
 			return -EIO;
+	} else {
+		index = (offset - VW_MSEV_START) / 4;
+		regmap_read(vwgpio->map, ESPI_VWEVMS(index), &val);
+		/* Check wire valid bit, invalid retrun default value */
+		if (!(val & BIT(wire + 4)))
+			return !!(vwgpio->evmswire_default &
+				  BIT(offset - VW_MSEV_START));;
 	}
 
 	return !!(val & BIT(wire));
@@ -155,12 +169,18 @@ static void npcm_vwgpio_check_event(struct npcm_vwgpio *vwgpio,
 	u8 new_state;
 	u32 val;
 
-	if (event_idx >= VW_MSGPIO_NUM)
-		return;
-
-	regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
-	/* Clear MODIFIED bit */
-	regmap_write(vwgpio->map, ESPI_VWGPMS(index), val | VWGPMS_MODIFIED);
+	if (index < VWGPMS_INDEX_COUNT) {
+		regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
+		/* Clear MODIFIED bit */
+		regmap_write(vwgpio->map, ESPI_VWGPMS(index),
+			     val | VWGPMS_MODIFIED);
+	} else {
+		index = (event_idx - VM_MSGPIO_START) / 4;
+		regmap_read(vwgpio->map, ESPI_VWEVMS(index), &val);
+		/* Clear MODIFIED bit */
+		regmap_write(vwgpio->map, ESPI_VWEVMS(index),
+			     val | VWEVMS_MODIFIED);
+	}
 
 	raw_spin_lock_irqsave(&vwgpio->lock, flags);
 
@@ -232,7 +252,7 @@ static irqreturn_t npcm_vwgpio_irq_handler(int irq, void *dev_id)
 	/* Clear ESPISTS_VWUPD status */
 	regmap_write(vwgpio->map, ESPI_ESPISTS, ESPISTS_VWUPD);
 	/* Check all events */
-	for (i = 0; i < VW_MSGPIO_NUM; i++)
+	for (i = 0; i < VW_MSGPIO_NUM + VW_MSEV_NUM; i++)
 		npcm_vwgpio_check_event(vwgpio, i);
 
 	return IRQ_HANDLED;
@@ -249,7 +269,8 @@ static int npcm_vwgpio_set_irq_type(struct irq_data *d, unsigned int type)
 	u8 value;
 
 	dev_dbg(vwgpio->dev, "gpio %u, type %d\n", gpio, type);
-	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
+	if (gpio < VM_MSGPIO_START ||
+	    gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM + VW_MSEV_NUM))
 		return -EINVAL;
 	event_idx = gpio - VM_MSGPIO_START;
 
@@ -300,7 +321,8 @@ static void npcm_vwgpio_irq_set_mask(struct irq_data *d, bool enable, bool set)
 	int index, wire;
 	u32 val;
 
-	if (gpio < VM_MSGPIO_START || gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM))
+	if (gpio < VM_MSGPIO_START ||
+	    gpio >= (VM_MSGPIO_START + VW_MSGPIO_NUM + VW_MSEV_NUM))
 		return;
 
 	index = (gpio - VM_MSGPIO_START) / 4;
@@ -325,19 +347,36 @@ static void npcm_vwgpio_irq_set_mask(struct irq_data *d, bool enable, bool set)
 	}
 
 	if (!int_enable) {
-		regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
+		if (index < VWGPMS_INDEX_COUNT) {
+			regmap_read(vwgpio->map, ESPI_VWGPMS(index), &val);
 
-		if (enable)
-			val |= VWGPMS_INDEX_EN;
-		else
-			val &= ~VWGPMS_INDEX_EN;
+			if (enable)
+				val |= VWGPMS_INDEX_EN;
+			else
+				val &= ~VWGPMS_INDEX_EN;
 
-		if (set)
-			val |= VWGPMS_IE;
-		else
-			val &= ~VWGPMS_IE;
+			if (set)
+				val |= VWGPMS_IE;
+			else
+				val &= ~VWGPMS_IE;
 
-		regmap_write(vwgpio->map, ESPI_VWGPMS(index), val);
+			regmap_write(vwgpio->map, ESPI_VWGPMS(index), val);
+		} else {
+			index = (gpio - VW_MSEV_START) / 4;
+			regmap_read(vwgpio->map, ESPI_VWEVMS(index), &val);
+
+			if (enable)
+				val |= VWEVMS_INDEX_EN;
+			else
+				val &= ~VWEVMS_INDEX_EN;
+
+			if (set)
+				val |= VWEVMS_IE;
+			else
+				val &= ~VWEVMS_IE;
+
+			regmap_write(vwgpio->map, ESPI_VWEVMS(index), val);
+		}
 	}
 
         raw_spin_unlock_irqrestore(&vwgpio->lock, flags);
@@ -368,7 +407,7 @@ static void npcm_vwgpio_init(struct npcm_vwgpio *vwgpio)
 
 	/* Get gpio initial state */
 	memset(&vwgpio->events, 0, sizeof(vwgpio->events));
-	for (i = 0; i < VW_MSGPIO_NUM; i++)
+	for (i = 0; i < VW_MSGPIO_NUM + VW_MSEV_NUM; i++)
 		vwgpio->events[i].state =
 			vwgpio_get_value(&vwgpio->chip, VM_MSGPIO_START + i);
 
@@ -421,7 +460,7 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct gpio_irq_chip *irq;
 	u32 gpvwmap, intwin, idxenmap;
-	u64 mswiremap, smwiremap;
+	u64 mswiremap, smwiremap, evmswiremap;
 	int rc;
 
 	vwgpio = devm_kzalloc(dev, sizeof(*vwgpio), GFP_KERNEL);
@@ -457,6 +496,11 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 	if (of_property_read_u64(pdev->dev.of_node,
 				 "nuvoton,vwgpsm-wire-map", &smwiremap))
 		smwiremap = 0xFFFFFFFFFFFFFFFFULL;
+	if (of_property_read_u64(pdev->dev.of_node,
+				 "nuvoton,vwevms-wire-map", &evmswiremap))
+		vwgpio->evmswire_default = 0;
+	else
+		vwgpio->evmswire_default = evmswiremap;
 
 	npcm_vwgpio_config(vwgpio, intwin, gpvwmap, idxenmap, smwiremap);
 
@@ -465,7 +509,7 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 		vwgpio->chip.base = -1;
 		vwgpio->chip.parent = dev;
 		vwgpio->chip.owner = THIS_MODULE;
-		vwgpio->chip.ngpio = VW_SMGPIO_NUM + VW_MSGPIO_NUM;
+		vwgpio->chip.ngpio = VW_SMGPIO_NUM + VW_MSGPIO_NUM + VW_MSEV_NUM;
 		vwgpio->chip.can_sleep = 0;
 		vwgpio->chip.get = vwgpio_get_value;
 		vwgpio->chip.set = vwgpio_set_value;
