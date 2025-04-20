@@ -657,11 +657,15 @@ static int vdm_release(struct inode *inode, struct file *filp)
 {
 	vdm_instance_t *pVDM_Instance;
         uint16_t tBDF;
+	unsigned long flags;
+
 	pVDM_Instance=filp->private_data;
         tBDF = pVDM_Instance->mBDF;
 	kfree(pVDM_Instance->mptxBuffer);
 	kfree(pVDM_Instance->mprxBuffer);
+	spin_lock_irqsave(&lock,   flags);
 	list_del ( &pVDM_Instance->list ) ;
+	spin_unlock_irqrestore(&lock,   flags);
 
 	if(pVDM_Instance_Default == pVDM_Instance)
 	{
