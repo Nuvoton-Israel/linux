@@ -235,12 +235,20 @@
 			status = "disabled";
 		};
 
-		pcimbox: pcimbox@f0848000 {
+		pcimbox1: pcimbox@f0848000 {
 			compatible = "nuvoton,npcm845-pci-mbox", "nuvoton,npcm750-pci-mbox",
 					"simple-mfd", "syscon";
-			reg = <0x0 0xf084C000 0x0 0x8
+			reg = <0x0 0xf084C000 0x0 0xC
 				0x0 0xf0848000 0x0 0x3F00>;
 			interrupts = <GIC_SPI 105 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		pcimbox2: pcimbox@f0868000 {
+			compatible = "nuvoton,npcm845-pci-mbox", "nuvoton,npcm750-pci-mbox",
+					"simple-mfd", "syscon";
+			reg = <0x0 0xf086C000 0x0 0xC
+				0x0 0xf0868000 0x0 0x3F00>;
+			interrupts = <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
 		vcd: vcd@f0810000 {
