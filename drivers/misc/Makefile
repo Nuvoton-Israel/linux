@@ -78,3 +78,4 @@ obj-$(CONFIG_MISC_RP1)		+= rp1/
 obj-$(CONFIG_NPCM_PCI_MBOX)	+= npcm7xx-pci-mbox.o
 obj-$(CONFIG_NPCM_VDM)		+= npcm-vdm/
 obj-$(CONFIG_NPCM8XX_JTAG_MASTER) += npcm8xx-jtag-master.o
+obj-$(CONFIG_NPCM750_VCD) 	+= npcm750_vcd.o

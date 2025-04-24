@@ -656,6 +656,11 @@ config NPCM8XX_JTAG_MASTER
 	help
 	  NPCM8xx JTAG Master Interfaces.
 
+config NPCM750_VCD
+	tristate "Nuvoton VCD support"
+        help
+          Enable Nuvoton vcd.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
