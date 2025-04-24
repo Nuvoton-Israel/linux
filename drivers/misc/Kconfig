@@ -628,6 +628,11 @@ config NPCM750_VCD
         help
           Enable Nuvoton vcd.
 
+config NPCM750_ECE
+	tristate "Nuvoton ECE support"
+	help
+	  Enable Nuvoton Encoding and Compression Engine.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
