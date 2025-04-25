@@ -288,6 +288,7 @@ struct mtd_info {
 	/* Kernel-only stuff starts here. */
 	const char *name;
 	int index;
+	bool mtd_event_remove;
 
 	/* OOB layout description */
 	const struct mtd_ooblayout_ops *ooblayout;
