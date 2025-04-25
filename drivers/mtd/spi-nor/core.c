@@ -16,6 +16,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/spi-nor.h>
 #include <linux/mutex.h>
+#include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/sched/task_stack.h>
 #include <linux/sizes.h>
@@ -42,6 +43,9 @@
 
 #define SPI_NOR_SRST_SLEEP_MIN 200
 #define SPI_NOR_SRST_SLEEP_MAX 400
+
+static int spi_nor_remove_notifier_call(struct notifier_block *nb,
+					unsigned long event, void *data);
 
 /**
  * spi_nor_get_cmd_ext() - Get the command opcode extension based on the
@@ -1186,6 +1190,9 @@ static int spi_nor_prep(struct spi_nor *nor)
 
 	if (nor->controller_ops && nor->controller_ops->prepare)
 		ret = nor->controller_ops->prepare(nor);
+
+	if (nor->mtd.mtd_event_remove)
+		return -ENODEV;
 
 	return ret;
 }
@@ -3641,6 +3648,11 @@ static int spi_nor_probe(struct spi_mem *spimem)
 	if (ret)
 		return ret;
 
+	if (!nor->spi_nor_remove_nb.notifier_call) {
+		nor->spi_nor_remove_nb.notifier_call = spi_nor_remove_notifier_call;
+		bus_register_notifier(&spi_bus_type, &nor->spi_nor_remove_nb);
+	}
+
 	return mtd_device_register(&nor->mtd, data ? data->parts : NULL,
 				   data ? data->nr_parts : 0);
 }
@@ -3650,6 +3662,9 @@ static int spi_nor_remove(struct spi_mem *spimem)
 	struct spi_nor *nor = spi_mem_get_drvdata(spimem);
 
 	spi_nor_restore(nor);
+
+	bus_unregister_notifier(&spi_bus_type, &nor->spi_nor_remove_nb);
+	memset(&nor->spi_nor_remove_nb, 0, sizeof(nor->spi_nor_remove_nb));
 
 	/* Clean up MTD stuff. */
 	return mtd_device_unregister(&nor->mtd);
@@ -3728,6 +3743,37 @@ static const struct of_device_id spi_nor_of_table[] = {
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, spi_nor_of_table);
+
+static int spi_nor_remove_notifier_call(struct notifier_block *nb,
+				    unsigned long event, void *data)
+{
+	struct device *dev = data;
+	struct spi_device *spi;
+	struct spi_mem *mem;
+	struct spi_nor *nor;
+
+	if (!of_match_device(spi_nor_of_table, dev))
+		return 0;
+
+	switch (event) {
+	case BUS_NOTIFY_DEL_DEVICE:
+	case BUS_NOTIFY_UNBIND_DRIVER:
+		spi = to_spi_device(dev);
+		mem = spi_get_drvdata(spi);
+		if (!mem)
+			return NOTIFY_DONE;
+		nor = spi_mem_get_drvdata(mem);
+
+		mutex_lock(&nor->lock);
+		nor->mtd.mtd_event_remove = true;
+		mutex_unlock(&nor->lock);
+		msleep(300);
+
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
 
 /*
  * REVISIT: many of these chips have deep power-down modes, which
