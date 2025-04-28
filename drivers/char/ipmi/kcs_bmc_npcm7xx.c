@@ -169,6 +169,7 @@ static int npcm7xx_kcs_probe(struct platform_device *pdev)
 	struct npcm7xx_kcs_bmc *priv;
 	struct kcs_bmc_device *kcs_bmc;
 	u32 chan;
+	u32 val;
 	int rc;
 
 	rc = of_property_read_u32(dev->of_node, "kcs_chan", &chan);
@@ -197,6 +198,9 @@ static int npcm7xx_kcs_probe(struct platform_device *pdev)
 	kcs_bmc->ops = &npcm7xx_kcs_ops;
 
 	platform_set_drvdata(pdev, priv);
+
+	/* clear KCS status before enable the IRQ */
+	rc = regmap_read(priv->map, priv->reg->sts, &val);
 
 	rc = npcm7xx_kcs_config_irq(kcs_bmc, pdev);
 	if (rc)
