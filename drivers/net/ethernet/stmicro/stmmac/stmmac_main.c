@@ -51,6 +51,7 @@
 #include "dwxgmac2.h"
 #include "hwif.h"
 #include <net/ncsi.h>
+#include "dwmac_dma.h"
 
 extern void __iomem *npcm_base;
 extern bool sgmii_npcm;
@@ -6144,10 +6145,18 @@ static irqreturn_t stmmac_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = (struct net_device *)dev_id;
 	struct stmmac_priv *priv = netdev_priv(dev);
+	bool xmac = priv->plat->has_gmac4 || priv->plat->has_xgmac;
 
 	/* Check if adapter is up */
-	if (test_bit(STMMAC_DOWN, &priv->state))
+	if (test_bit(STMMAC_DOWN, &priv->state)) {
+		u32 intr_status = readl(priv->ioaddr + DMA_STATUS);
+
+		if ((priv->plat->has_gmac) || xmac)
+			readl(priv->ioaddr + GMAC_INT_STATUS);
+
+		writel((intr_status & 0x1ffff), priv->ioaddr + DMA_STATUS);
 		return IRQ_HANDLED;
+	}
 
 	/* Check ASP error if it isn't delivered via an individual IRQ */
 	if (priv->sfty_irq <= 0 && stmmac_safety_feat_interrupt(priv))
