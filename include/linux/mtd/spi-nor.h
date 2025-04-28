@@ -425,6 +425,7 @@ struct spi_nor {
 	} dirmap;
 
 	void *priv;
+	struct notifier_block spi_nor_remove_nb;
 };
 
 static inline void spi_nor_set_flash_node(struct spi_nor *nor,
