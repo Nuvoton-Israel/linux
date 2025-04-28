@@ -54,6 +54,13 @@
 #include "hwif.h"
 #include <net/ncsi.h>
 
+extern void __iomem *npcm_base;
+extern bool sgmii_npcm;
+
+#define IND_AC_INDX    0x1FE
+#define SR_MII_CTRL    0x003E0000 
+#define SR_MII_CTRL1   0x003F0000
+
 /* As long as the interface is active, we keep the timestamping counter enabled
  * with fine resolution and binary rollover. This avoid non-monotonic behavior
  * (clock jumps) when changing timestamping settings at runtime.
@@ -950,6 +957,27 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 		default:
 			return;
 		}
+	}
+
+	if (sgmii_npcm) {
+		u16 RegValue;
+
+		iowrite16((u16)(SR_MII_CTRL >> 9), npcm_base + IND_AC_INDX);
+		RegValue = ioread16(npcm_base + 0x2);
+		RegValue = ioread16(npcm_base + 0x0);
+		RegValue &= 0xDFBF;
+		switch (speed) {
+		case SPEED_1000:
+			RegValue |= BIT(6);
+			break;
+		case SPEED_100:
+			RegValue |= BIT(13);
+			break;
+		case SPEED_10:
+			break;
+		}
+
+		iowrite16(RegValue, npcm_base + 0x0);
 	}
 
 	if (priv->plat->fix_mac_speed)
