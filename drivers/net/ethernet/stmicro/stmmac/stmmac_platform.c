@@ -20,6 +20,9 @@
 #include "stmmac.h"
 #include "stmmac_platform.h"
 
+void __iomem *npcm_base;
+bool sgmii_npcm = false;
+
 #define IND_AC_INDX	0x1FE
 #define SR_MII_CTRL	0x003E0000
 
@@ -422,7 +425,6 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	struct device_node *np = pdev->dev.of_node;
 	struct plat_stmmacenet_data *plat;
 	struct stmmac_dma_cfg *dma_cfg;
-	void __iomem *base;
 	u16 RegValue;
 	int phy_mode;
 	void *ret;
@@ -665,19 +667,21 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	}
 
 	if (of_device_is_compatible(np, "nuvoton,npcm-dwmac")) {
-		base = devm_platform_ioremap_resource(pdev, 1);
-		if (IS_ERR(base)) {
+		sgmii_npcm = true;
+		npcm_base = devm_platform_ioremap_resource(pdev, 1);
+		if (IS_ERR(npcm_base)) {
 			dev_warn(&pdev->dev, "devm_platform_ioremap_resource failed\n");
+			sgmii_npcm = false;
 		}
-		iowrite16((u16)(SR_MII_CTRL >> 9), base + IND_AC_INDX);
-		RegValue = ioread16(base + 0x2);
-		RegValue = ioread16(base + 0x0);
+		iowrite16((u16)(SR_MII_CTRL >> 9), npcm_base + IND_AC_INDX);
+		RegValue = ioread16(npcm_base + 0x2);
+		RegValue = ioread16(npcm_base + 0x0);
 		RegValue |= BIT(15);
-		iowrite16(RegValue, base + 0x0);
+		iowrite16(RegValue, npcm_base + 0x0);
 		while (RegValue & BIT(15))
-			RegValue = ioread16(base + 0x0);
+			RegValue = ioread16(npcm_base + 0x0);
 		RegValue &= ~(BIT(12));
-		iowrite16(RegValue, base + 0x0);
+		iowrite16(RegValue, npcm_base + 0x0);
 	}
 
 	return plat;
