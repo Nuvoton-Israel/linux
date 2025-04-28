@@ -1785,6 +1785,26 @@
 			groups = "spi1";
 			function = "spi1";
 		};
+		spi1cs0_pins: spi1cs0-pins {
+			groups = "spi1cs0";
+			function = "spi1cs0";
+		};
+		spi1cs1_pins: spi1cs1-pins {
+			groups = "spi1cs1";
+			function = "spi1cs1";
+		};
+		spi1cs2_pins: spi1cs2-pins {
+			groups = "spi1cs2";
+			function = "spi1cs2";
+		};
+		spi1cs3_pins: spi1cs3-pins {
+			groups = "spi1cs3";
+			function = "spi1cs3";
+		};
+		spi1d23_pins: spi1d23-pins {
+			groups = "spi1d23";
+			function = "spi1d23";
+		};
 		faninx_pins: faninx-pins {
 			groups = "faninx";
 			function = "faninx";
