@@ -365,6 +365,10 @@
 	status = "okay";
 };
 
+&vdma {
+	status = "okay";
+};
+
 &pcimbox1 {
 	status = "okay";
 };
