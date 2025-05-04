@@ -235,6 +235,13 @@
 			status = "disabled";
 		};
 
+		vdma: vdma@e0800000 {
+			compatible = "nuvoton,npcm845-vdm";
+			reg = <0x0 0xe0800000 0x0 0x1000
+				   0x0 0xf0822000 0x0 0x1000>;
+			interrupts = <GIC_SPI 29 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
 		pcimbox1: pcimbox@f0848000 {
 			compatible = "nuvoton,npcm845-pci-mbox", "nuvoton,npcm750-pci-mbox",
 					"simple-mfd", "syscon";
