@@ -1237,7 +1237,6 @@ static void vdm_exit(void)
 	reset_detect_poll = 0;
 	stop_reset_poll = 1;
 	cancel_delayed_work(&reset_poll_work);
-	flush_scheduled_work();	/* wait till polling work finished */
 
 #ifdef _USE_VDMA_POLLING
 	stop_task = 1;		/* keep intrp_routine from queueing itself */
