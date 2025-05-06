@@ -761,6 +761,12 @@ config SPI_WPCM_FIU
 	  This driver does not support generic SPI. The implementation only
 	  supports the spi-mem interface.
 
+config NPCM_FIU_WR_DR_EN
+     bool "Enable FIU NPCM direct write"
+     default n
+     help
+       This option enables FIU NPCM direct write.
+
 config SPI_NPCM_FIU
 	tristate "Nuvoton NPCM FLASH Interface Unit"
 	depends on ARCH_NPCM || COMPILE_TEST
