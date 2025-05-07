@@ -570,7 +570,7 @@ static void npcm_fiux_set_direct_wr(struct npcm_fiu_spi *fiu)
 
 static void npcm_fiux_set_direct_rd(struct npcm_fiu_spi *fiu)
 {
-	u32 rx_dummy = 0;
+	u32 rx_dummy = 2;
 
 	regmap_write(fiu->regmap, NPCM_FIU_DRD_CFG,
 		     NPCM_FIU_DRD_16_BYTE_BURST);
