@@ -556,6 +556,7 @@ struct i3c_master_controller {
 	struct work_struct hj_work;
 	struct work_struct reg_work;
 	unsigned int dev_nack_retry_count;
+	struct mutex daa_lock;
 };
 
 /**

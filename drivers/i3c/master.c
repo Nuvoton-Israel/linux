@@ -2041,7 +2041,13 @@ EXPORT_SYMBOL_GPL(i3c_master_do_daa_ext);
  */
 int i3c_master_do_daa(struct i3c_master_controller *master)
 {
-	return i3c_master_do_daa_ext(master, false);
+	int ret;
+
+	mutex_lock(&master->daa_lock);
+	ret = i3c_master_do_daa_ext(master, false);
+	mutex_unlock(&master->daa_lock);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(i3c_master_do_daa);
 
@@ -2379,9 +2385,9 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 		i3c_master_sethid_locked(master);
 		i3c_master_setaasa_locked(master);
 
-		i3c_bus_normaluse_lock(&master->bus);
+		mutex_lock(&master->daa_lock);
 		i3c_master_register_new_i3c_devs(master);
-		i3c_bus_normaluse_unlock(&master->bus);
+		mutex_unlock(&master->daa_lock);
 		return 0;
 	}
 
@@ -3254,6 +3260,7 @@ int i3c_master_register(struct i3c_master_controller *master,
 	master->secondary = secondary;
 	INIT_LIST_HEAD(&master->boardinfo.i2c);
 	INIT_LIST_HEAD(&master->boardinfo.i3c);
+	mutex_init(&master->daa_lock);
 
 	ret = i3c_master_rpm_get(master);
 	if (ret)
@@ -3341,8 +3348,10 @@ int i3c_master_register(struct i3c_master_controller *master,
 	 * behavior.
 	 */
 	master->init_done = true;
+	mutex_lock(&master->daa_lock);
 	queue_work(master->wq, &master->reg_work);
 	flush_work(&master->reg_work);
+	mutex_unlock(&master->daa_lock);
 
 	if (master->ops->set_dev_nack_retry)
 		device_create_file(&master->dev, &dev_attr_dev_nack_retry_count);
