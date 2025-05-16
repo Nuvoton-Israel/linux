@@ -1535,6 +1535,9 @@ static int i3c_master_retrieve_dev_info(struct i3c_dev_desc *dev)
 	ret = i3c_master_getpid_locked(master, &dev->info);
 	if (ret)
 		return ret;
+	/* Use the PID if defined in dts */
+	if (dev->boardinfo && dev->boardinfo->pid)
+		dev->info.pid = dev->boardinfo->pid;
 
 	ret = i3c_master_getbcr_locked(master, &dev->info);
 	if (ret)
