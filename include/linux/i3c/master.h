@@ -516,6 +516,7 @@ struct i3c_master_controller {
 	} boardinfo;
 	struct i3c_bus bus;
 	struct workqueue_struct *wq;
+	struct mutex daa_lock;
 };
 
 /**
