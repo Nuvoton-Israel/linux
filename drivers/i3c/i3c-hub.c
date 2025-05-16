@@ -220,6 +220,8 @@ struct i3c_hub {
 	/* Offset for reading HUB's register. */
 	u8 reg_addr;
 	struct dentry *debug_dir;
+	struct delayed_work post_work;
+	struct device_node *node;
 };
 
 struct hub_setting {
@@ -779,6 +781,20 @@ static int i3c_hub_connect_tp(struct device *dev)
 	return regmap_clear_bits(priv->regmap, I3C_HUB_TP_NET_CON_CONF, tp_dis_val);
 }
 
+static void i3c_hub_post_work(struct work_struct *work)
+{
+	struct i3c_hub *priv = container_of(to_delayed_work(work), struct i3c_hub, post_work);
+	struct i3c_master_controller *master = priv->i3cdev->desc->common.master;
+
+	if (priv->node && of_property_read_bool(priv->node, "post-work-daa"))
+		i3c_master_do_daa(master);
+
+	if (priv->i3cdev->bus->jesd403) {
+		i3c_device_send_ccc_cmd(priv->i3cdev, I3C_CCC_SETHID);
+		i3c_device_send_ccc_cmd(priv->i3cdev, I3C_CCC_SETAASA);
+	}
+}
+
 static int i3c_hub_probe(struct i3c_device *i3cdev)
 {
 	struct regmap_config i3c_hub_regmap_config = {
@@ -814,6 +830,7 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	} else {
 		i3c_hub_of_get_configuration(dev, node);
 		of_node_put(node);
+		priv->node = node;
 	}
 
 	regmap = devm_regmap_init_i3c(i3cdev, &i3c_hub_regmap_config);
@@ -838,10 +855,6 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		goto error;
 	}
 
-	if (i3cdev->bus->jesd403) {
-		i3c_device_send_ccc_cmd(i3cdev, I3C_CCC_SETHID);
-		i3c_device_send_ccc_cmd(i3cdev, I3C_CCC_SETAASA);
-	}
 	/* Setup hub network connection according to dts setting */
 	i3c_hub_connect_tp(dev);
 
@@ -858,6 +871,9 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		dev_err(dev, "Failed to create tp_connect sysfs file\n");
 		goto error;
 	}
+
+	INIT_DELAYED_WORK(&priv->post_work, i3c_hub_post_work);
+	schedule_delayed_work(&priv->post_work, msecs_to_jiffies(100));
 	/* TBD: Apply special/security lock here using DEV_CMD register */
 
 	return 0;
