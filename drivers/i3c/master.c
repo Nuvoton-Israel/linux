@@ -1863,18 +1863,19 @@ int i3c_master_do_daa(struct i3c_master_controller *master)
 {
 	int ret;
 
+	mutex_lock(&master->daa_lock);
 	i3c_bus_maintenance_lock(&master->bus);
 	ret = master->ops->do_daa(master);
 	i3c_bus_maintenance_unlock(&master->bus);
 
 	if (ret)
-		return ret;
+		goto mutex_unlock;
 
-	i3c_bus_normaluse_lock(&master->bus);
 	i3c_master_register_new_i3c_devs(master);
-	i3c_bus_normaluse_unlock(&master->bus);
+mutex_unlock:
+	mutex_unlock(&master->daa_lock);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(i3c_master_do_daa);
 
@@ -2212,9 +2213,9 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 		i3c_master_sethid_locked(master);
 		i3c_master_setaasa_locked(master);
 
-		i3c_bus_normaluse_lock(&master->bus);
+		mutex_lock(&master->daa_lock);
 		i3c_master_register_new_i3c_devs(master);
-		i3c_bus_normaluse_unlock(&master->bus);
+		mutex_unlock(&master->daa_lock);
 		return 0;
 	}
 
@@ -3057,6 +3058,7 @@ int i3c_master_register(struct i3c_master_controller *master,
 	master->secondary = secondary;
 	INIT_LIST_HEAD(&master->boardinfo.i2c);
 	INIT_LIST_HEAD(&master->boardinfo.i3c);
+	mutex_init(&master->daa_lock);
 
 	device_initialize(&master->dev);
 
@@ -3134,9 +3136,9 @@ int i3c_master_register(struct i3c_master_controller *master,
 	 * register I3C devices discovered during the initial DAA.
 	 */
 	master->init_done = true;
-	i3c_bus_normaluse_lock(&master->bus);
+	mutex_lock(&master->daa_lock);
 	i3c_master_register_new_i3c_devs(master);
-	i3c_bus_normaluse_unlock(&master->bus);
+	mutex_unlock(&master->daa_lock);
 
 	return 0;
 
