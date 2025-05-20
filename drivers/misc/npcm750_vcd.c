@@ -415,6 +415,33 @@ static const struct res_tbl res_tbls[] = {
 
 #define RESTBL_CNT ARRAY_SIZE(res_tbls)
 
+static u32 npcm750_vcd_pclk(struct npcm750_vcd *priv)
+{
+	struct regmap *gfxi = priv->gfx_regmap;
+	u32 tmp, pllfbdiv, pllinotdiv, gpllfbdiv;
+	u8 gpllfbdv109, gpllfbdv8, gpllindiv;
+	u8 gpllst_pllotdiv1, gpllst_pllotdiv2;
+
+	regmap_read(gfxi, GPLLST, &tmp);
+	gpllfbdv109 = (tmp & GPLLFBDV109_MASK) >> GPLLFBDV109_OFFSET;
+	gpllst_pllotdiv1 = tmp & GPLLST_PLLOTDIV1_MASK;
+	gpllst_pllotdiv2 = (tmp & GPLLST_PLLOTDIV2_MASK) >> GPLLST_PLLOTDIV2_OFFSET;
+
+	regmap_read(gfxi, GPLLINDIV, &tmp);
+	gpllfbdv8 = (tmp & GPLLFBDV8_MASK) >> GPLLFBDV8_OFFSET;
+	gpllindiv = tmp & GPLLINDIV_MASK;
+
+	regmap_read(gfxi, GPLLFBDIV, &tmp);
+	gpllfbdiv = tmp & GPLLFBDIV_MASK;
+
+	pllfbdiv = (512 * gpllfbdv109 + 256 * gpllfbdv8 + gpllfbdiv);
+	pllinotdiv = (gpllindiv * gpllst_pllotdiv1 * gpllst_pllotdiv2);
+	if (pllfbdiv == 0 || pllinotdiv == 0)
+		return 0;
+
+	return ((pllfbdiv * 25) / pllinotdiv) * 1000;
+}
+
 static void npcm750_vcd_ip_reset(struct npcm750_vcd *priv)
 {
 	reset_control_assert(priv->reset);
@@ -496,27 +523,47 @@ static unsigned int npcm750_vcd_vbp(struct npcm750_vcd *priv)
 static void npcm750_vcd_adjust_dvodel(struct npcm750_vcd *priv)
 {
 	struct regmap *vcd = priv->vcd_regmap;
-	unsigned int hact, hdelay, vdelay, val;
+	unsigned int hact, hdelay, vdelay, val, det_width, det_height;
+	u32 pclk, hbp, vbp;
 
 	if (!priv->hsync_mode)
 		return;
 
 	regmap_read(vcd, VCD_HOR_AC_TIM, &val);
 	hact = FIELD_GET(VCD_HOR_AC_TIM_VALUE, val);
+	det_width = npcm750_vcd_hres(priv);
+	det_height = npcm750_vcd_vres(priv);
+	pclk = npcm750_vcd_pclk(priv);
+	hbp = npcm750_vcd_hbp(priv);
+	vbp = npcm750_vcd_vbp(priv);
 
-	if (hact != 0x3fff) {
-		if (hact < npcm750_vcd_hres(priv))
-			hdelay = npcm750_vcd_hbp(priv) + hact + priv->hdelay_add;
-		else
-			hdelay = npcm750_vcd_hbp(priv);
+	if(hact == 0x3fff)
+		return;
 
-		vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add;
+	if (hact < det_width)
+		hdelay = npcm750_vcd_hbp(priv) + hact + priv->hdelay_add + 0xC; // for head2
+	else
+		hdelay = npcm750_vcd_hbp(priv) + priv->hdelay_add;
 
-		regmap_write(vcd, VCD_DVO_DEL,
-			     FIELD_PREP(VCD_DVO_DEL_HSYNC_DEL, hdelay) |
-			     FIELD_PREP(VCD_DVO_DEL_VSYNC_DEL, vdelay));
+	vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add;
+
+	if (1440 > det_height){
+		if ((hact == 0x88) && (det_width == 1024) && (det_height == 768) &&
+			(pclk == 65000)){
+			vdelay += 0x6;
+		}
+
+		if ((det_width == 720) && (det_height == 400)) {
+			vdelay += 0xa;
+			hdelay += 0x2e;
+		}
 	}
 
+	regmap_write(vcd, VCD_DVO_DEL,
+			FIELD_PREP(VCD_DVO_DEL_HSYNC_DEL, hdelay) |
+			FIELD_PREP(VCD_DVO_DEL_VSYNC_DEL, vdelay));
+
+	return;
 }
 
 static int npcm750_vcd_get_bpp(struct npcm750_vcd *priv)
@@ -582,33 +629,6 @@ static int npcm750_vcd_ready(struct npcm750_vcd *priv)
 	}
 
 	return 0;
-}
-
-static u32 npcm750_vcd_pclk(struct npcm750_vcd *priv)
-{
-	struct regmap *gfxi = priv->gfx_regmap;
-	u32 tmp, pllfbdiv, pllinotdiv, gpllfbdiv;
-	u8 gpllfbdv109, gpllfbdv8, gpllindiv;
-	u8 gpllst_pllotdiv1, gpllst_pllotdiv2;
-
-	regmap_read(gfxi, GPLLST, &tmp);
-	gpllfbdv109 = (tmp & GPLLFBDV109_MASK) >> GPLLFBDV109_OFFSET;
-	gpllst_pllotdiv1 = tmp & GPLLST_PLLOTDIV1_MASK;
-	gpllst_pllotdiv2 = (tmp & GPLLST_PLLOTDIV2_MASK) >> GPLLST_PLLOTDIV2_OFFSET;
-
-	regmap_read(gfxi, GPLLINDIV, &tmp);
-	gpllfbdv8 = (tmp & GPLLFBDV8_MASK) >> GPLLFBDV8_OFFSET;
-	gpllindiv = tmp & GPLLINDIV_MASK;
-
-	regmap_read(gfxi, GPLLFBDIV, &tmp);
-	gpllfbdiv = tmp & GPLLFBDIV_MASK;
-
-	pllfbdiv = (512 * gpllfbdv109 + 256 * gpllfbdv8 + gpllfbdiv);
-	pllinotdiv = (gpllindiv * gpllst_pllotdiv1 * gpllst_pllotdiv2);
-	if (pllfbdiv == 0 || pllinotdiv == 0)
-		return 0;
-
-	return ((pllfbdiv * 25) / pllinotdiv) * 1000;
 }
 
 static int npcm750_vcd_capres(struct npcm750_vcd *priv, u32 width, u32 height)
