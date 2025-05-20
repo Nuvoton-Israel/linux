@@ -33,9 +33,12 @@ struct npcm7xx_mbox {
 	spinlock_t		lock;	/* mbox access mutex */
 	bool			cif0;
 	u32			max_buf_size;
+	int id;
 };
 
 static atomic_t npcm7xx_mbox_open_count = ATOMIC_INIT(0);
+
+static DEFINE_IDA(npcm7xx_mbox_ida);
 
 static struct npcm7xx_mbox *file_mbox(struct file *file)
 {
@@ -207,11 +210,9 @@ static int npcm7xx_mbox_config_irq(struct npcm7xx_mbox *mbox,
 static int npcm7xx_mbox_probe(struct platform_device *pdev)
 {
 	struct npcm7xx_mbox *mbox;
-	struct device *dev;
+	struct device *dev = &pdev->dev;
 	struct resource *res;
 	int rc;
-
-	dev = &pdev->dev;
 
 	mbox = devm_kzalloc(dev, sizeof(*mbox), GFP_KERNEL);
 	if (!mbox)
@@ -222,39 +223,66 @@ static int npcm7xx_mbox_probe(struct platform_device *pdev)
 	mbox->regmap = syscon_node_to_regmap(dev->of_node);
 	if (IS_ERR(mbox->regmap)) {
 		dev_err(dev, "Couldn't get regmap\n");
-		return -ENODEV;
+		return PTR_ERR(mbox->regmap);
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!res) {
+		dev_err(dev, "No memory resource\n");
+		return -ENXIO;
+	}
+
 	mbox->memory = devm_ioremap_resource(dev, res);
 	if (IS_ERR(mbox->memory))
 		return PTR_ERR(mbox->memory);
+
 	mbox->max_buf_size = resource_size(res);
 
 	spin_lock_init(&mbox->lock);
 	init_waitqueue_head(&mbox->queue);
 
+	mbox->id = ida_alloc(&npcm7xx_mbox_ida, GFP_KERNEL);
+	if (mbox->id < 0) {
+		dev_err(dev, "Unable to allocate id\n");
+		rc = -ENOMEM;
+		return rc;
+	}
+
 	mbox->miscdev.minor = MISC_DYNAMIC_MINOR;
-	mbox->miscdev.name = DEVICE_NAME;
+	mbox->miscdev.name = devm_kasprintf(dev, GFP_KERNEL, "%s%d", DEVICE_NAME, mbox->id);
+	if (!mbox->miscdev.name) {
+		dev_err(dev, "Unable to allocate a dev name\n");
+		rc = -ENOMEM;
+		goto err_free_ida;
+	}
+
 	mbox->miscdev.fops = &npcm7xx_mbox_fops;
 	mbox->miscdev.parent = dev;
 	mbox->cif0 = false;
+
 	rc = misc_register(&mbox->miscdev);
 	if (rc) {
 		dev_err(dev, "Unable to register device\n");
-		return rc;
+		goto err_free_name;
 	}
 
 	rc = npcm7xx_mbox_config_irq(mbox, pdev);
 	if (rc) {
 		dev_err(dev, "Failed to configure IRQ\n");
-		misc_deregister(&mbox->miscdev);
-		return rc;
+		goto err_deregister_misc;
 	}
 
-	pr_info("NPCM7xx PCI Mailbox probed\n");
-
+	dev_info(dev, "NPCM7xx PCI Mailbox probed\n");
 	return 0;
+
+err_deregister_misc:
+	misc_deregister(&mbox->miscdev);
+err_free_name:
+	devm_kfree(dev, mbox->miscdev.name);
+err_free_ida:
+	ida_free(&npcm7xx_mbox_ida, mbox->id);
+	devm_kfree(dev, mbox);
+	return rc;
 }
 
 static void npcm7xx_mbox_remove(struct platform_device *pdev)
@@ -262,10 +290,14 @@ static void npcm7xx_mbox_remove(struct platform_device *pdev)
 	struct npcm7xx_mbox *mbox = dev_get_drvdata(&pdev->dev);
 
 	misc_deregister(&mbox->miscdev);
+	devm_kfree(&pdev->dev, mbox->miscdev.name);
+	ida_free(&npcm7xx_mbox_ida, mbox->id);
+	devm_kfree(&pdev->dev, mbox);
 }
 
 static const struct of_device_id npcm7xx_mbox_match[] = {
 	{ .compatible = "nuvoton,npcm750-pci-mbox" },
+	{ .compatible = "nuvoton,npcm845-pci-mbox" },
 	{ },
 };
 
