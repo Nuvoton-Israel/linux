@@ -249,9 +249,9 @@ static int get_b2h_avail_buf_len(struct npcm_mmbi_channel *channel,
 		hrop.b2h_wp, hrop.h2b_rp);
 
 	if (hrop.b2h_wp >= b2h_rp)
-		*avail_buf_len = channel->b2h_cb_size - hrop.b2h_wp + b2h_rp;
+		*avail_buf_len = channel->b2h_cb_size - hrop.b2h_wp + b2h_rp - 1;
 	else
-		*avail_buf_len = b2h_rp - hrop.b2h_wp;
+		*avail_buf_len = b2h_rp - hrop.b2h_wp - 1;
 
 	return 0;
 }
@@ -362,16 +362,10 @@ static void update_host_rop(struct npcm_mmbi_channel *channel,
 		hrop.h2b_rp);
 
 	/* Advance the B2H CB offset for next write */
-	if ((hrop.b2h_wp + w_len) <= channel->b2h_cb_size)
-		hrop.b2h_wp += w_len;
-	else
-		hrop.b2h_wp = hrop.b2h_wp + w_len - channel->b2h_cb_size;
+	hrop.b2h_wp = (hrop.b2h_wp + w_len) % channel->b2h_cb_size;
 
 	/* Advance the H2B CB offset till where BMC read data */
-	if ((hrop.h2b_rp + r_len) <= channel->h2b_cb_size)
-		hrop.h2b_rp += r_len;
-	else
-		hrop.h2b_rp = hrop.h2b_rp + r_len - channel->h2b_cb_size;
+	hrop.h2b_rp = (hrop.h2b_rp + r_len) % channel->h2b_cb_size;
 
 	/*
 	 * Clear BMC reset request state its set:
@@ -605,8 +599,8 @@ static ssize_t mmbi_read(struct file *filp, char *buff, size_t count,
 	    channel->h2b_cb_size) {
 		rd_offset = hrop.h2b_rp + sizeof(struct mmbi_header);
 	} else {
-		rd_offset = hrop.h2b_rp + sizeof(struct mmbi_header) -
-			    channel->h2b_cb_size;
+		rd_offset = (hrop.h2b_rp + sizeof(struct mmbi_header))
+			    % channel->h2b_cb_size;
 	}
 	rd_len = req_data_len;
 
@@ -658,7 +652,6 @@ static ssize_t mmbi_read(struct file *filp, char *buff, size_t count,
 		print_hex_dump_debug("mmbi H2B-2:", DUMP_PREFIX_NONE, 16, 1,
 				     channel->h2b_cb_vmem + rd_offset,
 				     rd_len - chunk_len, false);
-		rd_offset += (rd_len - chunk_len);
 	}
 	*offp += rd_len;
 	ret = rd_len;
@@ -720,7 +713,8 @@ static ssize_t mmbi_write(struct file *filp, const char *buffer, size_t len,
 	dev_dbg(priv->dev, "B2H buffer empty space: %ld\n", avail_buf_len);
 
 	/* Empty space should be more than write request data size */
-	if (len + sizeof(header) > avail_buf_len) {
+	if (avail_buf_len <= sizeof(header) ||
+	    (len > (avail_buf_len - sizeof(header)))) {
 		dev_err(priv->dev, "Not enough space(%ld) in B2H buffer\n",
 			avail_buf_len);
 		return -ENOSPC;
@@ -741,9 +735,9 @@ static ssize_t mmbi_write(struct file *filp, const char *buffer, size_t len,
 	} else {
 		chunk_len = end_offset - wt_offset;
 		memcpy(channel->b2h_cb_vmem + wt_offset, &header, chunk_len);
-		memcpy(channel->b2h_cb_vmem, &header + chunk_len,
+		memcpy(channel->b2h_cb_vmem, (u8 *)(&header) + chunk_len,
 		       (sizeof(header) - chunk_len));
-		wt_offset = (sizeof(header) - chunk_len);
+		wt_offset = (wt_offset + sizeof(header)) % channel->b2h_cb_size;
 	}
 
 	/* Write the data */
