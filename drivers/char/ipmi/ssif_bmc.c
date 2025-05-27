@@ -225,9 +225,6 @@ static ssize_t ssif_bmc_write(struct file *file, const char __user *buf, size_t 
 	/* ssif_bmc not busy */
 	ssif_bmc->busy = false;
 
-	if (ssif_bmc->set_ssif_bmc_status)
-		ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_READY);
-
 	/* Clean old request buffer */
 	memset(&ssif_bmc->request, 0, sizeof(struct ipmi_ssif_msg));
 exit:
@@ -264,6 +261,9 @@ static __poll_t ssif_bmc_poll(struct file *file, poll_table *wait)
 	/* The request is available, userspace application can get the request */
 	if (ssif_bmc->request_available)
 		mask |= EPOLLIN;
+
+	if(!ssif_bmc->response_in_progress)
+		mask |= EPOLLOUT;
 
 	spin_unlock_irq(&ssif_bmc->lock);
 
@@ -795,8 +795,6 @@ static int ssif_bmc_cb(struct i2c_client *client, enum i2c_slave_event event, u8
 
 	case I2C_SLAVE_WRITE_REQUESTED:
 		on_write_requested_event(ssif_bmc, val);
-		if (ssif_bmc->busy)
-			mdelay(30); /* 30 ms */
 		break;
 
 	case I2C_SLAVE_READ_PROCESSED:
