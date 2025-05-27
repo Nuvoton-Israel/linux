@@ -187,15 +187,15 @@ config ASPEED_BT_IPMI_BMC
 	  found on Aspeed SOCs (AST2400 and AST2500). The driver
 	  implements the BMC side of the BT interface.
 
-config NPCM7XX_BT_IPMI_BMC
+config NPCM_BT_IPMI_BMC
         depends on ARCH_NPCM || COMPILE_TEST
 	depends on MFD_SYSCON
 	select REGMAP_MMIO
         tristate "Nuvonton BT IPMI bmc driver"
         help
 	  Provides a driver for the BT (Block Transfer) IPMI interface
-	  found on Nuvoton SOCs (npcm750 and npcm845). The driver
-	  implements the BMC side of the BT interface.
+	  found on Nuvoton SOC. The driver implements the BMC side of
+	  the BT interface.
 
 config SSIF_IPMI_BMC
 	tristate "SSIF IPMI BMC driver"

@@ -438,7 +438,6 @@ static int bt_bmc_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id npcm_bt_bmc_match[] = {
-	{ .compatible = "nuvoton,npcm750-bt-bmc" },
 	{ .compatible = "nuvoton,npcm845-bt-bmc" },
 	{ },
 };
