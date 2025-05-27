@@ -108,6 +108,17 @@ struct ssif_bmc_ctx {
 
 void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable);
 
+static void npcm_ssif_enable(struct ssif_bmc_ctx *ssif_bmc)
+{
+	if(ssif_bmc->busy) {
+		if (ssif_bmc->set_ssif_bmc_status)
+			ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_BUSY);
+	} else
+		if (ssif_bmc->set_ssif_bmc_status)
+			ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_READY);
+}
+
+
 static inline struct ssif_bmc_ctx *to_ssif_bmc(struct file *file)
 {
 	return container_of(file->private_data, struct ssif_bmc_ctx, miscdev);
@@ -228,8 +239,7 @@ static ssize_t ssif_bmc_write(struct file *file, const char __user *buf, size_t 
 	/* Clean old request buffer */
 	memset(&ssif_bmc->request, 0, sizeof(struct ipmi_ssif_msg));
 exit:
-	if (ssif_bmc->set_ssif_bmc_status)
-		ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_READY);
+	npcm_ssif_enable(ssif_bmc);
 	spin_unlock_irqrestore(&ssif_bmc->lock, flags);
 
 	return (ret < 0) ? ret : count;
@@ -316,7 +326,6 @@ static void response_timeout(struct timer_list *t)
 	/* Do nothing if the response is in progress */
 	if (!ssif_bmc->response_in_progress) {
 		/* Recover ssif_bmc from busy */
-		ssif_bmc->busy = false;
 		ssif_bmc->response_timer_inited = false;
 		dev_warn(&ssif_bmc->client->dev,
 			 "%s: No response from userspace, abort current request\n", __func__);
@@ -324,19 +333,17 @@ static void response_timeout(struct timer_list *t)
 		ssif_bmc->aborting = true;
 	}
 
-	if (ssif_bmc->set_ssif_bmc_status)
-		ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_READY);
+	ssif_bmc->busy = false;
+	npcm_ssif_enable(ssif_bmc);
 	spin_unlock_irqrestore(&ssif_bmc->lock, flags);
 }
 
 /* Called with ssif_bmc->lock held. */
 static void handle_request(struct ssif_bmc_ctx *ssif_bmc)
 {
-	if (ssif_bmc->set_ssif_bmc_status)
-		ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_BUSY);
-
 	/* set ssif_bmc to busy waiting for response */
 	ssif_bmc->busy = true;
+	npcm_ssif_enable(ssif_bmc);
 
 	/* Request message is available to process */
 	ssif_bmc->request_available = true;
@@ -854,8 +861,7 @@ static int ssif_bmc_probe(struct i2c_client *client)
 	ssif_bmc->client->flags |= I2C_CLIENT_SLAVE;
 	ssif_bmc->priv = i2c_get_adapdata(client->adapter);
 	ssif_bmc->set_ssif_bmc_status = npcm_i2c_client_slave_enable;
-	if (ssif_bmc->set_ssif_bmc_status)
-		ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_READY);
+	npcm_ssif_enable(ssif_bmc);
 
 	/* Register I2C slave */
 	i2c_set_clientdata(client, ssif_bmc);
