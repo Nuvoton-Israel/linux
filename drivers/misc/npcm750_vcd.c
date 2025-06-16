@@ -531,32 +531,33 @@ static void npcm750_vcd_adjust_dvodel(struct npcm750_vcd *priv)
 
 	regmap_read(vcd, VCD_HOR_AC_TIM, &val);
 	hact = FIELD_GET(VCD_HOR_AC_TIM_VALUE, val);
+
+	if(hact == 0x3fff)
+		return;
+
 	det_width = npcm750_vcd_hres(priv);
 	det_height = npcm750_vcd_vres(priv);
 	pclk = npcm750_vcd_pclk(priv);
 	hbp = npcm750_vcd_hbp(priv);
 	vbp = npcm750_vcd_vbp(priv);
 
-	if(hact == 0x3fff)
-		return;
-
 	if (hact < det_width)
-		hdelay = npcm750_vcd_hbp(priv) + hact + priv->hdelay_add + 0xC; // for head2
+		hdelay = npcm750_vcd_hbp(priv) + hact + priv->hdelay_add + 0xC;
 	else
-		hdelay = npcm750_vcd_hbp(priv) + priv->hdelay_add;
+		hdelay = npcm750_vcd_hbp(priv) + priv->hdelay_add + 0x2;
 
-	vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add;
-
-	if (1440 > det_height){
-		if ((hact == 0x88) && (det_width == 1024) && (det_height == 768) &&
-			(pclk == 65000)){
-			vdelay += 0x6;
-		}
-
-		if ((det_width == 720) && (det_height == 400)) {
-			vdelay += 0xa;
-			hdelay += 0x2e;
-		}
+	if (det_height < 1440) {
+			if ((hact == 0x88) && (det_width == 1024) && (det_height == 768) &&
+				(pclk == 65000)) {
+				vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + 0x6;
+			} else if ((det_width == 720) && (det_height == 400)) {
+				vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + 0xa;
+				hdelay = npcm750_vcd_hbp(priv) + priv->hdelay_add + 0x2e;
+			} else {
+				vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add;
+			}
+	} else {
+			vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + 0x3;
 	}
 
 	regmap_write(vcd, VCD_DVO_DEL,
@@ -734,11 +735,6 @@ static void npcm750_vcd_update_info(struct npcm750_vcd *priv)
 
 	if (priv->info.vdisp > VCD_MAX_HIGHT)
 		priv->info.vdisp = VCD_MAX_HIGHT;
-
-	if (priv->hsync_mode) {
-		regmap_read(vcd, VCD_HOR_AC_TIM, &priv->hortact);
-		priv->hortact &= VCD_HOR_AC_TIM_MASK;
-	}
 }
 
 static void npcm750_vcd_detect_video_mode(struct npcm750_vcd *priv)
@@ -816,21 +812,15 @@ static int npcm750_vcd_get_resolution(struct npcm750_vcd *priv)
 	struct regmap *vcd = priv->vcd_regmap;
 	struct regmap *gfxi = priv->gfx_regmap;
 	size_t i;
-	u32 hortact = 0, dispst;
+	u32 dispst;
 	u32 res_retry = GET_RES_RERTY, vaild_retry = GET_RES_VALID_RERTY;
 	u8 vaild = 0;
-
-	if (priv->hsync_mode) {
-		regmap_read(vcd, VCD_HOR_AC_TIM, &hortact);
-		hortact &= VCD_HOR_AC_TIM_MASK;
-	}
 
 	/* check with GFX registers if resolution changed from last time */
 	if ((priv->info.hdisp != npcm750_vcd_hres(priv)) ||
 	    (priv->info.vdisp != npcm750_vcd_vres(priv)) ||
 	    (priv->info.pixelclk != npcm750_vcd_pclk(priv)) ||
-	    (priv->info.mode != npcm750_vcd_is_mga(priv)) ||
-	    (priv->hortact != hortact)) {
+	    (priv->info.mode != npcm750_vcd_is_mga(priv))) {
 
 		if (npcm750_vcd_hres(priv) && npcm750_vcd_vres(priv)) {
 			/*
@@ -1037,8 +1027,6 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 	/* Enable display of KVM GFX and access to memory */
 	regmap_update_bits(gcr, INTCR, INTCR_GFXIFDIS, 0);
 
-	/* KVM in progress */
-	regmap_update_bits(gcr, INTCR, INTCR_KVMSI, INTCR_KVMSI);
 
 	/* Set vrstenw and hrstenw */
 	regmap_update_bits(gcr, INTCR2, INTCR2_GIHCRST | INTCR2_GIVCRST,
@@ -1090,8 +1078,7 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 	regmap_write(vcd, VCD_FBB_ADR, priv->dma);
 
 	/* Set VCD mode */
-	regmap_update_bits(vcd, VCD_MODE, 0xFFFFFFFF,
-			   VCD_MODE_CM565 | VCD_MODE_KVM_BW_SET);
+	regmap_write(vcd, VCD_MODE, VCD_MODE_CM565 | VCD_MODE_KVM_BW_SET);
 
 	/* Set DVDE/DVHSYNC */
 	if (priv->hsync_mode) {
@@ -1605,7 +1592,8 @@ static int npcm750_vcd_probe(struct platform_device *pdev)
 	init_completion(&priv->complete);
 	init_waitqueue_head(&priv->wait);
 
-	dev_info(dev, "NPCM VCD Driver probed %s\n", VCD_VERSION);
+	dev_info(dev, "NPCM VCD Driver probed %s %s %s\n", VCD_VERSION, priv->hsync_mode ? "HSYNC" : "DE",
+		priv->use_head1_source ? "HEAD1" : "HEAD2");
 	return 0;
 
 err:
