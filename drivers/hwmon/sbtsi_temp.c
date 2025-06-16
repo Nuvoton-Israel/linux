@@ -12,7 +12,8 @@
 #include <linux/err.h>
 #include <linux/fs.h>
 #include <linux/hwmon.h>
-#include <linux/i2c.h>
+#include <linux/i3c/device.h>
+#include <linux/i3c/master.h>
 #include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -21,11 +22,10 @@
 #include <linux/of_device.h>
 #include <linux/of.h>
 #include <linux/regmap.h>
+#include <linux/version.h>
 
 #include "amd-apml.h"
 
-#define SOCK_0_ADDR	0x4C
-#define SOCK_1_ADDR	0x48
 /*
  * SB-TSI registers only support SMBus byte data access. "_INT" registers are
  * the integer part of a temperature value or limit, and "_DEC" registers are
@@ -64,6 +64,7 @@ struct apml_sbtsi_device {
 	struct miscdevice sbtsi_misc_dev;
 	struct regmap *regmap;
 	struct mutex lock;
+	u8 dev_static_addr;
 } __packed;
 
 /*
@@ -224,7 +225,7 @@ static const struct hwmon_chip_info sbtsi_chip_info = {
 
 static long sbtsi_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 {
-	int __user *arguser = (int __user *)arg;
+	int __user *arguser = (int  __user *)arg;
 	struct apml_message msg = { 0 };
 	struct apml_sbtsi_device *tsi_dev;
 	int ret;
@@ -261,22 +262,24 @@ out:
 }
 
 static const struct file_operations sbtsi_fops = {
-	.owner = THIS_MODULE,
-	.unlocked_ioctl = sbtsi_ioctl,
-	.compat_ioctl = sbtsi_ioctl,
+	.owner		= THIS_MODULE,
+	.unlocked_ioctl	= sbtsi_ioctl,
+	.compat_ioctl	= sbtsi_ioctl,
 };
 
 static int create_misc_tsi_device(struct apml_sbtsi_device *tsi_dev,
-				  struct device *dev, int id)
+				  struct device *dev)
 {
 	int ret;
 
-	tsi_dev->sbtsi_misc_dev.name = devm_kasprintf(dev, GFP_KERNEL, "apml_tsi%d", id);
-	tsi_dev->sbtsi_misc_dev.minor = MISC_DYNAMIC_MINOR;
-	tsi_dev->sbtsi_misc_dev.fops = &sbtsi_fops;
-	tsi_dev->sbtsi_misc_dev.parent = dev;
-	tsi_dev->sbtsi_misc_dev.nodename = devm_kasprintf(dev, GFP_KERNEL, "sbtsi%d", id);
-	tsi_dev->sbtsi_misc_dev.mode = 0600;
+	tsi_dev->sbtsi_misc_dev.name		= devm_kasprintf(dev, GFP_KERNEL,
+						  "sbtsi-%x", tsi_dev->dev_static_addr);
+	tsi_dev->sbtsi_misc_dev.minor		= MISC_DYNAMIC_MINOR;
+	tsi_dev->sbtsi_misc_dev.fops		= &sbtsi_fops;
+	tsi_dev->sbtsi_misc_dev.parent		= dev;
+	tsi_dev->sbtsi_misc_dev.nodename	= devm_kasprintf(dev, GFP_KERNEL,
+						  "sbtsi-%x", tsi_dev->dev_static_addr);
+	tsi_dev->sbtsi_misc_dev.mode		= 0600;
 
 	ret = misc_register(&tsi_dev->sbtsi_misc_dev);
 	if (ret)
@@ -286,8 +289,50 @@ static int create_misc_tsi_device(struct apml_sbtsi_device *tsi_dev,
 	return ret;
 }
 
+static int sbtsi_i3c_probe(struct i3c_device *i3cdev)
+{
+	struct device *dev = &i3cdev->dev;
+	struct device *hwmon_dev;
+	struct apml_sbtsi_device *tsi_dev;
+	struct regmap_config sbtsi_i3c_regmap_config = {
+		.reg_bits = 8,
+		.val_bits = 8,
+	};
+	struct regmap *regmap;
+
+	regmap = devm_regmap_init_i3c(i3cdev, &sbtsi_i3c_regmap_config);
+	if (IS_ERR(regmap)) {
+		dev_err(&i3cdev->dev, "Failed to register i3c regmap %d\n",
+			(int)PTR_ERR(regmap));
+		return PTR_ERR(regmap);
+	}
+
+	tsi_dev = devm_kzalloc(dev, sizeof(struct apml_sbtsi_device), GFP_KERNEL);
+	if (!tsi_dev)
+		return -ENOMEM;
+
+	tsi_dev->regmap = regmap;
+	mutex_init(&tsi_dev->lock);
+
+	dev_set_drvdata(dev, (void *)tsi_dev);
+	hwmon_dev = devm_hwmon_device_register_with_info(dev, "sbtsi_i3c", tsi_dev,
+							 &sbtsi_chip_info, NULL);
+
+	if (!hwmon_dev)
+		return PTR_ERR_OR_ZERO(hwmon_dev);
+
+	/* Need to verify for the static address for i3cdev */
+	tsi_dev->dev_static_addr = i3cdev->desc->info.static_addr;
+
+	return create_misc_tsi_device(tsi_dev, dev);
+}
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
 static int sbtsi_i2c_probe(struct i2c_client *client,
 			   const struct i2c_device_id *tsi_id)
+#else
+static int sbtsi_i2c_probe(struct i2c_client *client)
+#endif
 {
 	struct device *dev = &client->dev;
 	struct device *hwmon_dev;
@@ -296,7 +341,6 @@ static int sbtsi_i2c_probe(struct i2c_client *client,
 		.reg_bits = 8,
 		.val_bits = 8,
 	};
-	int id;
 
 	tsi_dev = devm_kzalloc(dev, sizeof(struct apml_sbtsi_device), GFP_KERNEL);
 	if (!tsi_dev)
@@ -317,15 +361,33 @@ static int sbtsi_i2c_probe(struct i2c_client *client,
 	if (!hwmon_dev)
 		return PTR_ERR_OR_ZERO(hwmon_dev);
 
-	if (client->addr == SOCK_0_ADDR)
-		id = 0;
-	if (client->addr == SOCK_1_ADDR)
-		id = 1;
+	tsi_dev->dev_static_addr = client->addr;
 
-	return create_misc_tsi_device(tsi_dev, dev, id);
+	return create_misc_tsi_device(tsi_dev, dev);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 12, 0)
+static int sbtsi_i3c_remove(struct i3c_device *i3cdev)
+#else
+static void sbtsi_i3c_remove(struct i3c_device *i3cdev)
+#endif
+{
+	struct apml_sbtsi_device *tsi_dev = dev_get_drvdata(&i3cdev->dev);
+
+	if (tsi_dev)
+		misc_deregister(&tsi_dev->sbtsi_misc_dev);
+
+	dev_info(&i3cdev->dev, "Removed sbtsi-i3c driver\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 12, 0)
+	return 0;
+#endif
+}
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+static int sbtsi_i2c_remove(struct i2c_client *client)
+#else
 static void sbtsi_i2c_remove(struct i2c_client *client)
+#endif
 {
 	struct apml_sbtsi_device *tsi_dev = dev_get_drvdata(&client->dev);
 
@@ -333,7 +395,25 @@ static void sbtsi_i2c_remove(struct i2c_client *client)
 		misc_deregister(&tsi_dev->sbtsi_misc_dev);
 
 	dev_info(&client->dev, "Removed sbtsi driver\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+	return 0;
+#endif
 }
+
+static const struct i3c_device_id sbtsi_i3c_id[] = {
+	I3C_DEVICE_EXTRA_INFO(0x112, 0, 0x1, NULL),
+	{}
+};
+MODULE_DEVICE_TABLE(i3c, sbtsi_i3c_id);
+
+static struct i3c_driver sbtsi_i3c_driver = {
+	.driver = {
+		.name = "sbtsi_i3c",
+	},
+	.probe = sbtsi_i3c_probe,
+	.remove = sbtsi_i3c_remove,
+	.id_table = sbtsi_i3c_id,
+};
 
 static const struct i2c_device_id sbtsi_id[] = {
 	{"sbtsi", 0},
@@ -360,7 +440,7 @@ static struct i2c_driver sbtsi_driver = {
 	.id_table = sbtsi_id,
 };
 
-module_i2c_driver(sbtsi_driver);
+module_i3c_i2c_driver(sbtsi_i3c_driver, &sbtsi_driver)
 
 MODULE_AUTHOR("Kun Yi <kunyi@google.com>");
 MODULE_DESCRIPTION("Hwmon driver for AMD SB-TSI emulated sensor");
