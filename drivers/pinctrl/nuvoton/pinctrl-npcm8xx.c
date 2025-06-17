@@ -203,6 +203,11 @@ static int npcmgpio_gpio_request(struct gpio_chip *chip, unsigned int offset)
 	if (ret)
 		return ret;
 
+	/* active-high, input, clear interrupt, enable interrupt */
+	ret = npcmgpio_direction_input(chip, offset);
+	if (ret)
+		return ret;
+
 	return bank->request(chip, offset);
 }
 
@@ -295,11 +300,6 @@ static void npcmgpio_irq_unmask(struct irq_data *d)
 
 static unsigned int npcmgpio_irq_startup(struct irq_data *d)
 {
-	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
-	unsigned int gpio = irqd_to_hwirq(d);
-
-	/* active-high, input, clear interrupt, enable interrupt */
-	npcmgpio_direction_input(gc, gpio);
 	npcmgpio_irq_ack(d);
 	npcmgpio_irq_unmask(d);
 
