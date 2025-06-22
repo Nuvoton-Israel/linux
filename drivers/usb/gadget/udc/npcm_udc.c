@@ -174,6 +174,11 @@ __acquires(ep->udc->lock)
 	struct ep_td_struct *curr_td, *next_td;
 	int j;
 
+	if (!ep || !req) {
+		VDBG("done: invalid ep %p or req %p", ep, req);
+		return;
+	}
+
 	/* Removed the req from npcm_ep->queue */
 	list_del_init(&req->queue);
 
@@ -184,17 +189,32 @@ __acquires(ep->udc->lock)
 		status = req->req.status;
 
 	/* Free dtd for the request */
-	next_td = req->head;
-	for (j = 0; j < req->dtd_count; j++) {
-		curr_td = next_td;
-		if (j != req->dtd_count - 1) {
-			next_td = curr_td->next_td_virt;
-		}
+	if (req->head) {
+		next_td = req->head;
+		for (j = 0; j < req->dtd_count; j++) {
+			curr_td = next_td;
+			if (!curr_td) {
+				VDBG("done: null curr_td at index %d for ep %s, dtd_count %d",
+				     j, ep->ep.name, req->dtd_count);
+				break;
+			}
+			if (j != req->dtd_count - 1) {
+				next_td = curr_td->next_td_virt;
+				if (!next_td && j < req->dtd_count - 1) {
+					VDBG("done: null next_td_virt at index %d for ep %s, dtd_count %d",
+					     j, ep->ep.name, req->dtd_count);
+					break;
+				}
+			}
 #ifdef NPCM_USB_DESC_PHYS_BASE_ADDR
-		curr_td->res = DTD_IS_FREE; // curr_td is free
+			curr_td->res = DTD_IS_FREE; // curr_td is free
 #else
-		dma_pool_free(ep->udc->td_pool, curr_td, curr_td->td_dma);
+			dma_pool_free(ep->udc->td_pool, curr_td, curr_td->td_dma);
 #endif
+		}
+	} else if (req->dtd_count > 0) {
+		VDBG("done: invalid req->head %p with dtd_count %d for ep %s",
+		     req->head, req->dtd_count, ep->ep.name);
 	}
 
 	usb_gadget_unmap_request(&ep->udc->gadget, &req->req, ep_is_in(ep));
