@@ -26,7 +26,7 @@ struct npcm_gdma_peripheral_config {
 	 * 16: I3C5 TX FIFO
 	 * 17: I3C5 RX FIFO
 	 */
-	unsigned int connectivity;
+	u32 connectivity;
 };
 
 #endif /* __LINUX_DMA_NPCM_GDMA_H */

@@ -189,15 +189,25 @@ static void npcm_gdma_issue_pending(struct dma_chan *chan)
 static irqreturn_t npcm_gdma_isr(int irq, void *arg)
 {
 	struct npcm_gdma *gdma = arg;
-	struct npcm_gdma_chan *gdma_chan = gdma->gdma_chan;
-	struct dma_async_tx_descriptor *tx = &gdma_chan->gdma_desc.tx;
+	struct npcm_gdma_chan *gdma_chan;
+	struct dma_async_tx_descriptor *tx;
 	struct dmaengine_result result;
+	unsigned int residue;
+	int i;
 
-	/* GDMA operation is completed */
-	result.result = DMA_TRANS_NOERROR;
-	result.residue = readl(gdma->gdmac_reg + GDMA_CTCNT(gdma_chan->chan.chan_id));
-	dma_cookie_complete(tx);
-	dmaengine_desc_get_callback_invoke(tx, &result);
+	for (i = 0; i < GDMA_CHAN_NUM; i++) {
+		residue = readl(gdma->gdmac_reg + GDMA_CTCNT(i));
+		if (!residue) {
+			/* GDMA operation is completed */
+			gdma_chan = &gdma->gdma_chan[i];
+			tx = &gdma_chan->gdma_desc.tx;
+
+			result.result = DMA_TRANS_NOERROR;
+			result.residue = residue;
+			dma_cookie_complete(tx);
+			dmaengine_desc_get_callback_invoke(tx, &result);
+		}
+	}
 
 	return IRQ_HANDLED;
 }
@@ -213,6 +223,7 @@ static int npcm_gdma_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	INIT_LIST_HEAD(&gdma->ddev.channels);
+	spin_lock_init(&gdma->lock);
 	dma_cap_set(DMA_SLAVE, gdma->ddev.cap_mask);
 	gdma->ddev.dev = dev;
 	gdma->ddev.src_addr_widths = BIT(DMA_SLAVE_BUSWIDTH_1_BYTE);
@@ -267,7 +278,6 @@ static int npcm_gdma_probe(struct platform_device *pdev)
 	if (rc)
 		return rc;
 
-	spin_lock_init(&gdma->lock);
 	platform_set_drvdata(pdev, gdma);
 
 	dev_info(&pdev->dev, "module loaded\n");
