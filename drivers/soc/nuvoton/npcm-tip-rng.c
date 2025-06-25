@@ -103,6 +103,7 @@ static int npcm_rng_tip_probe(struct platform_device *pdev)
 	struct npcm_rng_tip *priv;
 	struct device_node *tipsh;
 	struct resource t_res;
+	char test_buf[8];
 	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -163,6 +164,14 @@ static int npcm_rng_tip_probe(struct platform_device *pdev)
 	ret = devm_hwrng_register(dev, &priv->rng);
 	if (ret) {
 		dev_err(dev, "Failed to register rng device: %d\n", ret);
+		return ret;
+	}
+
+	ret = npcm_rng_tip_read(&priv->rng, test_buf, 8, true);
+	if (ret < 0) {
+		dev_err(dev, "npcm_rng_tip_read check failed, probe failed\n");
+		devm_hwrng_unregister(&pdev->dev, &priv->rng);
+		mbox_free_channel(priv->chan);
 		return ret;
 	}
 
