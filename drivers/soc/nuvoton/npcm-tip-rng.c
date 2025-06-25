@@ -158,7 +158,7 @@ static int npcm_rng_tip_probe(struct platform_device *pdev)
 	priv->rng.name = pdev->name;
 	priv->rng.read = npcm_rng_tip_read;
 	priv->rng.priv = (unsigned long)dev;
-	priv->rng.quality = 1000;
+	priv->rng.quality = 1024;
 
 	ret = devm_hwrng_register(dev, &priv->rng);
 	if (ret) {
