@@ -1604,8 +1604,8 @@ static void __exit npcm750_otp_exit(void)
 	platform_driver_unregister(&npcm750_otp_driver);
 }
 
-module_init(npcm750_otp_init);
-module_exit(npcm750_otp_exit);
+/*module_init(npcm750_otp_init);
+module_exit(npcm750_otp_exit);*/
 
 
 MODULE_AUTHOR("Tali Perry <tali.perry@nuvoton.com>");
