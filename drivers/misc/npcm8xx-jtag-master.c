@@ -888,6 +888,7 @@ static int npcm_jtm_probe(struct platform_device *pdev)
 	}
 
 	init_completion(&priv->xfer_done);
+	spin_lock_init(&priv->lock);
 
 	priv->freq = npcm_jtm_set_baudrate(priv, NPCM_JTM_DEFAULT_RATE);
 
