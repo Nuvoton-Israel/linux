@@ -426,8 +426,10 @@ static long npcm750_ece_ioctl(struct file *filp, unsigned int cmd, unsigned long
 		priv->line_pitch = DEFAULT_LP;
 		break;
 	case ECE_RESET:
+		npcm750_ece_ip_reset(priv);
 		npcm750_ece_reset(priv);
 		npcm750_ece_set_enc_dba(priv, priv->dma);
+		priv->line_pitch = DEFAULT_LP;
 
 		regmap_read(ece, HEX_CTRL, &gap);
 		priv->enc_gap = (gap & HEX_CTRL_ENC_GAP) >> HEX_CTRL_ENC_GAP_OFFSET;
