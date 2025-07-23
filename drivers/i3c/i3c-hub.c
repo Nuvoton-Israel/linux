@@ -192,6 +192,11 @@
 #define I3C_HUB_DT_TP_CONNECT_ENABLED			0x00
 #define I3C_HUB_DT_TP_CONNECT_DISABLED			0x01
 
+/* Analog switch setting */
+#define I3C_HUB_DT_ANALOG_SWITCH_DISABLED		0x00
+#define I3C_HUB_DT_ANALOG_SWITCH_ENABLED		0x01
+#define ANALOG_SWITCH_EN				BIT(0)
+
 struct tp_setting {
 	u8 mode;
 	u8 pullup_en;
@@ -267,6 +272,10 @@ static const struct hub_setting io_strength_settings[] = {
 static const struct hub_setting tp_connect_settings[] = {
 	{"disabled",	I3C_HUB_DT_TP_CONNECT_DISABLED},
 	{"enabled",	I3C_HUB_DT_TP_CONNECT_ENABLED},
+};
+static const struct hub_setting analog_switch_settings[] = {
+	{"disabled",	I3C_HUB_DT_ANALOG_SWITCH_DISABLED},
+	{"enabled",	I3C_HUB_DT_ANALOG_SWITCH_ENABLED},
 };
 
 static u8 i3c_hub_ldo_dt_to_reg(u8 dt_value)
@@ -631,6 +640,8 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 
 static int i3c_hub_configure_hw(struct device *dev)
 {
+	struct i3c_hub *priv = dev_get_drvdata(dev);
+	u8 setting;
 	int ret;
 
 	ret = i3c_hub_hw_configure_pullup(dev);
@@ -642,6 +653,18 @@ static int i3c_hub_configure_hw(struct device *dev)
 		return ret;
 
 	ret = i3c_hub_hw_configure_io_strength(dev);
+	if (ret)
+		return ret;
+
+	/* Enable analog switch by default */
+	setting = I3C_HUB_DT_ANALOG_SWITCH_ENABLED;
+	i3c_hub_of_get_setting(priv->node, "analog_switch", analog_switch_settings,
+			       ARRAY_SIZE(analog_switch_settings),
+			       &setting);
+	if (setting == I3C_HUB_DT_ANALOG_SWITCH_DISABLED)
+		ret = regmap_clear_bits(priv->regmap, I3C_HUB_NET_OPER_MODE_CONF, ANALOG_SWITCH_EN);
+	else
+		ret = regmap_update_bits(priv->regmap, I3C_HUB_NET_OPER_MODE_CONF, ANALOG_SWITCH_EN, ANALOG_SWITCH_EN);
 	if (ret)
 		return ret;
 
