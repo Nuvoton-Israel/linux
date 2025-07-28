@@ -288,6 +288,15 @@
 #define VCD_IOCSETDISPLAY	_IOW(VCD_IOC_MAGIC, 11, unsigned int)
 #define VCD_IOC_MAXNR		11
 
+/* hsync/vsync delay for special resolution */
+#define HDELAY_ADJUST_SMALL	0xC
+#define HDELAY_ADJUST_LARGE	0x2
+#define VDELAY_ADJUST_STANDARD 	0x3
+#define VDELAY_ADJUST_SPECIAL_1 0x6
+#define VDELAY_ADJUST_SPECIAL_2 0xA
+#define HDELAY_ADJUST_SPECIAL 0x2e
+
+
 struct class *vcd_class;
 
 struct vcd_info {
@@ -542,22 +551,22 @@ static void npcm750_vcd_adjust_dvodel(struct npcm750_vcd *priv)
 	vbp = npcm750_vcd_vbp(priv);
 
 	if (hact < det_width)
-		hdelay = npcm750_vcd_hbp(priv) + hact + priv->hdelay_add + 0xC;
+		hdelay = npcm750_vcd_hbp(priv) + hact + priv->hdelay_add + HDELAY_ADJUST_SMALL;
 	else
-		hdelay = npcm750_vcd_hbp(priv) + priv->hdelay_add + 0x2;
+		hdelay = npcm750_vcd_hbp(priv) + priv->hdelay_add + HDELAY_ADJUST_LARGE;
 
 	if (det_height < 1440) {
 			if ((hact == 0x88) && (det_width == 1024) && (det_height == 768) &&
-				(pclk == 65000)) {
-				vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + 0x6;
+				(pclk >= 64500 && pclk <= 65500) ) {
+				vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + VDELAY_ADJUST_SPECIAL_1;
 			} else if ((det_width == 720) && (det_height == 400)) {
-				vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + 0xa;
-				hdelay = npcm750_vcd_hbp(priv) + priv->hdelay_add + 0x2e;
+				vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + VDELAY_ADJUST_SPECIAL_2;
+				hdelay = npcm750_vcd_hbp(priv) + priv->hdelay_add + HDELAY_ADJUST_SPECIAL;
 			} else {
 				vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add;
 			}
 	} else {
-			vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + 0x3;
+			vdelay = npcm750_vcd_vbp(priv) + priv->vdelay_add + VDELAY_ADJUST_STANDARD;
 	}
 
 	regmap_write(vcd, VCD_DVO_DEL,
@@ -1078,7 +1087,7 @@ static int npcm750_vcd_init(struct npcm750_vcd *priv)
 	regmap_write(vcd, VCD_FBB_ADR, priv->dma);
 
 	/* Set VCD mode */
-	regmap_write(vcd, VCD_MODE, VCD_MODE_CM565 | VCD_MODE_KVM_BW_SET);
+	regmap_update_bits(vcd, VCD_MODE, VCD_MODE_CM565 | VCD_MODE_KVM_BW_SET, VCD_MODE_CM565 | VCD_MODE_KVM_BW_SET);
 
 	/* Set DVDE/DVHSYNC */
 	if (priv->hsync_mode) {
