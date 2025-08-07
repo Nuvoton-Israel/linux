@@ -1676,34 +1676,16 @@ static int svc_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
 	struct svc_i3c_xfer *xfer;
-	struct svc_i3c_cmd *cmd;
 	int ret, i;
 
-	xfer = svc_i3c_master_alloc_xfer(master, nxfers + 1);
+	xfer = svc_i3c_master_alloc_xfer(master, nxfers);
 	if (!xfer)
 		return -ENOMEM;
 
 	xfer->type = SVC_I3C_MCTRL_TYPE_I3C;
-	/*
-	 * I3C Spec 1.1, Section 5.1.6.4
-	 * In order to ensure that any other I3C Device can initiate a Target
-	 * Interrupt Request or a Controller Role Request, the I3C Active
-	 * Controller may choose to initiate new Frames with a START followed
-	 * by the I3C Broadcast Address (7’h7E).
-	 *
-	 * Start the private transfer with broadcast address
-	 */
-	cmd = &xfer->cmds[0];
-	cmd->addr = I3C_BROADCAST_ADDR;
-	cmd->rnw = 0;
-	cmd->in = NULL;
-	cmd->out = NULL;
-	cmd->len = 0;
-	cmd->actual_len = SVC_I3C_MAX_IBI_PAYLOAD_SIZE;
-	cmd->continued = true;
 
 	for (i = 0; i < nxfers; i++) {
-		struct svc_i3c_cmd *cmd = &xfer->cmds[i + 1];
+		struct svc_i3c_cmd *cmd = &xfer->cmds[i];
 
 		cmd->addr = master->addrs[data->index];
 		cmd->rnw = xfers[i].rnw;
@@ -1721,7 +1703,7 @@ static int svc_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 	mutex_unlock(&master->lock);
 
 	for (i = 0; i < nxfers; i++) {
-		struct svc_i3c_cmd *cmd = &xfer->cmds[i + 1];
+		struct svc_i3c_cmd *cmd = &xfer->cmds[i];
 
 		if (xfers[i].rnw)
 			xfers[i].len = cmd->actual_len;
