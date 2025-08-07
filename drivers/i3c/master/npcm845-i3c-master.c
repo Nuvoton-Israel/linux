@@ -235,12 +235,12 @@ struct svc_i3c_master {
 	struct dentry *debugfs;
 
 	bool en_hj;
-	bool probe_done;
 
 	/* Statistic report */
 	u8 err_code;
 	u64 err_cnt;
-	u64 ibiwon_cnt;
+	u64 rd_ibiwon_cnt;
+	u64 wr_ibiwon_cnt;
 };
 
 /**
@@ -1304,26 +1304,17 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 {
 	bool no_data = xfer_len ? false : true;
 	u32 reg, rdterm = *actual_len, mstatus;
+	bool restarted = false;
+	u32 ibitype;
 	int ret;
-	ktime_t timeout;
-	u32 ibiresp;
 
 	if (rdterm > SVC_I3C_MAX_RDTERM)
 		rdterm = 0;
 
-	/*
-	 * IBI payload size may be larger than rdterm, use manual IBI response
-	 * for read operation to set the proper RDTERM value in IBI ack request.
-	 */
-	if (master->probe_done)
-		ibiresp = rnw ? SVC_I3C_MCTRL_IBIRESP_MANUAL : SVC_I3C_MCTRL_IBIRESP_AUTO;
-	else
-		ibiresp = SVC_I3C_MCTRL_IBIRESP_MANUAL;
-	timeout = ktime_add_ms(ktime_get(), 1000);
 restart:
 	writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
 	       xfer_type |
-	       ibiresp |
+	       SVC_I3C_MCTRL_IBIRESP_NACK |
 	       SVC_I3C_MCTRL_DIR(rnw) |
 	       SVC_I3C_MCTRL_ADDR(addr) |
 	       SVC_I3C_MCTRL_RDTERM(rdterm),
@@ -1337,7 +1328,7 @@ restart:
 	 * Workaround:
 	 * Fill the FIFO in advance to prevent FIFO from becoming empty.
 	 */
-	if (!rnw && xfer_len) {
+	if (!rnw && xfer_len && !restarted) {
 		u32 end = xfer_len > SVC_I3C_FIFO_SIZE ? 0 : SVC_I3C_MWDATAB_END;
 		u32 len = min_t(u32, xfer_len, SVC_I3C_FIFO_SIZE);
 
@@ -1354,50 +1345,27 @@ restart:
 		goto emit_stop;
 
 	mstatus = readl(master->regs + SVC_I3C_MSTATUS);
-	if (SVC_I3C_MSTATUS_IBIWON(mstatus)) {
-		/*
-		 * Unable to handle slave event before driver probe done.
-		 * Ignore the event and disable slave interrupts
-		 * (send a Repeated START and DISEC CCC).
-		 */
-		if (!master->probe_done) {
-			/* ACK the IBI and drop the payload */
-			svc_i3c_master_ack_ibi(master, true);
-			readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
-					   SVC_I3C_MSTATUS_COMPLETE(reg), 0, 1000);
-			svc_i3c_master_flush_fifo(master);
-			/* Send a Repeated Start followed by a DISEC CCC */
-			writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
-			       xfer_type | SVC_I3C_MCTRL_IBIRESP_NACK |
-			       SVC_I3C_MCTRL_DIR(0) |
-			       SVC_I3C_MCTRL_ADDR(I3C_BROADCAST_ADDR),
-			       master->regs + SVC_I3C_MCTRL);
-			writel(I3C_CCC_DISEC(true), master->regs + SVC_I3C_MWDATAB);
-			writel(I3C_CCC_EVENT_SIR | I3C_CCC_EVENT_MR | I3C_CCC_EVENT_HJ,
-			       master->regs + SVC_I3C_MWDATABE);
-			readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
-					 SVC_I3C_MSTATUS_COMPLETE(reg), 0, 1000);
-			svc_i3c_master_emit_stop(master);
-			writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
-			/* Return EAGAIN to restart the transaction */
-			return -EAGAIN;
-		}
-		ret = svc_i3c_master_handle_ibi_won(master, !rnw);
-		if (ret) {
-			dev_err(master->dev, "xfer(rnw %d): handle ibi event fail, ret=%d\n",
-				rnw, ret);
-			goto emit_stop;
-		}
-		if (ktime_after(ktime_get(), timeout)) {
-			dev_info(master->dev, "abnormal ibiwon events\n");
-			goto emit_stop;
-		}
 
-		/* Clear COMPLETE status of this IBI transaction */
-		writel(SVC_I3C_MINT_COMPLETE, master->regs + SVC_I3C_MSTATUS);
-		master->ibiwon_cnt++;
+	/* NACK the slave event, restart the original transfer */
+	if (SVC_I3C_MSTATUS_IBIWON(mstatus) && !restarted) {
+		ibitype = SVC_I3C_MSTATUS_IBITYPE(mstatus);
+		writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
+
+		/* Hardware can't auto emit NACK for hot join and master request */
+		switch (ibitype) {
+			case SVC_I3C_MSTATUS_IBITYPE_HOT_JOIN:
+			case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
+			svc_i3c_master_nack_ibi(master);
+		}
+		if (rnw)
+			master->rd_ibiwon_cnt++;
+		else
+			master->wr_ibiwon_cnt++;
+
+		restarted = true;
 		goto restart;
 	}
+
 	if (SVC_I3C_MSTATUS_NACKED(mstatus)) {
 		dev_dbg(master->dev, "addr 0x%x NACK\n", addr);
 		ret = -EIO;
@@ -1943,7 +1911,8 @@ static void svc_i3c_init_debugfs(struct platform_device *pdev,
 	debugfs_create_file("debug", 0444, master->debugfs, master, &debug_fops);
 	debugfs_create_u64("err_cnt", 0444, master->debugfs, &master->err_cnt);
 	debugfs_create_u8("err_code", 0444, master->debugfs, &master->err_code);
-	debugfs_create_u64("ibiwon_cnt", 0444, master->debugfs, &master->ibiwon_cnt);
+	debugfs_create_u64("rd_ibiwon_cnt", 0444, master->debugfs, &master->rd_ibiwon_cnt);
+	debugfs_create_u64("wr_ibiwon_cnt", 0444, master->debugfs, &master->wr_ibiwon_cnt);
 }
 
 static int svc_i3c_master_probe(struct platform_device *pdev)
@@ -2039,7 +2008,6 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 		master->enabled_events |= SVC_I3C_EVENT_HOTJOIN;
 		svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
 	}
-	master->probe_done = true;
 	return 0;
 
 err_disable_clks:
