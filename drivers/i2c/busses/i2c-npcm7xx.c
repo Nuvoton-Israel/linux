@@ -593,6 +593,7 @@ struct npcm_i2c {
 	u64 nack_cnt;
 	u64 timeout_cnt;
 	u64 tx_complete_cnt;
+	u64 ab_slvrstr_cnt;
 	bool ber_state; /* Indicate the bus error state */
 };
 
@@ -1713,6 +1714,24 @@ static void npcm_i2c_irq_master_handler_read(struct npcm_i2c *bus)
 	}
 }
 
+static void npcm_i2c_irq_handle_ab_slvrstr(struct npcm_i2c *bus)
+{
+	u8 val;
+
+	if (bus->ab_slvrstr_cnt < ULLONG_MAX)
+		bus->ab_slvrstr_cnt++;
+	npcm_i2c_clear_tx_fifo(bus);
+	npcm_i2c_clear_rx_fifo(bus);
+	iowrite8(0, bus->reg + NPCM_I2CRXF_CTL);
+	iowrite8(0, bus->reg + NPCM_I2CTXF_CTL);
+	val = NPCM_I2CFIF_CTS_CLR_FIFO | NPCM_I2CFIF_CTS_SLVRSTR |
+	      NPCM_I2CFIF_CTS_RXF_TXE;
+	iowrite8(val, bus->reg + NPCM_I2CFIF_CTS);
+	bus->stop_ind = I2C_BUS_ERR_IND;
+	npcm_i2c_callback(bus, bus->stop_ind, npcm_i2c_get_index(bus));
+	bus->state = I2C_IDLE;
+}
+
 static void npcm_i2c_irq_handle_nmatch(struct npcm_i2c *bus)
 {
 	iowrite8(NPCM_I2CST_NMATCH, bus->reg + NPCM_I2CST);
@@ -2243,6 +2262,10 @@ static irqreturn_t npcm_i2c_bus_irq(int irq, void *dev_id)
 	}
 #endif
 	/* Clear status bits for spurious interrupts */
+	if (bus->fifo_use && FIELD_GET(NPCM_I2CFIF_CTS_SLVRSTR,
+				       ioread8(bus->reg + NPCM_I2CFIF_CTS))) {
+		npcm_i2c_irq_handle_ab_slvrstr(bus);
+	}
 	npcm_i2c_clear_master_status(bus);
 
 	return IRQ_HANDLED;
@@ -2493,6 +2516,7 @@ static void npcm_i2c_init_debugfs(struct platform_device *pdev,
 	debugfs_create_u64("rec_fail_cnt", 0444, bus->adap.debugfs, &bus->rec_fail_cnt);
 	debugfs_create_u64("timeout_cnt", 0444, bus->adap.debugfs, &bus->timeout_cnt);
 	debugfs_create_u64("tx_complete_cnt", 0444, bus->adap.debugfs, &bus->tx_complete_cnt);
+	debugfs_create_u64("ab_slvrstr_cnt", 0444, bus->adap.debugfs, &bus->ab_slvrstr_cnt);
 }
 
 void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable)
