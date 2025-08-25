@@ -118,10 +118,10 @@ static ssize_t i2c_slave_mqueue_bin_read(struct file *filp,
 	return ret;
 }
 
-static int i2c_slave_mqueue_probe(struct i2c_client *client,
-				  const struct i2c_device_id *id)
+static int i2c_slave_mqueue_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct mq_queue *mq;
 	int ret, i;
 	void *buf;
