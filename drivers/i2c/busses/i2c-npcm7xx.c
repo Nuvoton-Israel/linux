@@ -1369,6 +1369,16 @@ static irqreturn_t npcm_i2c_int_slave_handler(struct npcm_i2c *bus)
 	 * status bits are cleared.
 	 */
 	if (ret == IRQ_NONE) {
+		dev_err(bus->dev, "%s: I2C%d ST: %x, CST: %x, CST2: %x,"
+			" CST3: %x, FIF_CTS: %x, TXF_STS: %x, RXF_STS: %x\n",
+			__func__, bus->num,
+			ioread8(bus->reg + NPCM_I2CST),
+			ioread8(bus->reg + NPCM_I2CCST),
+			ioread8(bus->reg + NPCM_I2CCST2),
+			ioread8(bus->reg + NPCM_I2CCST3),
+			ioread8(bus->reg + NPCM_I2CFIF_CTS),
+			ioread8(bus->reg + NPCM_I2CTXF_STS),
+			ioread8(bus->reg + NPCM_I2CRXF_STS));
 		npcm_i2c_eob_int(bus, false);
 		npcm_i2c_clear_master_status(bus);
 	}
@@ -2134,6 +2144,17 @@ static irqreturn_t npcm_i2c_bus_irq(int irq, void *dev_id)
 		npcm_i2c_irq_handle_ab_slvrstr(bus);
 	}
 
+	dev_err(bus->dev, "%s: I2C%d ST: %x, CST: %x, CST2: %x,"
+		" CST3: %x, FIF_CTS: %x, TXF_STS: %x, RXF_STS: %x\n",
+		__func__, bus->num,
+		ioread8(bus->reg + NPCM_I2CST),
+		ioread8(bus->reg + NPCM_I2CCST),
+		ioread8(bus->reg + NPCM_I2CCST2),
+		ioread8(bus->reg + NPCM_I2CCST3),
+		ioread8(bus->reg + NPCM_I2CFIF_CTS),
+		ioread8(bus->reg + NPCM_I2CTXF_STS),
+		ioread8(bus->reg + NPCM_I2CRXF_STS));
+
 	npcm_i2c_clear_master_status(bus);
 
 	return IRQ_HANDLED;
@@ -2145,6 +2166,8 @@ static bool npcm_i2c_master_start_xmit(struct npcm_i2c *bus,
 				       bool use_PEC, bool use_read_block)
 {
 	if (bus->state != I2C_IDLE) {
+		dev_dbg(bus->dev, "I2C%d module not idle, state: %d\n",
+			bus->num, bus->state);
 		bus->cmd_err = -EBUSY;
 		return false;
 	}
@@ -2262,6 +2285,8 @@ static int npcm_i2c_master_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 
 	bus->dest_addr = slave_addr << 1;
 	if (bus_busy || bus->ber_state) {
+		dev_dbg(bus->dev, "I2C%d module BB: %d, ber_state: %d\n",
+			bus->num, bus_busy, bus->ber_state);
 		iowrite8(NPCM_I2CCST_BB, bus->reg + NPCM_I2CCST);
 		npcm_i2c_reset(bus);
 		i2c_recover_bus(adap);
