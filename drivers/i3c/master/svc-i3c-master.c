@@ -2134,7 +2134,7 @@ static const struct svc_i3c_drvdata npcm845_drvdata = {
 static const struct svc_i3c_drvdata svc_default_drvdata = {};
 
 static const struct of_device_id svc_i3c_master_of_match_tbl[] = {
-	{ .compatible = "nuvoton,npcm845-i3c-v1", .data = &npcm845_drvdata },
+	{ .compatible = "nuvoton,npcm845-i3c", .data = &npcm845_drvdata },
 	{ .compatible = "silvaco,i3c-master-v1", .data = &svc_default_drvdata },
 	{ /* sentinel */ },
 };
@@ -2144,7 +2144,7 @@ static struct platform_driver svc_i3c_master = {
 	.probe = svc_i3c_master_probe,
 	.remove_new = svc_i3c_master_remove,
 	.driver = {
-		.name = "silvaco-i3c-master-v1",
+		.name = "silvaco-i3c-master",
 		.of_match_table = svc_i3c_master_of_match_tbl,
 		.pm = &svc_i3c_pm_ops,
 	},
