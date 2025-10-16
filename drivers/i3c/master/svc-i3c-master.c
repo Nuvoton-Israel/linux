@@ -133,6 +133,11 @@
 #define SVC_I3C_FIFO_SIZE 16
 #define SVC_I3C_PPBAUD_MAX 15
 #define SVC_I3C_QUICK_I2C_CLK 4170000
+#define SVC_I3C_MAX_PPLOW 15
+#define SVC_I3C_MAX_ODBAUD 255
+#define SVC_I3C_MAX_I2CBAUD 15
+#define I3C_SCL_PP_PERIOD_NS_MIN 40
+#define I3C_SCL_OD_LOW_PERIOD_NS_MIN 200
 
 #define SVC_I3C_EVENT_IBI	GENMASK(7, 0)
 #define SVC_I3C_EVENT_HOTJOIN	BIT(31)
@@ -233,6 +238,12 @@ struct svc_i3c_master {
 	int num_clks;
 	struct clk *fclk;
 	struct clk_bulk_data *clks;
+	struct {
+		u32 i3c_pp_hi;
+		u32 i3c_pp_lo;
+		u32 i3c_od_hi;
+		u32 i3c_od_lo;
+	} scl_timing;
 	struct {
 		struct list_head list;
 		struct svc_i3c_xfer *cur;
@@ -705,7 +716,7 @@ static int svc_i3c_master_bus_init(struct i3c_master_controller *m)
 	struct i3c_device_info info = {};
 	unsigned long fclk_rate, fclk_period_ns;
 	unsigned long i2c_period_ns, i2c_scl_rate, i3c_scl_rate;
-	unsigned int high_period_ns, od_low_period_ns;
+	unsigned int high_period_ns, od_low_period_ns, scl_period_ns;
 	u32 ppbaud, pplow, odhpp, odbaud, odstop, i2cbaud, reg;
 	int ret;
 
@@ -730,20 +741,44 @@ static int svc_i3c_master_bus_init(struct i3c_master_controller *m)
 	i3c_scl_rate = bus->scl_rate.i3c;
 
 	/*
-	 * Using I3C Push-Pull mode, target is 12.5MHz/80ns period.
-	 * Simplest configuration is using a 50% duty-cycle of 40ns.
+	 * Configure for Push-Pull mode.
 	 */
-	ppbaud = DIV_ROUND_UP(fclk_rate / 2, i3c_scl_rate) - 1;
-	pplow = 0;
+	if (master->scl_timing.i3c_pp_hi >= I3C_SCL_PP_PERIOD_NS_MIN &&
+	    master->scl_timing.i3c_pp_lo >= master->scl_timing.i3c_pp_hi) {
+		ppbaud = DIV_ROUND_UP(master->scl_timing.i3c_pp_hi, fclk_period_ns) - 1;
+		if (ppbaud > SVC_I3C_PPBAUD_MAX)
+			ppbaud = SVC_I3C_PPBAUD_MAX;
+		pplow = DIV_ROUND_UP(master->scl_timing.i3c_pp_lo, fclk_period_ns)
+			- (ppbaud + 1);
+		if (pplow > SVC_I3C_MAX_PPLOW)
+			pplow = SVC_I3C_MAX_PPLOW;
+		i3c_scl_rate = 1000000000 / (((ppbaud + 1) * 2 + pplow) * fclk_period_ns);
+	} else {
+		scl_period_ns = DIV_ROUND_UP(1000000000, bus->scl_rate.i3c);
+		ppbaud = DIV_ROUND_UP((scl_period_ns / 2), fclk_period_ns) - 1;
+		pplow = 0;
+		if (ppbaud > SVC_I3C_PPBAUD_MAX)
+			ppbaud = SVC_I3C_PPBAUD_MAX;
+	}
 
-	/*
-	 * Using I3C Open-Drain mode, target is 4.17MHz/240ns with a
-	 * duty-cycle tuned so that high levels are filetered out by
-	 * the 50ns filter (target being 40ns).
-	 */
-	odhpp = 1;
 	high_period_ns = (ppbaud + 1) * fclk_period_ns;
-	odbaud = DIV_ROUND_UP(fclk_rate, SVC_I3C_QUICK_I2C_CLK * (1 + ppbaud)) - 2;
+	/*
+	 * Configure for Open-Drain mode.
+	 */
+	if (master->scl_timing.i3c_od_hi >= high_period_ns &&
+	    master->scl_timing.i3c_od_lo >= I3C_SCL_OD_LOW_PERIOD_NS_MIN) {
+		if (master->scl_timing.i3c_od_hi == high_period_ns)
+			odhpp = 1;
+		else
+			odhpp = 0;
+		odbaud = DIV_ROUND_UP(master->scl_timing.i3c_od_lo, high_period_ns) - 1;
+	} else {
+		/* Set default OD timing: 1MHz/1000ns with 50% duty cycle */
+		odhpp = 0;
+		odbaud = DIV_ROUND_UP(500, high_period_ns) - 1;
+	}
+	if (odbaud > SVC_I3C_MAX_ODBAUD)
+		odbaud = SVC_I3C_MAX_ODBAUD;
 	od_low_period_ns = (odbaud + 1) * high_period_ns;
 
 	switch (bus->mode) {
@@ -781,8 +816,8 @@ static int svc_i3c_master_bus_init(struct i3c_master_controller *m)
 
 	reg = SVC_I3C_MCONFIG_MASTER_EN |
 	      SVC_I3C_MCONFIG_DISTO(0) |
-	      SVC_I3C_MCONFIG_HKEEP(0) |
-	      SVC_I3C_MCONFIG_ODSTOP(odstop) |
+	      SVC_I3C_MCONFIG_HKEEP(3) |
+	      SVC_I3C_MCONFIG_ODSTOP(1) |
 	      SVC_I3C_MCONFIG_PPBAUD(ppbaud) |
 	      SVC_I3C_MCONFIG_PPLOW(pplow) |
 	      SVC_I3C_MCONFIG_ODBAUD(odbaud) |
@@ -792,6 +827,14 @@ static int svc_i3c_master_bus_init(struct i3c_master_controller *m)
 	writel(reg, master->regs + SVC_I3C_MCONFIG);
 
 	master->mctrl_config = reg;
+	i3c_scl_rate = 1000000000 / (((ppbaud + 1) * 2 + pplow) * fclk_period_ns);
+	dev_info(master->dev, "fclk=%lu, period_ns=%lu\n", fclk_rate, fclk_period_ns);
+	dev_info(master->dev, "mconfig=0x%08x\n", reg);
+	dev_info(master->dev, "i3c_scl_rate=%lu\n", i3c_scl_rate);
+	dev_info(master->dev, "pp_high=%u, pp_low=%lu\n", high_period_ns,
+		 (ppbaud + 1 + pplow) * fclk_period_ns);
+	dev_info(master->dev, "od_high=%d, od_low=%d\n", odhpp ? high_period_ns : od_low_period_ns,
+		 od_low_period_ns);
 	/* Master core's registration */
 	ret = i3c_master_get_free_addr(m, 0);
 	if (ret < 0)
@@ -1909,6 +1952,7 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct svc_i3c_master *master;
 	int ret, i;
+	u32 val;
 
 	master = devm_kzalloc(dev, sizeof(*master), GFP_KERNEL);
 	if (!master)
@@ -1978,6 +2022,18 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 	pm_runtime_get_noresume(&pdev->dev);
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
+
+	if (!of_property_read_u32(dev->of_node, "i3c-pp-scl-hi-period-ns", &val))
+		master->scl_timing.i3c_pp_hi = val;
+
+	if (!of_property_read_u32(dev->of_node, "i3c-pp-scl-lo-period-ns", &val))
+		master->scl_timing.i3c_pp_lo = val;
+
+	if (!of_property_read_u32(dev->of_node, "i3c-od-scl-hi-period-ns", &val))
+		master->scl_timing.i3c_od_hi = val;
+
+	if (!of_property_read_u32(dev->of_node, "i3c-od-scl-lo-period-ns", &val))
+		master->scl_timing.i3c_od_lo = val;
 
 	svc_i3c_master_reset(master);
 
