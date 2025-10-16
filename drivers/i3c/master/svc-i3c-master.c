@@ -396,6 +396,12 @@ svc_i3c_master_dev_from_addr(struct svc_i3c_master *master,
 
 static void svc_i3c_master_emit_stop(struct svc_i3c_master *master)
 {
+	u32 reg = readl(master->regs + SVC_I3C_MSTATUS);
+
+	/* Do not emit stop in the IDLE or SLVREQ state */
+	if (SVC_I3C_MSTATUS_STATE_IDLE(reg) || SVC_I3C_MSTATUS_STATE_SLVREQ(reg))
+		return;
+
 	writel(SVC_I3C_MCTRL_REQUEST_STOP, master->regs + SVC_I3C_MCTRL);
 
 	/*
