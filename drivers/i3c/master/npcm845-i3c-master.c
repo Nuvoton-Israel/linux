@@ -2030,7 +2030,7 @@ static void svc_i3c_master_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id svc_i3c_master_of_match_tbl[] = {
-	{ .compatible = "nuvoton,npcm845-i3c" },
+	{ .compatible = "nuvoton,npcm845-i3c-v1" },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, svc_i3c_master_of_match_tbl);
