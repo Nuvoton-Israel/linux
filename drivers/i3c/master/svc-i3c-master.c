@@ -411,6 +411,14 @@ static void svc_i3c_master_emit_stop(struct svc_i3c_master *master)
 	 * correctly if a start condition follows too rapidly.
 	 */
 	udelay(1);
+
+	/*
+	 * Wait for the EmitStop request to complete; otherwise, the subsequent
+	 * EmitStartAddr request may be ignored if issued before the previous
+	 * request has finished.
+	 */
+	readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
+			   SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
 }
 
 static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
