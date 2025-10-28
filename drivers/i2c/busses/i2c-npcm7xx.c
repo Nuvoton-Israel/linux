@@ -1509,6 +1509,16 @@ static irqreturn_t npcm_i2c_int_slave_handler(struct npcm_i2c *bus)
 	 * status bits are cleared.
 	 */
 	if (ret == IRQ_NONE) {
+		dev_err(bus->dev, "%s: I2C%d ST: %x, CST: %x, CST2: %x,"
+			" CST3: %x, FIF_CTS: %x, TXF_STS: %x, RXF_STS: %x\n",
+			__func__, bus->num,
+			ioread8(bus->reg + NPCM_I2CST),
+			ioread8(bus->reg + NPCM_I2CCST),
+			ioread8(bus->reg + NPCM_I2CCST2),
+			ioread8(bus->reg + NPCM_I2CCST3),
+			ioread8(bus->reg + NPCM_I2CFIF_CTS),
+			ioread8(bus->reg + NPCM_I2CTXF_STS),
+			ioread8(bus->reg + NPCM_I2CRXF_STS));
 		npcm_i2c_eob_int(bus, false);
 		npcm_i2c_clear_master_status(bus);
 	}
@@ -2089,6 +2099,7 @@ static int npcm_i2c_init_clk(struct npcm_i2c *bus, u32 bus_freq_hz)
 {
 	struct  smb_timing_t *smb_timing;
 	u8   scl_table_cnt = 0, table_size = 0;
+	u8   scl_ht, scl_lt;
 	u8   fast_mode = 0;
 
 	bus->bus_freq = bus_freq_hz;
@@ -2137,8 +2148,13 @@ static int npcm_i2c_init_clk(struct npcm_i2c *bus, u32 bus_freq_hz)
 		 * k1 = 2 * SCLLT7-0 -> Low Time  = k1 / 2
 		 * k2 = 2 * SCLLT7-0 -> High Time = k2 / 2
 		 */
-		iowrite8(smb_timing[scl_table_cnt].scllt, bus->reg + NPCM_I2CSCLLT);
-		iowrite8(smb_timing[scl_table_cnt].sclht, bus->reg + NPCM_I2CSCLHT);
+		if (of_property_read_u8(bus->dev->of_node, "npcm,i2cscllt", &scl_lt))
+			scl_lt = smb_timing[scl_table_cnt].scllt;
+		if (of_property_read_u8(bus->dev->of_node, "npcm,i2csclht", &scl_ht))
+			scl_ht = smb_timing[scl_table_cnt].sclht;
+		iowrite8(scl_lt, bus->reg + NPCM_I2CSCLLT);
+		iowrite8(scl_ht, bus->reg + NPCM_I2CSCLHT);
+		dev_info(bus->dev, "set SCLLT:%02X, SCLHT:%02X\n", scl_lt, scl_ht);
 
 		iowrite8(smb_timing[scl_table_cnt].dbcnt, bus->reg + NPCM_I2CCTL5);
 	}
@@ -2262,6 +2278,17 @@ static irqreturn_t npcm_i2c_bus_irq(int irq, void *dev_id)
 				       ioread8(bus->reg + NPCM_I2CFIF_CTS))) {
 		npcm_i2c_irq_handle_ab_slvrstr(bus);
 	}
+
+	dev_err(bus->dev, "%s: I2C%d ST: %x, CST: %x, CST2: %x,"
+		" CST3: %x, FIF_CTS: %x, TXF_STS: %x, RXF_STS: %x\n",
+		__func__, bus->num,
+		ioread8(bus->reg + NPCM_I2CST),
+		ioread8(bus->reg + NPCM_I2CCST),
+		ioread8(bus->reg + NPCM_I2CCST2),
+		ioread8(bus->reg + NPCM_I2CCST3),
+		ioread8(bus->reg + NPCM_I2CFIF_CTS),
+		ioread8(bus->reg + NPCM_I2CTXF_STS),
+		ioread8(bus->reg + NPCM_I2CRXF_STS));
 	npcm_i2c_clear_master_status(bus);
 
 	return IRQ_HANDLED;
@@ -2273,6 +2300,8 @@ static bool npcm_i2c_master_start_xmit(struct npcm_i2c *bus,
 				       bool use_PEC, bool use_read_block)
 {
 	if (bus->state != I2C_IDLE) {
+		dev_dbg(bus->dev, "I2C%d module not idle, state: %d\n",
+			bus->num, bus->state);
 		bus->cmd_err = -EBUSY;
 		return false;
 	}
@@ -2410,6 +2439,8 @@ static int npcm_i2c_master_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 	 * bus is busy.
 	 */
 	if (bus_busy || bus->ber_state) {
+		dev_dbg(bus->dev, "I2C%d module BB: %d, ber_state: %d\n",
+			bus->num, bus_busy, bus->ber_state);
 		iowrite8(NPCM_I2CCST_BB, bus->reg + NPCM_I2CCST);
 		npcm_i2c_reset(bus);
 		i2c_recover_bus(adap);
@@ -2503,6 +2534,42 @@ static const struct i2c_algorithm npcm_i2c_algo = {
 #endif
 };
 
+static int i2c_speed_get(void *data, u64 *val)
+{
+	struct npcm_i2c *bus = data;
+
+	*val = bus->bus_freq;
+	return 0;
+}
+
+static int i2c_speed_set(void *data, u64 val)
+{
+	struct npcm_i2c *bus = data;
+	int ret;
+
+	if (val < I2C_FREQ_MIN_HZ || val > I2C_FREQ_MAX_HZ)
+		return -EINVAL;
+
+	if (val == bus->bus_freq)
+		return 0;
+
+	i2c_lock_bus(&bus->adap, I2C_LOCK_ROOT_ADAPTER);
+
+	npcm_i2c_int_enable(bus, false);
+
+	ret = npcm_i2c_init_module(bus, I2C_MASTER, (u32)val);
+
+	i2c_unlock_bus(&bus->adap, I2C_LOCK_ROOT_ADAPTER);
+
+	if (ret)
+		return -EAGAIN;
+
+	npcm_i2c_int_enable(bus, true);
+
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE(i2c_clock_ops, i2c_speed_get, i2c_speed_set, "%llu\n");
+
 static void npcm_i2c_init_debugfs(struct platform_device *pdev,
 				  struct npcm_i2c *bus)
 {
@@ -2513,6 +2580,7 @@ static void npcm_i2c_init_debugfs(struct platform_device *pdev,
 	debugfs_create_u64("timeout_cnt", 0444, bus->adap.debugfs, &bus->timeout_cnt);
 	debugfs_create_u64("tx_complete_cnt", 0444, bus->adap.debugfs, &bus->tx_complete_cnt);
 	debugfs_create_u64("ab_slvrstr_cnt", 0444, bus->adap.debugfs, &bus->ab_slvrstr_cnt);
+	debugfs_create_file("i2c_speed", 0644, bus->adap.debugfs, bus, &i2c_clock_ops);
 }
 
 void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable)
