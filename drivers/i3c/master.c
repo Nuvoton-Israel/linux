@@ -1553,6 +1553,9 @@ static int i3c_master_retrieve_dev_info(struct i3c_dev_desc *dev)
 			return ret;
 	}
 
+	if (dev->boardinfo && dev->boardinfo->max_read_turnaround)
+		dev->info.max_read_turnaround = dev->boardinfo->max_read_turnaround;
+
 	if (dev->info.bcr & I3C_BCR_IBI_PAYLOAD)
 		dev->info.max_ibi_len = 1;
 
@@ -1748,6 +1751,9 @@ static int i3c_master_add_static_i3c_dev(struct i3c_master_controller *master,
 	i3cdev->info.static_addr = boardinfo->static_addr;
 	i3cdev->info.pid = boardinfo->pid;
 	i3cdev->info.dyn_addr = boardinfo->static_addr;
+	i3cdev->info.dcr = boardinfo->dcr;
+	i3cdev->info.bcr = boardinfo->bcr;
+	i3cdev->info.max_read_turnaround = boardinfo->max_read_turnaround;
 
 	ret = i3c_master_attach_i3c_dev(master, i3cdev);
 	if (ret)
@@ -2405,6 +2411,8 @@ of_i3c_master_add_i3c_boardinfo(struct i3c_master_controller *master,
 	struct device *dev = &master->dev;
 	enum i3c_addr_slot_status addrstatus;
 	u32 init_dyn_addr = 0;
+	u32 max_read_turnaround;
+	u8 dcr, bcr;
 
 	boardinfo = devm_kzalloc(dev, sizeof(*boardinfo), GFP_KERNEL);
 	if (!boardinfo)
@@ -2437,6 +2445,15 @@ of_i3c_master_add_i3c_boardinfo(struct i3c_master_controller *master,
 	if ((boardinfo->pid & GENMASK_ULL(63, 48)) ||
 	    I3C_PID_RND_LOWER_32BITS(boardinfo->pid))
 		return -EINVAL;
+
+	if (!of_property_read_u8(node, "dcr", &dcr))
+		boardinfo->dcr = dcr;
+
+	if (!of_property_read_u8(node, "bcr", &bcr))
+		boardinfo->bcr = bcr;
+
+	if (!of_property_read_u32(node, "max-rd-turnaround", &max_read_turnaround))
+		boardinfo->max_read_turnaround = max_read_turnaround;
 
 	boardinfo->init_dyn_addr = init_dyn_addr;
 	boardinfo->of_node = of_node_get(node);
