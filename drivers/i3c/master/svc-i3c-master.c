@@ -214,6 +214,7 @@ struct svc_i3c_cmd {
 	struct i3c_priv_xfer *xfer;
 	bool continued;
 	bool use_dma;
+	u32 max_read_turnaround;
 };
 
 struct svc_i3c_xfer {
@@ -719,7 +720,6 @@ clear_ibiwon:
 	writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
 	return ret;
 }
-
 static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 {
 	u32 val, mstatus;
@@ -1534,7 +1534,7 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 			       bool rnw, unsigned int xfer_type, u8 addr,
 			       u8 *in, const u8 *out, unsigned int xfer_len,
 			       unsigned int *actual_len, bool continued,
-			       bool use_dma)
+			       bool use_dma, u32 max_rd_turn)
 {
 	bool no_data = xfer_len ? false : true;
 	u32 reg, rdterm = *actual_len, mstatus;
@@ -1542,6 +1542,7 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 	unsigned long flags;
 	bool restarted = false;
 	u32 ibitype;
+	ktime_t timeout;
 
 	if (rdterm > SVC_I3C_MAX_RDTERM)
 		rdterm = SVC_I3C_MAX_RDTERM;
@@ -1567,6 +1568,8 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 	 */
 	spin_lock_irqsave(&master->req_lock, flags);
 
+	if (rnw && max_rd_turn)
+		timeout = ktime_add_us(ktime_get(), max_rd_turn);
 restart:
 	writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
 	       xfer_type |
@@ -1641,6 +1644,9 @@ restart:
 
 	if (SVC_I3C_MSTATUS_NACKED(mstatus)) {
 		dev_dbg(master->dev, "addr 0x%x NACK\n", addr);
+		if (rnw && max_rd_turn && addr != 0x7e &&
+		    (ktime_compare(ktime_get(), timeout) < 0))
+			goto restart;
 		ret = -EIO;
 		goto emit_stop;
 	}
@@ -1785,7 +1791,8 @@ again:
 		ret = svc_i3c_master_xfer(master, cmd->rnw, xfer->type,
 					  cmd->addr, cmd->in, cmd->out,
 					  cmd->len, &cmd->actual_len,
-					  cmd->continued, cmd->use_dma);
+					  cmd->continued, cmd->use_dma,
+					  cmd->max_read_turnaround);
 		if (ret == -EAGAIN && --retry)
 			goto again;
 		/* cmd->xfer is NULL if I2C or CCC transfer */
@@ -1990,6 +1997,8 @@ static int svc_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 		cmd->len = xfers[i].len;
 		cmd->actual_len = xfers[i].rnw ? xfers[i].len : 0;
 		cmd->continued = (i + 1) < nxfers;
+		if (xfers[i].rnw)
+			cmd->max_read_turnaround = dev->info.max_read_turnaround;
 		if (master->use_dma && (xfers[i].len > SVC_I3C_FIFO_SIZE)
 		    && (xfers[i].len <= MAX_DMA_COUNT))
 			cmd->use_dma = true;
