@@ -189,6 +189,9 @@ struct i3c_dev_boardinfo {
 	u8 init_dyn_addr;
 	u8 static_addr;
 	u64 pid;
+	u8 dcr;
+	u8 bcr;
+	u32 max_read_turnaround;
 	struct device_node *of_node;
 };
 
