@@ -534,6 +534,18 @@ static void svc_i3c_master_emit_stop(struct svc_i3c_master *master)
 	udelay(1);
 }
 
+static void svc_i3c_master_emit_stop_nodelay(struct svc_i3c_master *master)
+{
+	u32 reg = readl(master->regs + SVC_I3C_MSTATUS);
+
+	if (SVC_I3C_MSTATUS_STATE_IDLE(reg) || SVC_I3C_MSTATUS_STATE_SLVREQ(reg))
+		return;
+
+	writel(SVC_I3C_MCTRL_REQUEST_STOP, master->regs + SVC_I3C_MCTRL);
+	readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
+			   SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
+}
+
 static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 				     struct i3c_dev_desc *dev)
 {
@@ -767,8 +779,21 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 		goto ibi_out;
 	}
 
-	if (svc_i3c_master_handle_ibiwon(master, true))
-		svc_i3c_master_emit_stop(master);
+	ret = svc_i3c_master_handle_ibiwon(master, true);
+	if (ret) {
+		/*
+		 * The target can raise an event when bus is available(free at least 1us).
+		 * Use the no-delay verion to avoid clearing a true event.
+		 */
+		svc_i3c_master_emit_stop_nodelay(master);
+		/*
+		 * When SDA is held low, it can cause a false Master Read (MR) event.
+		 * After emitting a STOP condition, the SLVSTART status is set again.
+		 * Clear SLVSTART to prevent another false interrupt from being triggered.
+		 */
+		if (ret == -EOPNOTSUPP)
+			writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MSTATUS);
+	}
 ibi_out:
 	spin_unlock(&master->req_lock);
 }
