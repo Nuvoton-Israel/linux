@@ -645,6 +645,12 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
 		svc_i3c_master_emit_stop(master);
+		/*
+		 * When SDA is held low, it can cause a false Master Read (MR) event.
+		 * After emitting a STOP condition, the SLVSTART status is set again.
+		 * Clear SLVSTART to prevent another false interrupt from being triggered.
+		 */
+		writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MSTATUS);
 		break;
 	default:
 		break;
