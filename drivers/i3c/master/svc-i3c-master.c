@@ -177,6 +177,7 @@ struct svc_i3c_cmd {
 	unsigned int actual_len;
 	struct i3c_priv_xfer *xfer;
 	bool continued;
+	u32 max_read_turnaround;
 };
 
 struct svc_i3c_xfer {
@@ -1358,15 +1359,20 @@ static int svc_i3c_master_write(struct svc_i3c_master *master,
 static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 			       bool rnw, unsigned int xfer_type, u8 addr,
 			       u8 *in, const u8 *out, unsigned int xfer_len,
-			       unsigned int *actual_len, bool continued, bool repeat_start)
+			       unsigned int *actual_len, bool continued, bool repeat_start,
+			       u32 max_rd_turn)
 {
 	int retry = repeat_start ? 1 : 2;
+	ktime_t timeout;
 	u32 reg;
 	int ret;
 
 	/* clean SVC_I3C_MINT_IBIWON w1c bits */
 	writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
 
+
+	if (max_rd_turn)
+		timeout = ktime_add_us(ktime_get(), max_rd_turn);
 
 	while (retry--) {
 		writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
@@ -1448,6 +1454,8 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 			 */
 			if (retry && addr != 0x7e) {
 				writel(SVC_I3C_MERRWARN_NACK, master->regs + SVC_I3C_MERRWARN);
+				if (max_rd_turn && (ktime_compare(ktime_get(), timeout) < 0))
+					retry++;
 			} else {
 				ret = -ENXIO;
 				*actual_len = 0;
@@ -1550,7 +1558,8 @@ static void svc_i3c_master_start_xfer_locked(struct svc_i3c_master *master)
 		ret = svc_i3c_master_xfer(master, cmd->rnw, xfer->type,
 					  cmd->addr, cmd->in, cmd->out,
 					  cmd->len, &cmd->actual_len,
-					  cmd->continued, i > 0);
+					  cmd->continued, i > 0,
+					  cmd->max_read_turnaround);
 		/* cmd->xfer is NULL if I2C or CCC transfer */
 		if (cmd->xfer)
 			cmd->xfer->actual_len = cmd->actual_len;
@@ -1749,6 +1758,8 @@ static int svc_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 		cmd->len = xfers[i].len;
 		cmd->actual_len = xfers[i].rnw ? xfers[i].len : 0;
 		cmd->continued = (i + 1) < nxfers;
+		if (xfers[i].rnw)
+			cmd->max_read_turnaround = dev->info.max_read_turnaround;
 	}
 
 	mutex_lock(&master->lock);
