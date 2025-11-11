@@ -1308,6 +1308,9 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 	u32 ibitype;
 	int ret;
 
+	/* clean SVC_I3C_MINT_IBIWON w1c bits */
+	writel(SVC_I3C_MINT_IBIWON, master->regs + SVC_I3C_MSTATUS);
+
 	if (rdterm > SVC_I3C_MAX_RDTERM)
 		rdterm = 0;
 
