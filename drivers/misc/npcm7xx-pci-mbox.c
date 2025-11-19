@@ -232,7 +232,7 @@ static int npcm7xx_mbox_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
-	mbox->memory = devm_ioremap_resource(dev, res);
+	mbox->memory = devm_ioremap_resource_wc(dev, res);
 	if (IS_ERR(mbox->memory))
 		return PTR_ERR(mbox->memory);
 
