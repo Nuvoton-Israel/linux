@@ -264,6 +264,7 @@ struct npcm_dma_xfer_desc {
  * @ibi.lock: IBI lock
  * @lock: Transfer lock, prevent concurrent daa/priv_xfer/ccc
  * @req_lock: protect between IBI isr and bus operation request
+ * @ibi_map: Bitmap indicating which devices have IBI enabled.
  */
 struct svc_i3c_master {
 	struct i3c_master_controller base;
@@ -298,6 +299,7 @@ struct svc_i3c_master {
 	spinlock_t req_lock;
 	struct mutex lock;
 	struct dentry *debugfs;
+	u32 ibi_map;
 
 	struct {
 		struct svc_i3c_xfer *cur;
@@ -2144,6 +2146,7 @@ static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
+	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
 	int ret;
 
 	ret = pm_runtime_resume_and_get(master->dev);
@@ -2152,6 +2155,8 @@ static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 		return ret;
 	}
 
+	if (data->ibi >= 0)
+		master->ibi_map |= (1 << data->ibi);
 	/* Clear the interrupt status */
 	writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MSTATUS);
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
@@ -2163,9 +2168,13 @@ static int svc_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
+	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
 	int ret;
 
-	writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
+	if (data->ibi >= 0)
+		master->ibi_map &= ~(1 << data->ibi);
+	if (!master->ibi_map && !master->en_hj)
+		writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
 
 	ret = i3c_master_disec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
 
