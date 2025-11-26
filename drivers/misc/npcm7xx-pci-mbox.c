@@ -112,6 +112,9 @@ static ssize_t npcm7xx_mbox_write(struct file *file, const char __user *buf,
 		return -EFAULT;
 	}
 
+	/* Synchronize after writing to wc buffer */
+	wmb();
+
 	regmap_update_bits(mbox->regmap, NPCM7XX_MBOX_BMBXCMD,
 			   NPCM7XX_MBOX_ALL_HIF, NPCM7XX_MBOX_HIF_0);
 
