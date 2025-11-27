@@ -25,6 +25,10 @@ static DEFINE_IDR(i3c_bus_idr);
 static DEFINE_MUTEX(i3c_core_lock);
 static int __i3c_first_dynamic_bus_num;
 static BLOCKING_NOTIFIER_HEAD(i3c_bus_notifier);
+static void i3c_master_free_i3c_dev(struct i3c_dev_desc *dev);
+static void i3c_master_detach_i3c_dev(struct i3c_dev_desc *dev);
+static int i3c_master_rstdaa_locked(struct i3c_master_controller *master,
+				    u8 addr);
 
 /**
  * i3c_bus_maintenance_lock - Lock the bus for a maintenance operation
@@ -700,6 +704,64 @@ static ssize_t discover_store(struct device *dev, struct device_attribute *da,
 }
 static DEVICE_ATTR_WO(discover);
 
+static ssize_t detach_store(struct device *dev, struct device_attribute *da,
+			      const char *buf, size_t count)
+{
+	struct i3c_master_controller *master = dev_to_i3cmaster(dev);
+	struct i3c_dev_desc *i3cdev;
+	bool found = false;
+	u64 pid;
+
+	if (kstrtoull(buf, 0, &pid))
+		return -EINVAL;
+
+	mutex_lock(&master->daa_lock);
+	i3c_bus_for_each_i3cdev(&master->bus, i3cdev) {
+		if (!i3cdev->dev)
+			continue;
+
+		if (i3cdev->info.pid == pid) {
+			found = true;
+			break;
+		}
+	}
+	if (!found) {
+		mutex_unlock(&master->daa_lock);
+		return -ENXIO;
+	}
+
+	i3c_bus_maintenance_lock(&master->bus);
+	/* Release IBI resource */
+	if (i3cdev->ibi && i3cdev->ibi->enabled) {
+		i3c_dev_disable_ibi_locked(i3cdev);
+		i3cdev->ibi->enabled = false;
+		i3c_dev_free_ibi_locked(i3cdev);
+	}
+
+	/* Reset the dynamic address */
+	i3c_master_rstdaa_locked(master, i3cdev->info.dyn_addr);
+	i3c_bus_maintenance_unlock(&master->bus);
+
+	/* Unregister i3c_device */
+	i3cdev->dev->desc = NULL;
+	if (device_is_registered(&i3cdev->dev->dev))
+		device_unregister(&i3cdev->dev->dev);
+	else
+		put_device(&i3cdev->dev->dev);
+
+	/* Delete from bus device list, release the addr slot */
+	i3c_bus_maintenance_lock(&master->bus);
+	i3c_master_detach_i3c_dev(i3cdev);
+	i3c_bus_maintenance_unlock(&master->bus);
+
+	/* Free i3c_dev_desc */
+	i3c_master_free_i3c_dev(i3cdev);
+	mutex_unlock(&master->daa_lock);
+
+	return count;
+}
+static DEVICE_ATTR_WO(detach);
+
 static struct attribute *i3c_masterdev_attrs[] = {
 	&dev_attr_mode.attr,
 	&dev_attr_current_master.attr,
@@ -712,6 +774,7 @@ static struct attribute *i3c_masterdev_attrs[] = {
 	&dev_attr_hdrcap.attr,
 	&dev_attr_hotjoin.attr,
 	&dev_attr_discover.attr,
+	&dev_attr_detach.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(i3c_masterdev);
