@@ -1886,6 +1886,46 @@ mutex_unlock:
 }
 EXPORT_SYMBOL_GPL(i3c_master_do_daa);
 
+void i3c_master_do_setdasa(struct i3c_master_controller *master)
+{
+	struct i3c_dev_boardinfo *i3cboardinfo;
+	int newdev = 0;
+	int ret;
+
+	mutex_lock(&master->daa_lock);
+	list_for_each_entry(i3cboardinfo, &master->boardinfo.i3c, node) {
+		if (!i3cboardinfo->init_dyn_addr)
+			continue;
+
+		ret = i3c_bus_get_addr_slot_status(&master->bus,
+						   i3cboardinfo->init_dyn_addr);
+		if (ret != I3C_ADDR_SLOT_FREE)
+			continue;
+
+		i3c_bus_maintenance_lock(&master->bus);
+		if (i3cboardinfo->static_addr) {
+			if (i3cboardinfo->init_dyn_addr != i3cboardinfo->static_addr)
+				i3c_bus_set_addr_slot_status(&master->bus,
+							     i3cboardinfo->init_dyn_addr,
+							     I3C_ADDR_SLOT_I3C_DEV);
+			ret = i3c_master_early_i3c_dev_add(master, i3cboardinfo);
+			if (ret)
+				i3c_bus_set_addr_slot_status(&master->bus,
+							     i3cboardinfo->init_dyn_addr,
+							     I3C_ADDR_SLOT_FREE);
+			else
+				newdev++;
+		}
+		i3c_bus_maintenance_unlock(&master->bus);
+	}
+
+	if (newdev)
+		i3c_master_register_new_i3c_devs(master);
+
+	mutex_unlock(&master->daa_lock);
+}
+EXPORT_SYMBOL_GPL(i3c_master_do_setdasa);
+
 /**
  * i3c_master_set_info() - set master device information
  * @master: master used to send frames on the bus
