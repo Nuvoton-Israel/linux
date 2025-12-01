@@ -693,4 +693,8 @@ void i3c_for_each_bus_locked(int (*fn)(struct i3c_bus *bus, void *data),
 int i3c_register_notifier(struct notifier_block *nb);
 int i3c_unregister_notifier(struct notifier_block *nb);
 
+struct i3c_device *i3c_master_create_i3c_device(struct i3c_master_controller *master,
+						u64 pid, u8 dyn_addr);
+void i3c_master_remove_i3c_device(struct i3c_master_controller *master,
+				  struct i3c_device *i3cdev);
 #endif /* I3C_MASTER_H */
