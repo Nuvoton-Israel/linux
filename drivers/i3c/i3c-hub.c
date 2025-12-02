@@ -138,6 +138,7 @@
 #define I3C_HUB_TP_SDA_IN_DETECT_FLG			0x63
 
 /* SMBus Agent Configuration and Status Registers */
+#define HUB_REG_TP_SMBUS_AGNT_STS(p)			(0x64 + (p))
 #define I3C_HUB_TP0_SMBUS_AGNT_STS			0x64
 #define I3C_HUB_TP1_SMBUS_AGNT_STS			0x65
 #define I3C_HUB_TP2_SMBUS_AGNT_STS			0x66
@@ -147,6 +148,14 @@
 #define I3C_HUB_TP6_SMBUS_AGNT_STS			0x6A
 #define I3C_HUB_TP7_SMBUS_AGNT_STS			0x6B
 #define I3C_HUB_ONCHIP_TD_AND_SMBUS_AGNT_CONF		0x6C
+
+#define HUB_REG_AGENT_CNTRL_STATUS_FINISH		1
+#define HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0		2
+#define HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1		4
+#define HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF		8
+
+/* page numbers, per port */
+#define HUB_PAGE_AGENT_RX_BUF(p, n)	(16 + (4 * p) + 2 + n)
 
 /* Special Function Registers */
 #define I3C_HUB_LDO_AND_CPSEL_STS			0x79
@@ -203,6 +212,26 @@
 #define I3C_HUB_DT_ANALOG_SWITCH_ENABLED		0x01
 #define ANALOG_SWITCH_EN				BIT(0)
 
+/* Paged Transaction Registers */
+#define I3C_HUB_CONTROLLER_BUFFER_PAGE			0x10
+#define I3C_HUB_CONTROLLER_AGENT_BUFF			0x80
+#define I3C_HUB_CONTROLLER_AGENT_BUFF_DATA		0x84
+#define I3C_HUB_TARGET_BUFF_LENGTH			0x80
+
+/* Transaction status checking mask */
+#define I3C_HUB_XFER_SUCCESS				0x01
+#define I3C_HUB_SMBUS_MASTER_STATUS_MASK		0xF1
+#define I3C_HUB_TP_BUFFER_STATUS_MASK			0xFF
+#define I3C_HUB_TP_TRANSACTION_CODE_MASK		0xF0
+
+/* SMBus transaction types fields */
+#define I3C_HUB_SMBUS_400kHz				BIT(2)
+
+/* Hub buffer size */
+#define I3C_HUB_CONTROLLER_BUFFER_SIZE			88
+#define I3C_HUB_SMBUS_DESCRIPTOR_SIZE			4
+#define I3C_HUB_SMBUS_PAYLOAD_SIZE			84
+
 #define I3C_HUB_DEFAULT_ADDR				0x70
 #define I3C_HUB_DEFAULT_PID				0x04cd00000000
 
@@ -226,6 +255,43 @@ struct dt_settings {
 	struct tp_setting tp[I3C_HUB_TP_MAX_COUNT];
 };
 
+struct smbus_device {
+	struct i2c_client *client;
+	struct list_head list;
+};
+
+struct smbus_agent {
+	struct i2c_adapter adap;
+	struct list_head devs; /* i2c device list */
+	void *hub;
+	struct completion completion;
+
+	u32 port_id;
+	/* target handling */
+	struct i2c_client *client;
+	u8 target_rx_buf[I3C_HUB_CONTROLLER_BUFFER_SIZE];
+	int next_buf_idx;
+
+	u8 tx_res;
+};
+
+struct i3c_hub_ibi_payload {
+	u8 dev_port_status;
+	u8 target_agent_status;
+} __packed;
+
+struct i3c_hub_agent_tx_hdr {
+	u8 addr_rnw;
+	u8 type;
+	u8 wr_len;
+	u8 rd_len;
+};
+
+struct i3c_hub_agent_rx_hdr {
+	u8 len;
+	u8 addr;
+};
+
 struct i3c_hub {
 	struct i3c_device *i3cdev;
 	struct regmap *regmap;
@@ -238,7 +304,17 @@ struct i3c_hub {
 	struct delayed_work delayed_work;
 	struct device_node *node;
 	struct device_node *child_nodes[I3C_HUB_TP_MAX_COUNT];
+	struct smbus_agent agents[I3C_HUB_TP_MAX_COUNT];
+
+	/* Element of hubdevs */
+	struct list_head list;
+
+	bool ibi_enabled;
 };
+
+/* List of i3c_hub devices */
+static LIST_HEAD(hubdevs);
+static DEFINE_MUTEX(hubdevs_lock);
 
 struct hub_setting {
 	const char * const name;
@@ -821,6 +897,490 @@ static int i3c_hub_connect_tp(struct device *dev)
 	return regmap_clear_bits(priv->regmap, I3C_HUB_TP_NET_CON_CONF, tp_dis_val);
 }
 
+#if IS_ENABLED(CONFIG_I2C_SLAVE)
+static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
+{
+	struct i3c_hub_agent_rx_hdr hdr;
+	struct i3c_hub *hub = agent->hub;
+	u8 tmp, len, addr;
+	unsigned int i, page;
+	int ret;
+
+	if (!agent->client)
+		goto ack;
+
+	/* Switch to RX BUF page */
+	page = HUB_PAGE_AGENT_RX_BUF(agent->port_id, buf_idx);
+	ret = regmap_write(hub->regmap, I3C_HUB_PAGE_PTR, page);
+	if (ret)
+		goto ack;
+
+	/* We need the length to figure out the size of our read. But we also
+	 * read the first byte of i2c data in the same read; the hardware has
+	 * no facility for filtering on incoming local addresses, so we have a
+	 * fast-path to aborting the transaction if it's not targeted to us.
+	 */
+	ret = regmap_bulk_read(hub->regmap, 0x80, &hdr, sizeof(hdr));
+	if (ret)
+		goto ack;
+
+	len = min_t(u8, hdr.len, I3C_HUB_TARGET_BUFF_LENGTH);
+	if (len == 0)
+		goto ack;
+
+	if (hdr.addr & 0x1) {
+		dev_dbg(&hub->i3cdev->dev, "unsupported read requested\n");
+		goto ack;
+	}
+
+	/* not for us? discard and ack */
+	addr = hdr.addr >> 1;
+	if (addr != (agent->client->addr & 0x7f))
+		goto ack;
+
+	memset(agent->target_rx_buf, 0, sizeof(agent->target_rx_buf));
+	ret = regmap_bulk_read(hub->regmap, 0x82, agent->target_rx_buf, len - 1);
+	if (ret)
+		goto ack;
+
+	/* synthesize i2c target events from the target write */
+	tmp = 0;
+	ret = i2c_slave_event(agent->client, I2C_SLAVE_WRITE_REQUESTED, &tmp);
+	if (ret)
+		goto stop;
+
+	/* len includes the address byte, which we have already read */
+	for (i = 0; i < len - 1; i++) {
+		tmp = agent->target_rx_buf[i];
+		i2c_slave_event(agent->client, I2C_SLAVE_WRITE_RECEIVED, &tmp);
+	}
+
+stop:
+	/* Switch to page 0 */
+	regmap_write(hub->regmap, I3C_HUB_PAGE_PTR, 0x00);
+
+	tmp = 0;
+	i2c_slave_event(agent->client, I2C_SLAVE_STOP, &tmp);
+
+ack:
+	tmp = buf_idx ? HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1 :
+		HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0;
+
+	if (regmap_write(hub->regmap, HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id), tmp))
+		dev_warn(&hub->i3cdev->dev, "TP[%d]: Failed to clear RX status: %d\n",
+			 agent->port_id, ret);
+	agent->next_buf_idx = !agent->next_buf_idx;
+}
+#endif
+
+static void i3c_hub_agent_ibi(struct smbus_agent *agent)
+{
+	struct i3c_hub *hub = agent->hub;
+	unsigned int stat = 0;
+	int ret;
+
+	/* Read SMBus agent status */
+	ret = regmap_read(hub->regmap,
+			  HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id), &stat);
+	if (ret) {
+		dev_err(&hub->i3cdev->dev,
+			"TP[%d] - failed to read agent status\n", agent->port_id);
+		return;
+	}
+
+	/* Master Agent IBI */
+	if (stat & HUB_REG_AGENT_CNTRL_STATUS_FINISH) {
+		/* Clear Master Agent Finish flag */
+		ret = regmap_write(hub->regmap,
+				   HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
+				   HUB_REG_AGENT_CNTRL_STATUS_FINISH);
+		if (ret)
+			dev_warn(&hub->i3cdev->dev,
+				 "TP[%d] - failed to clear finish status\n", agent->port_id);
+		agent->tx_res = stat;
+		complete(&agent->completion);
+	}
+
+#if IS_ENABLED(CONFIG_I2C_SLAVE)
+	/* Slave Agent IBI */
+	if (stat & (HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0 | HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)) {
+		if (agent->next_buf_idx == 0) {
+			/* Check BUF0 first */
+			if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0)
+				i3c_hub_slave_agent_rx(agent, 0);
+
+			if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)
+				i3c_hub_slave_agent_rx(agent, 1);
+		} else {
+			/* Check BUF1 first */
+			if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)
+				i3c_hub_slave_agent_rx(agent, 1);
+			if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0)
+				i3c_hub_slave_agent_rx(agent, 0);
+		}
+	}
+
+	if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF) {
+		dev_info(&agent->adap.dev, "rx overflow\n");
+		ret = regmap_write(hub->regmap,
+				   HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
+				   HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF);
+		if (ret)
+			dev_warn(&hub->i3cdev->dev,
+				 "Port[%d] - failed to clear rx overflow status\n", agent->port_id);
+	}
+#endif
+}
+
+static int i3c_hub_disable_agent_ibi(struct i3c_hub *hub)
+{
+	int ret = 0;
+
+#ifndef CONFIG_I3C_HUB_POLLING_MODE
+	struct i3c_master_controller *master = hub->i3cdev->desc->common.master;
+
+	i3c_bus_normaluse_lock(&master->bus);
+	ret = i3c_master_disec_locked(master,
+				      hub->i3cdev->desc->info.dyn_addr,
+				      I3C_CCC_EVENT_SIR);
+	i3c_bus_normaluse_unlock(&master->bus);
+#endif
+	return ret;
+}
+
+static int i3c_hub_enable_agent_ibi(struct i3c_hub *hub)
+{
+	int ret = 0;
+
+#ifndef CONFIG_I3C_HUB_POLLING_MODE
+	struct i3c_master_controller *master = hub->i3cdev->desc->common.master;
+
+	i3c_bus_normaluse_lock(&master->bus);
+	ret = i3c_master_enec_locked(master,
+				     hub->i3cdev->desc->info.dyn_addr,
+				     I3C_CCC_EVENT_SIR);
+	i3c_bus_normaluse_unlock(&master->bus);
+#endif
+	return ret;
+}
+
+static void i3c_hub_ibi(struct i3c_device *i3c,
+			const struct i3c_ibi_payload *payload)
+{
+	struct i3c_hub *hub = i3cdev_get_drvdata(i3c);
+	const struct i3c_hub_ibi_payload *p = NULL;
+	int i;
+
+	i3c_hub_disable_agent_ibi(hub);
+
+	if (payload->len == sizeof(*p))
+		p = payload->data;
+
+	if (!p)
+		goto exit;
+
+	/* Clear MsgPending/ParityErr/PecErr flags */
+	if (p->dev_port_status & 0x07)
+		regmap_write(hub->regmap, I3C_HUB_DEV_AND_IBI_STS, 0x07);
+
+	/* Check SMBus agent event status */
+	if ((p->dev_port_status & 0x10) == 0)
+		goto exit;
+
+	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
+		if ((hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS) &&
+		    (p->target_agent_status & BIT(i))) {
+			dev_dbg(&hub->i3cdev->dev, "target port %d generates ibi\n", i);
+			i3c_hub_agent_ibi(&hub->agents[i]);
+		}
+	}
+exit:
+	i3c_hub_enable_agent_ibi(hub);
+}
+
+static int i3c_hub_reset_smbus_agent(struct smbus_agent *agent)
+{
+	struct i3c_hub *hub = agent->hub;
+	int ret;
+
+	/* Unlock register access */
+	regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_UNLOCK_CODE);
+
+	/* Disable Agent */
+	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_SMBUS_AGNT_EN, BIT(agent->port_id), 0);
+	if (ret)
+		goto err_exit;
+
+	/* Enable Agent */
+	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_SMBUS_AGNT_EN, BIT(agent->port_id),
+				 BIT(agent->port_id));
+	if (ret)
+		goto err_exit;
+
+err_exit:
+	if (ret)
+		dev_err(&hub->i3cdev->dev, "Failed to reset smbus agent:%d\n", ret);
+
+	/* Lock register access */
+	regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
+
+	return ret;
+}
+
+static int i3c_hub_smbus_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
+			      int num)
+{
+	struct smbus_agent *agent = adap->algo_data;
+	struct i3c_hub *priv = agent->hub;
+	int port_id = agent->port_id;
+	int ret = 0;
+	int ret_num = 1;
+
+	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE] = { 0 };
+	u8 *out = NULL, *in = NULL;
+	u32 wr_len = 0, rd_len = 0;
+	u8 page = I3C_HUB_CONTROLLER_BUFFER_PAGE + 4 * port_id;
+	u8 reg_status = HUB_REG_TP_SMBUS_AGNT_STS(port_id);
+
+	if ((msgs[0].flags & I2C_M_RD) == 0) {
+		desc[0] = msgs[0].addr << 1;
+		desc[1] = I3C_HUB_SMBUS_400kHz;
+		desc[2] = wr_len = msgs[0].len;
+		out = msgs[0].buf;
+		/* Check if there is a Read after Write transaction */
+		if (num > 1 && msgs[1].flags & I2C_M_RD && msgs[0].addr == msgs[1].addr) {
+			desc[1] |= BIT(0);
+			desc[3] = rd_len = msgs[1].len;
+			in = msgs[1].buf;
+			ret_num++;
+		} else {
+			desc[3] = 0;
+		}
+	} else {
+		desc[0] = msgs[0].addr << 1 | BIT(0);
+		desc[1] = I3C_HUB_SMBUS_400kHz;
+		desc[2] = 0;
+		desc[3] = rd_len = msgs[0].len;
+		in = msgs[0].buf;
+	}
+
+	if (wr_len + rd_len > I3C_HUB_SMBUS_PAYLOAD_SIZE) {
+		dev_err(&adap->dev, "Message length too long.\n");
+		return -EINVAL;
+	}
+
+	/* Switch to Bus Agent Data page */
+	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, page);
+	if (ret)
+		return ret;
+
+	/* Fill descriptor */
+	ret = regmap_bulk_write(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF,
+				desc, I3C_HUB_SMBUS_DESCRIPTOR_SIZE);
+	if (ret)
+		return ret;
+
+	if (out && wr_len) {
+		/* Fill payload for write */
+		ret = regmap_bulk_write(priv->regmap,
+					I3C_HUB_CONTROLLER_AGENT_BUFF_DATA,
+					out, wr_len);
+		if (ret)
+			return ret;
+	}
+
+	reinit_completion(&agent->completion);
+	/* Clear master agent status */
+	regmap_write(priv->regmap, reg_status, I3C_HUB_SMBUS_MASTER_STATUS_MASK);
+
+	/* Start the transaction */
+	ret = regmap_write(priv->regmap, I3C_HUB_TP_SMBUS_AGNT_TRANS_START, BIT(port_id));
+	if (ret)
+		return ret;
+
+	ret = wait_for_completion_timeout(&agent->completion, agent->adap.timeout);
+	if (ret < 0) {
+		dev_info(&adap->dev, "wait_for_complete ret %d\n", ret);
+		i3c_hub_reset_smbus_agent(agent);
+		ret_num = ret;
+		goto err_exit;
+	}
+
+	if ((agent->tx_res & I3C_HUB_SMBUS_MASTER_STATUS_MASK) != I3C_HUB_XFER_SUCCESS) {
+		dev_dbg(&adap->dev, "TX error: status = 0x%x\n", agent->tx_res);
+		ret_num = -EIO;
+		goto err_exit;
+	}
+
+	if (in) {
+		/* Read the data of read transaction */
+		ret = regmap_bulk_read(priv->regmap,
+				       I3C_HUB_CONTROLLER_AGENT_BUFF_DATA + wr_len,
+				       in, rd_len);
+		if (ret)
+			return ret;
+	}
+err_exit:
+	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
+	if (ret)
+		return ret;
+
+	return ret_num;
+}
+
+static u32 i3c_hub_i2c_funcs(struct i2c_adapter *adapter)
+{
+	return I2C_FUNC_SMBUS_EMUL | I2C_FUNC_I2C;
+}
+
+static int i3c_hub_agent_i2c_reg_target(struct i2c_client *client)
+{
+	struct smbus_agent *agent = i2c_get_adapdata(client->adapter);
+
+	if (agent->client)
+		return -EBUSY;
+
+	agent->client = client;
+
+	return 0;
+}
+
+static int i3c_hub_agent_i2c_unreg_target(struct i2c_client *client)
+{
+	struct smbus_agent *agent = i2c_get_adapdata(client->adapter);
+
+	agent->client = NULL;
+
+	return 0;
+}
+
+static const struct i2c_algorithm i3c_hub_i2c_algo = {
+	.master_xfer = i3c_hub_smbus_xfer,
+	.functionality = i3c_hub_i2c_funcs,
+#if IS_ENABLED(CONFIG_I2C_SLAVE)
+	.reg_slave = i3c_hub_agent_i2c_reg_target,
+	.unreg_slave = i3c_hub_agent_i2c_unreg_target,
+#endif
+};
+
+static const struct i3c_ibi_setup i3c_hub_ibi_setup = {
+	.max_payload_len = 2, /* no MDB, two status registers */
+	.num_slots = 6, /* two target buffers, one controller status */
+	.handler = i3c_hub_ibi,
+};
+
+static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
+{
+	struct device *dev = &hub->i3cdev->dev;
+	struct i2c_adapter *adap;
+	int ret, id = -ENODEV;
+	int i = port;
+
+	init_completion(&hub->agents[i].completion);
+	/* Disconnect slave port from hub network */
+	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_NET_CON_CONF, BIT(i), 0);
+	if (ret)
+		return ret;
+
+	/* Unlock access to protected registers */
+	ret = regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_UNLOCK_CODE);
+	if (ret) {
+		dev_err(dev, "Failed to unlock HUB's protected registers\n");
+		return ret;
+	}
+	/* Clear Agent flags */
+	ret = regmap_write(hub->regmap, HUB_REG_TP_SMBUS_AGNT_STS(i), 0x0F);
+	if (ret)
+		return ret;
+
+	/* Enable agent IBI */
+	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i), BIT(i));
+	if (ret)
+		return ret;
+
+	INIT_LIST_HEAD(&hub->agents[i].devs);
+	hub->agents[i].hub = hub;
+	hub->agents[i].port_id = i;
+	adap = &hub->agents[i].adap;
+	adap->dev.parent = dev->parent;
+	adap->owner = THIS_MODULE;
+	adap->algo = &i3c_hub_i2c_algo;
+	adap->algo_data = &hub->agents[i];
+	adap->timeout = 1000;
+	adap->retries = 3;
+	snprintf(adap->name, sizeof(adap->name), "i3c-hub-port%d", i);
+
+	i2c_set_adapdata(adap, &hub->agents[i]);
+	id = of_alias_get_id(hub->child_nodes[i], "i2c");
+	if (id >= 0) {
+		adap->nr = id;
+		ret = i2c_add_numbered_adapter(adap);
+	} else {
+		ret = i2c_add_adapter(adap);
+	}
+	if (ret < 0) {
+		dev_err(dev, "failed to add i2c-adapter %u (error=%d)\n", i, ret);
+		regmap_update_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i), 0);
+	}
+
+	ret = regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
+	if (ret)
+		dev_err(dev, "Failed to lock HUB's protected registers\n");
+
+	return ret;
+}
+
+static void i3c_hub_del_smbus_adapter(struct i3c_hub *hub)
+{
+	struct smbus_device *dev;
+	bool use_ibi = false;
+	int i;
+
+	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
+		if (hub->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_SMBUS)
+			continue;
+
+		list_for_each_entry(dev, &hub->agents[i].devs, list) {
+			i2c_unregister_device(dev->client);
+			kfree(dev);
+		}
+		i2c_del_adapter(&hub->agents[i].adap);
+		use_ibi = true;
+	}
+}
+
+static int i3c_hub_register_i2c_devices(struct i3c_hub *hub, int port)
+{
+	struct i2c_adapter *adap;
+	struct device_node *tp_node, *child;
+	struct i2c_board_info info;
+	struct smbus_device *device;
+	int ret;
+
+	tp_node = hub->child_nodes[port];
+	adap = &hub->agents[port].adap;
+	for_each_child_of_node(tp_node, child) {
+		dev_dbg(&adap->dev, "of_i2c: register %pOF\n", child);
+
+		ret = of_i2c_get_board_info(&adap->dev, child, &info);
+		if (ret)
+			continue;
+
+		device = kzalloc(sizeof(*device), GFP_KERNEL);
+		if (!device)
+			continue;
+
+		device->client = i2c_new_client_device(adap, &info);
+		if (IS_ERR(device->client)) {
+			dev_err(&adap->dev, "of_i2c: Failure registering %pOF\n", child);
+			kfree(device);
+			continue;
+		}
+		list_add_tail(&device->list, &hub->agents[port].devs);
+	}
+	return 0;
+}
+
 static int i3c_hub_i3c_write(struct i3c_device *i3c, u8 reg, u8 val)
 {
 	struct i3c_priv_xfer xfer;
@@ -905,7 +1465,9 @@ static int i3c_hub_init_leaf_hub(struct i3c_hub *hub, int port)
 static int i3c_hub_setup_child_nodes(struct i3c_hub *hub)
 {
 	struct i3c_master_controller *master = hub->i3cdev->desc->common.master;
-	int i;
+	struct i3c_device *i3cdev = hub->i3cdev;
+	bool enable_ibi = false;
+	int ret, i;
 
 	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
 		if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_I3C_HUB) {
@@ -916,11 +1478,32 @@ static int i3c_hub_setup_child_nodes(struct i3c_hub *hub)
 				i3c_hub_init_leaf_hub(hub, i);
 			else
 				dev_info(&hub->i3cdev->dev, "Unable to create config dev\n");
+		} else if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS) {
+			if (!i3c_hub_add_smbus_adapter(hub, i)) {
+				enable_ibi = true;
+				i3c_hub_register_i2c_devices(hub, i);
+			}
 		}
 	}
+
 	if (hub->default_dev) {
 		i3c_master_remove_i3c_device(master, hub->default_dev);
 		hub->default_dev = NULL;
+	}
+
+	if (enable_ibi) {
+		ret = i3c_device_request_ibi(i3cdev, &i3c_hub_ibi_setup);
+		if (ret) {
+			dev_err(&i3cdev->dev, "Failed requesting IBI\n");
+			return ret;
+		}
+		ret = i3c_device_enable_ibi(i3cdev);
+		if (ret) {
+			i3c_device_free_ibi(i3cdev);
+			dev_err(&i3cdev->dev, "Failed enabling IBI\n");
+			return ret;
+		}
+		hub->ibi_enabled = true;
 	}
 
 	return 0;
@@ -1048,6 +1631,9 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		goto error;
 	}
 
+	mutex_lock(&hubdevs_lock);
+	list_add(&priv->list, &hubdevs);
+	mutex_unlock(&hubdevs_lock);
 	INIT_DELAYED_WORK(&priv->delayed_work, i3c_hub_delayed_work);
 	schedule_delayed_work(&priv->delayed_work, msecs_to_jiffies(100));
 	/* TBD: Apply special/security lock here using DEV_CMD register */
@@ -1062,7 +1648,19 @@ error:
 static void i3c_hub_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_hub *priv = i3cdev_get_drvdata(i3cdev);
+	struct i3c_dev_desc *desc = priv->i3cdev->desc;
 
+	mutex_lock(&hubdevs_lock);
+	list_del(&priv->list);
+	if (priv->ibi_enabled) {
+		i3c_device_disable_ibi(priv->i3cdev);
+		if (desc && desc->ibi)
+			desc->ibi->enabled = false;
+		i3c_device_free_ibi(priv->i3cdev);
+		priv->ibi_enabled = false;
+	}
+	mutex_unlock(&hubdevs_lock);
+	i3c_hub_del_smbus_adapter(priv);
 	debugfs_remove_recursive(priv->debug_dir);
 	sysfs_remove_file(&i3cdev->dev.kobj, &dev_attr_tp_connect.attr);
 }
@@ -1074,7 +1672,62 @@ static struct i3c_driver i3c_hub = {
 	.remove = i3c_hub_remove,
 };
 
-module_i3c_driver(i3c_hub);
+static void i3c_hub_notify_bus_remove(struct i3c_bus *bus)
+{
+	struct i3c_hub *hub = NULL, *tmp;
+	struct i3c_dev_desc *desc;
+
+	mutex_lock(&hubdevs_lock);
+	list_for_each_entry_safe(hub, tmp, &hubdevs, list) {
+		if (hub->ibi_enabled) {
+			i3c_device_disable_ibi(hub->i3cdev);
+			desc = hub->i3cdev->desc;
+			if (desc && desc->ibi)
+				desc->ibi->enabled = false;
+			i3c_device_free_ibi(hub->i3cdev);
+			hub->ibi_enabled = false;
+		}
+	}
+	mutex_unlock(&hubdevs_lock);
+}
+
+static int i3c_hub_notifier_call(struct notifier_block *nb,
+				  unsigned long action, void *data)
+{
+	switch (action) {
+	case I3C_NOTIFY_BUS_REMOVE:
+		i3c_hub_notify_bus_remove((struct i3c_bus *)data);
+		break;
+	}
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block i3c_hub_notifier = {
+	.notifier_call = i3c_hub_notifier_call,
+};
+
+static __init int i3c_hub_init(void)
+{
+	int rc;
+
+	i3c_register_notifier(&i3c_hub_notifier);
+
+	rc = i3c_driver_register(&i3c_hub);
+	if (rc < 0)
+		return rc;
+
+	return 0;
+}
+
+static __exit void i3c_hub_exit(void)
+{
+	i3c_driver_unregister(&i3c_hub);
+
+	i3c_unregister_notifier(&i3c_hub_notifier);
+}
+
+module_init(i3c_hub_init);
+module_exit(i3c_hub_exit);
 
 MODULE_AUTHOR("Zbigniew Lukwinski <zbigniew.lukwinski@linux.intel.com>");
 MODULE_DESCRIPTION("I3C HUB driver");
