@@ -2155,13 +2155,15 @@ static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 		return ret;
 	}
 
+	ret = i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
+	if (ret)
+		return ret;
+
 	if (data->ibi >= 0)
 		master->ibi_map |= (1 << data->ibi);
-	/* Clear the interrupt status */
-	writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MSTATUS);
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
 
-	return i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
+	return 0;
 }
 
 static int svc_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
