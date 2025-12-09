@@ -107,10 +107,6 @@
 #define I3C_HUB_DEV_AND_IBI_STS				0x20
 #define I3C_HUB_TP_SMBUS_AGNT_IBI_STS			0x21
 
-/* OEM Defined Registers*/
-#define I3C_HUB_ID					0x30
-#define I3C_HUB_PORT_STATUS				0x31
-
 /* Controller Port Control/Status Registers */
 #define I3C_HUB_CP_MUX_SET				0x38
 #define I3C_HUB_CP_MUX_STS				0x39
@@ -159,6 +155,13 @@
 
 /* Special Function Registers */
 #define I3C_HUB_LDO_AND_CPSEL_STS			0x79
+#define  CP_SDA1_LEVEL					BIT(7)
+#define  CP_SCL1_LEVEL					BIT(6)
+#define  CP_SEL_PIN_INPUT_CODE_MASK			GENMASK(5, 4)
+#define  CP_SEL_PIN_INPUT_CODE_GET(x)			(((x) & CP_SEL_PIN_INPUT_CODE_MASK) >> 4)
+#define  CP_SDA1_SCL1_PINS_CODE_MASK			GENMASK(7, 6)
+#define  CP_SDA1_SCL1_PINS_CODE_GET(x)			(((x) & CP_SDA1_SCL1_PINS_CODE_MASK) >> 6)
+
 #define I3C_HUB_BUS_RESET_SCL_TIMEOUT			0x7A
 #define I3C_HUB_ONCHIP_TD_PROTO_ERR_FLG			0x7B
 #define I3C_HUB_DEV_CMD					0x7C
@@ -188,7 +191,6 @@
 #define I3C_HUB_DT_TP_MODE_I3C_PERF			0x02
 #define I3C_HUB_DT_TP_MODE_SMBUS			0x03
 #define I3C_HUB_DT_TP_MODE_GPIO				0x04
-#define I3C_HUB_DT_TP_MODE_I3C_HUB			0x05
 #define I3C_HUB_DT_TP_MODE_NOT_DEFINED			0xFF
 
 /* TP pull-up status */
@@ -231,9 +233,6 @@
 #define I3C_HUB_CONTROLLER_BUFFER_SIZE			88
 #define I3C_HUB_SMBUS_DESCRIPTOR_SIZE			4
 #define I3C_HUB_SMBUS_PAYLOAD_SIZE			84
-
-#define I3C_HUB_DEFAULT_ADDR				0x70
-#define I3C_HUB_DEFAULT_PID				0x04cd00000000
 
 struct tp_setting {
 	u8 mode;
@@ -296,7 +295,10 @@ struct i3c_hub {
 	struct i3c_device *i3cdev;
 	struct regmap *regmap;
 	struct dt_settings settings;
-	struct i3c_device *default_dev; /* I3C device using default static address */
+	int hub_pin_sel_id;
+	int hub_pin_cp1_id;
+	int hub_dt_sel_id;
+	int hub_dt_cp1_id;
 
 	/* Offset for reading HUB's register. */
 	u8 reg_addr;
@@ -343,7 +345,6 @@ static const struct hub_setting tp_mode_settings[] = {
 	{"i3c-perf",	I3C_HUB_DT_TP_MODE_I3C_PERF},
 	{"smbus",	I3C_HUB_DT_TP_MODE_SMBUS},
 	{"gpio",	I3C_HUB_DT_TP_MODE_GPIO},
-	{"i3c-hub",	I3C_HUB_DT_TP_MODE_I3C_HUB},
 };
 
 static const struct hub_setting tp_pullup_settings[] = {
@@ -690,8 +691,7 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 			smbus_mask |= TPn_SMBUS_MODE_EN(i);
 			gpio_mask |= TPn_GPIO_MODE_EN(i);
 
-			if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_I3C ||
-			    priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_I3C_HUB)
+			if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_I3C)
 				i3c_val |= TPn_NET_CON(i);
 			else if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS)
 				smbus_val |= TPn_SMBUS_MODE_EN(i);
@@ -768,6 +768,62 @@ static const struct i3c_device_id i3c_hub_ids[] = {
 	I3C_CLASS(I3C_DCR_HUB, NULL),
 	{ },
 };
+
+static int i3c_hub_read_id(struct device *dev)
+{
+	struct i3c_hub *priv = dev_get_drvdata(dev);
+	u32 reg_val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, I3C_HUB_LDO_AND_CPSEL_STS, &reg_val);
+	if (ret) {
+		dev_err(dev, "Failed to read status register\n");
+		return -1;
+	}
+
+	priv->hub_pin_sel_id = CP_SEL_PIN_INPUT_CODE_GET(reg_val);
+	priv->hub_pin_cp1_id = CP_SDA1_SCL1_PINS_CODE_GET(reg_val);
+	return 0;
+}
+
+static struct device_node *i3c_hub_get_dt_hub_node(struct device_node *node,
+						   struct i3c_hub *priv)
+{
+	struct device_node *hub_node_no_id = NULL;
+	struct device_node *hub_node;
+	u32 hub_id;
+	int found_id = 0;
+
+	for_each_available_child_of_node(node, hub_node) {
+		if (strstr(hub_node->name, "hub")) {
+			if (!of_property_read_u32(hub_node, "id", &hub_id)) {
+				if (hub_id == (u32)priv->hub_pin_sel_id)
+					found_id = 1;
+				priv->hub_dt_sel_id = hub_id;
+			}
+
+			if (!of_property_read_u32(hub_node, "id-cp1", &hub_id)) {
+				if (hub_id == (u32)priv->hub_pin_cp1_id)
+					found_id = 1;
+				priv->hub_dt_cp1_id = hub_id;
+			}
+
+			if (!found_id) {
+				/*
+				 * Just keep reference to first HUB node with no ID in case no ID
+				 * matching
+				 */
+				if (!hub_node_no_id && priv->hub_dt_sel_id == -1 &&
+				    priv->hub_dt_cp1_id == -1)
+					hub_node_no_id = hub_node;
+			} else {
+				return hub_node;
+			}
+		}
+	}
+
+	return hub_node_no_id;
+}
 
 static int fops_access_reg_get(void *ctx, u64 *val)
 {
@@ -1381,114 +1437,19 @@ static int i3c_hub_register_i2c_devices(struct i3c_hub *hub, int port)
 	return 0;
 }
 
-static int i3c_hub_i3c_write(struct i3c_device *i3c, u8 reg, u8 val)
-{
-	struct i3c_priv_xfer xfer;
-	u8 buf[] = {reg, val};
-
-	xfer.rnw = false;
-	xfer.len = 2;
-	xfer.data.out = buf;
-
-	return i3c_device_do_priv_xfers(i3c, &xfer, 1);
-}
-
-/* Assign a hub id to the leaf hub */
-static int i3c_hub_init_leaf_hub(struct i3c_hub *hub, int port)
-{
-	struct device_node *tp_node = hub->child_nodes[port];
-	u32 new_id = 0;
-	bool configured = false;
-	u32 port_status = 0;
-	int tp_save;
-	int ret;
-
-	/* Check if the downstream hub is already configured */
-	ret = regmap_read(hub->regmap, I3C_HUB_PORT_STATUS, &port_status);
-	if (ret)
-		return ret;
-	if (port_status & (1 << port)) {
-		dev_dbg(&hub->i3cdev->dev, "downstream port%d already configured\n", port);
-		return 0;
-	}
-
-	ret = of_property_read_u32(tp_node, "assigned-id", &new_id);
-	if (ret)
-		return 0;
-
-	/* Unlock access to protected registers */
-	ret = regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_UNLOCK_CODE);
-	if (ret)
-		return -EIO;
-
-	/* Save the hub network connection state */
-	regmap_read(hub->regmap, I3C_HUB_TP_NET_CON_CONF, &tp_save);
-	regmap_write(hub->regmap, I3C_HUB_TP_NET_CON_CONF, 0);
-
-	/* Enable the connection only to the slave port where the Hub is attached */
-	regmap_write(hub->regmap, I3C_HUB_TP_NET_CON_CONF, (1 << port));
-
-	if (new_id) {
-		/* Send SETAASA to set dynamic addr with its static addr */
-		i3c_device_send_ccc_cmd(hub->default_dev, I3C_CCC_RSTDAA(false));
-		i3c_device_send_ccc_cmd(hub->i3cdev, I3C_CCC_SETAASA);
-
-		/* Assign hub id */
-		ret = i3c_hub_i3c_write(hub->default_dev, I3C_HUB_ID, new_id);
-		if (!ret)
-			configured = true;
-
-		/* Reset dynamic address */
-		i3c_device_send_ccc_cmd(hub->default_dev, I3C_CCC_RSTDAA(false));
-	}
-
-	if (configured) {
-		/*
-		 * Update the downstream port status.
-		 * Set bit if the corresponding downstream hub is configured.
-		 */
-		port_status |= 1 << port;
-		regmap_write(hub->regmap, I3C_HUB_PORT_STATUS, port_status);
-	}
-
-	/* Restore the Hub netowrk connection state */
-	regmap_write(hub->regmap, I3C_HUB_TP_NET_CON_CONF, tp_save);
-
-	/* Lock access to protected registers */
-	ret = regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
-	if (ret)
-		return -EIO;
-
-	return ret;
-}
-
 static int i3c_hub_setup_child_nodes(struct i3c_hub *hub)
 {
-	struct i3c_master_controller *master = hub->i3cdev->desc->common.master;
 	struct i3c_device *i3cdev = hub->i3cdev;
 	bool enable_ibi = false;
 	int ret, i;
 
 	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
-		if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_I3C_HUB) {
-			if (!hub->default_dev)
-				hub->default_dev = i3c_master_create_i3c_device(master,
-					I3C_HUB_DEFAULT_PID, I3C_HUB_DEFAULT_ADDR);
-			if (hub->default_dev)
-				i3c_hub_init_leaf_hub(hub, i);
-			else
-				dev_info(&hub->i3cdev->dev, "Unable to create config dev\n");
-		} else if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS) {
+		if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS) {
 			if (!i3c_hub_add_smbus_adapter(hub, i)) {
 				enable_ibi = true;
 				i3c_hub_register_i2c_devices(hub, i);
 			}
 		}
-	}
-
-	if (hub->default_dev) {
-		i3c_master_remove_i3c_device(master, hub->default_dev);
-		hub->default_dev = NULL;
 	}
 
 	if (enable_ibi) {
@@ -1528,20 +1489,6 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 		i3c_master_do_daa(master);
 }
 
-static struct device_node *of_find_hub_by_id(struct device_node *parent, u32 hub_id)
-{
-
-	struct device_node *child = NULL;
-	u32 id;
-
-	for_each_child_of_node(parent, child) {
-		if (!of_property_read_u32(child, "id", &id) && id == hub_id)
-			return of_node_get(child);
-	}
-
-	return NULL;
-}
-
 static int i3c_hub_probe(struct i3c_device *i3cdev)
 {
 	struct regmap_config i3c_hub_regmap_config = {
@@ -1553,7 +1500,6 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	struct regmap *regmap;
 	struct i3c_hub *priv;
 	char hub_id[32];
-	int id;
 	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -1579,19 +1525,37 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 
 	priv->regmap = regmap;
 
+	ret = regmap_write(priv->regmap, I3C_HUB_CP_MUX_SET, BIT(0));
+	if (ret) {
+		dev_err(dev, "Failed to request hub control\n");
+		goto error;
+	}
+
 	if (dev->of_node) {
 		node = of_node_get(dev->of_node);
 	} else {
 		/* Find the hub node by hub_id */
-		ret = regmap_read(regmap, I3C_HUB_ID, &id);
+		priv->hub_dt_sel_id = -1;
+		priv->hub_dt_cp1_id = -1;
+		ret = i3c_hub_read_id(dev);
 		if (ret)
-			return ret;
-		node = of_find_hub_by_id(dev->parent->of_node, id);
-		if (node)
-			dev_info(dev, "hub-%d node found\n", id);
-		else
+			goto error;
+
+		if (priv->hub_pin_cp1_id >= 0 && priv->hub_pin_sel_id >= 0)
+			/* Find hub node in DT matching HW ID or just first without ID provided in DT */
+			node = i3c_hub_get_dt_hub_node(dev->parent->of_node, priv);
+
+		if (node) {
+			if (priv->hub_dt_sel_id == priv->hub_pin_sel_id)
+				dev_info(dev, "Matched hub node (id=%d)\n", priv->hub_dt_sel_id);
+			else if (priv->hub_dt_cp1_id == priv->hub_pin_cp1_id)
+				dev_info(dev, "Matched hub node (id-cp1=%d)\n", priv->hub_dt_cp1_id);
+			else
+				dev_info(dev, "Use first hub node\n");
+		} else {
 			/* Just get first hub node from DT */
 			node = of_get_child_by_name(dev->parent->of_node, "hub");
+		}
 	}
 	if (!node) {
 		dev_warn(dev, "Failed to find DT entry for the driver. Running with defaults.\n");
