@@ -710,7 +710,7 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 		return ret;
 
 	/* Set Open-Drain / Push-Pull compatible for I3C mode */
-	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_IO_MODE_CONF, i3c_mask, ~i3c_val);
+	ret = regmap_clear_bits(priv->regmap, I3C_HUB_TP_IO_MODE_CONF, i3c_val);
 	if (ret)
 		return ret;
 
@@ -1437,6 +1437,25 @@ static int i3c_hub_register_i2c_devices(struct i3c_hub *hub, int port)
 	return 0;
 }
 
+static void i3c_hub_init_gpio(struct i3c_hub *hub, int port)
+{
+	struct device_node *tp_node = hub->child_nodes[port];
+	u32 scl, sda;
+	int ret;
+
+	ret = of_property_read_u32(tp_node, "scl-output", &scl);
+	if (!ret) {
+		regmap_update_bits(hub->regmap, I3C_HUB_TP_SCL_OUT_LEVEL, (1 << port), (scl << port));
+		regmap_update_bits(hub->regmap, I3C_HUB_TP_SCL_OUT_EN, (1 << port), (1 << port));
+	}
+
+	ret = of_property_read_u32(tp_node, "sda-output", &sda);
+	if (!ret) {
+		regmap_update_bits(hub->regmap, I3C_HUB_TP_SDA_OUT_LEVEL, (1 << port), (sda << port));
+		regmap_update_bits(hub->regmap, I3C_HUB_TP_SDA_OUT_EN, (1 << port), (1 << port));
+	}
+}
+
 static int i3c_hub_setup_child_nodes(struct i3c_hub *hub)
 {
 	struct i3c_device *i3cdev = hub->i3cdev;
@@ -1449,6 +1468,8 @@ static int i3c_hub_setup_child_nodes(struct i3c_hub *hub)
 				enable_ibi = true;
 				i3c_hub_register_i2c_devices(hub, i);
 			}
+		} else if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_GPIO) {
+			i3c_hub_init_gpio(hub, i);
 		}
 	}
 
