@@ -232,6 +232,9 @@ static void npcm_usb_reset_npcm7xx(struct npcm_rc_data *rc)
 	regmap_update_bits(rc->gcr_regmap, NPCM_USB2PHYCTL_OFFSET,
 			   NPCM_USBXPHYCTL_RS, 0);
 
+	/* make sure the pull-up signal is disabled on the USB DP */
+	mdelay(10);
+
 	/* deassert reset USB PHY */
 	iprst3 &= ~(NPCM_IPSRST3_USBPHY1 | NPCM_IPSRST3_USBPHY2);
 	writel(iprst3, rc->base + NPCM_IPSRST3);
@@ -308,6 +311,9 @@ static void npcm_usb_reset_npcm8xx(struct npcm_rc_data *rc)
 			   NPCM_USBXPHYCTL_RS, 0);
 	regmap_update_bits(rc->gcr_regmap, NPCM_USB3PHYCTL_OFFSET,
 			   NPCM_USBXPHYCTL_RS, 0);
+
+	/* make sure the pull-up signal is disabled on the USB DP */
+	mdelay(10);
 
 	/* deassert reset USB PHY */
 	iprst3 &= ~(NPCM_IPSRST3_USBPHY1 | NPCM_IPSRST3_USBPHY2);
