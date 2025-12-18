@@ -656,17 +656,15 @@ static int i3c_hub_configure_hw(struct device *dev)
 	if (ret)
 		return ret;
 
-	/* Enable analog switch by default */
-	setting = I3C_HUB_DT_ANALOG_SWITCH_ENABLED;
-	i3c_hub_of_get_setting(priv->node, "analog_switch", analog_switch_settings,
+	setting = I3C_HUB_DT_ANALOG_SWITCH_DISABLED;
+	i3c_hub_of_get_setting(priv->node, "analog-switch", analog_switch_settings,
 			       ARRAY_SIZE(analog_switch_settings),
 			       &setting);
-	if (setting == I3C_HUB_DT_ANALOG_SWITCH_DISABLED)
-		ret = regmap_clear_bits(priv->regmap, I3C_HUB_NET_OPER_MODE_CONF, ANALOG_SWITCH_EN);
-	else
+	if (setting == I3C_HUB_DT_ANALOG_SWITCH_ENABLED) {
 		ret = regmap_update_bits(priv->regmap, I3C_HUB_NET_OPER_MODE_CONF, ANALOG_SWITCH_EN, ANALOG_SWITCH_EN);
-	if (ret)
-		return ret;
+		if (ret)
+			return ret;
+	}
 
 	return i3c_hub_hw_configure_tp(dev);
 }
