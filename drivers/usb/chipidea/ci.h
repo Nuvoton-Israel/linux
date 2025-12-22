@@ -30,6 +30,11 @@
 #define ENDPT_MAX          32
 #define CI_MAX_BUF_SIZE	(TD_PAGE_COUNT * CI_HDRC_PAGE_SIZE)
 
+#define CI_HISTORY_DEPTH (1 << 4)
+#define CI_HISTORY_MASK (CI_HISTORY_DEPTH - 1) /* Works only for powers of 2 */
+#define CI_HISTORY_INCR(index) (((index) + 1) & CI_HISTORY_DEPTH)
+#define CI_HISTORY_DECR(index) (((index) - 1) & CI_HISTORY_DEPTH)
+
 /******************************************************************************
  * REGISTERS
  *****************************************************************************/
@@ -75,6 +80,74 @@ enum ci_hw_regs {
 /******************************************************************************
  * STRUCTURES
  *****************************************************************************/
+
+/******
+ * struct history_info is a generic structure of capturing error information
+ * for post-failure analysis or other debug information.
+ *
+ * jiffies - Time in jiffies error occurred.
+ * data - A generic u32 data byte.
+ *******/
+struct history_info {
+	u64 jiffies;
+	u32 data;
+};
+
+/*********
+ * struct ci_history is a generic structure of history information.
+ *
+ * index - where the next value will be inserted into the array hist_data
+ * hist_data - an array of collected information.
+ *********/
+struct ci_history {
+	u32 index;
+	struct history_info hist_data[CI_HISTORY_DEPTH];
+};
+
+/**
+ * struct ci_stats - Statistic Counters for performance and debug
+ * enqueue_count - The number of struct USB requests successfully enqueued.
+ * dequeue_count - The number of struct USB requests successfully dequeued.
+ *
+ * Note: All dTD_* counters are detected by the hardware or by the ISR. Not all
+ *       counters are errors.
+ *
+ * The following counters are detected by the hardware:
+ * dTD_halted_count - The number of device transfer descriptors (dTD)
+ * dTD_buffer_err_count - The number of dTD buffer errors
+ * dTD_transaction_err_count - The number of dTD err count.
+ *
+ * The following counters are detected by the ISR:
+ * dTD_skipped_count - The number of dTD skips
+ * dTD_completed_count - The number of dTD successfully completed w/o issues.
+ * dTD_reprime_count - The number of dTD that need to be reprimed because the
+ *                     remaining chain of dTDs were missed by the hardware. This
+ *                     is not an error.
+ * dTD_partial_tx_count - The number of dTDs that were partially transmitted.
+ * dTD_no_interrupt_count - The number of dTDs that did not get interrupted on
+ *                          completion but should have.
+ * dTD_invalid_status_count - The number of dTDs that had an invalid USB
+ *                            request status at time of interrupt.
+ * error_interrupt_occurred - The number of times the error interrupt fired.
+ *
+ * token_history - A history of errors and its dTD status.
+ */
+struct ci_ep_stats {
+	u64 enqueue_count;
+	u64 dequeue_count;
+	u64 error_interrupt_occurred;
+	u64 dTD_halted_count;
+	u64 dTD_buffer_err_count;
+	u64 dTD_transaction_err_count;
+	u64 dTD_skipped_count;
+	u64 dTD_completed_count; // Successful count.
+	u64 dTD_reprime_count;
+	u64 dTD_partial_tx_count;
+	u64 dTD_invalid_status_count;
+	u64 dTD_no_interrupt_count;
+	struct ci_history token_history;
+};
+
 /**
  * struct ci_hw_ep - endpoint representation
  * @ep: endpoint structure for gadget drivers
@@ -110,6 +183,10 @@ struct ci_hw_ep {
 	struct dma_pool				*td_pool;
 #endif
 	struct td_node				*pending_td;
+
+	struct ci_ep_stats stats;
+	struct timer_list no_interrupt_timer;
+	unsigned long no_interrupt_timer_timeout_ms;
 };
 
 enum ci_role {

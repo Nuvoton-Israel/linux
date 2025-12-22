@@ -35,6 +35,7 @@ static int ci_device_show(struct seq_file *s, void *data)
 	seq_printf(s, "a_alt_hnp_support = %d\n", gadget->a_alt_hnp_support);
 	seq_printf(s, "name              = %s\n",
 		   (gadget->name ? gadget->name : ""));
+	seq_printf(s, "revision          = %d\n", ci->rev);
 
 	if (!ci->driver)
 		return 0;
@@ -118,6 +119,85 @@ static const struct file_operations ci_port_test_fops = {
 /*
  * ci_qheads_show: DMA contents of all queue heads
  */
+
+static int ci_stats_show (struct seq_file *s, void * data) {
+#define PRINT_STAT(str, member) \
+	seq_printf(s, "  " str " : %llu\n", hwep->stats.member)
+
+	struct ci_hdrc *ci = s->private;
+	unsigned long flags;
+	unsigned i, j;
+	struct ci_hw_ep *hwep;
+	bool found;
+	unsigned src;
+	u64 tmp;
+
+	if (ci->role != CI_ROLE_GADGET) {
+		seq_printf(s, "not in gadget mode\n");
+		return 0;
+	}
+
+	spin_lock_irqsave(&ci->lock, flags);
+
+	for (i = 0; i < ci->hw_ep_max; i++) {
+		hwep = &ci->ci_hw_ep[i];
+		seq_printf(s, "%s Endpoint %d Statistic and Debug Dump:\n",
+				       ((i < ci->hw_ep_max / 2) ?  "RX" : "TX"),
+					     i % (ci->hw_ep_max / 2));
+		seq_printf(s, "\n");
+		seq_printf(s, "  Now (jiffies)=%lld\n\n", get_jiffies_64());
+
+		seq_printf(s, "  The following are counter values:\n");
+		PRINT_STAT("USB Requests Enqueue      ", enqueue_count);
+		PRINT_STAT("USB Requests Dequeue      ", dequeue_count);
+		PRINT_STAT("Error Interrupt Occurred  ", error_interrupt_occurred);
+		PRINT_STAT("dTDs Invalid Status Error ", dTD_invalid_status_count);
+		PRINT_STAT("dTDs Halted Error         ", dTD_halted_count);
+		PRINT_STAT("dTDs Buffer Error         ", dTD_buffer_err_count);
+		PRINT_STAT("dTDs Transaction Error    ", dTD_transaction_err_count);
+		PRINT_STAT("dTDs Partial TX Error     ", dTD_partial_tx_count);
+		PRINT_STAT("dTDs Skipped Error        ", dTD_skipped_count);
+		PRINT_STAT("dTDs Reprimed             ", dTD_reprime_count);
+		PRINT_STAT("dTDs No Interrupt Occurred", dTD_no_interrupt_count);
+		PRINT_STAT("dTDs Completed            ", dTD_completed_count);
+
+		seq_printf(s, "\n"
+				       "  dTD Error History (most recent first):\n");
+		src = CI_HISTORY_DECR(hwep->stats.token_history.index);
+		found = false;
+
+		for (j = 0; j < CI_HISTORY_DEPTH; j++) {
+			tmp = hwep->stats.token_history.hist_data[src].jiffies;
+
+			if (!tmp) break; /* It's unlikely that jiffies=0 and an error occurred at
+												 the same time. */
+			found = true; /* At least one. */
+
+			seq_printf(s, "    [%10u] : jiffies=%lld, status=0x%08X\n",
+								 j,
+								 hwep->stats.token_history.hist_data[src].jiffies,
+								 hwep->stats.token_history.hist_data[src].data);
+
+			src = CI_HISTORY_DECR(src);
+		}
+
+		if (!found) {
+			seq_printf(s,
+				       "    No Hardware Reported dTD Errors found in history or none "
+							 "occurred.\n");
+		}
+
+		seq_printf(s, "\n-------------------------------------------------\n");
+	}
+
+	spin_unlock_irqrestore(&ci->lock, flags);
+
+	return 0;
+
+#undef PRINT_STAT
+}
+DEFINE_SHOW_ATTRIBUTE(ci_stats);
+
 static int ci_qheads_show(struct seq_file *s, void *data)
 {
 	struct ci_hdrc *ci = s->private;
@@ -140,6 +220,7 @@ static int ci_qheads_show(struct seq_file *s, void *data)
 			seq_printf(s, " %04X:    %08X    %08X\n", j,
 				   *((u32 *)hweprx->qh.ptr + j),
 				   *((u32 *)hweptx->qh.ptr + j));
+		seq_printf(s, "\n\n");
 	}
 	spin_unlock_irqrestore(&ci->lock, flags);
 
@@ -157,6 +238,7 @@ static int ci_requests_show(struct seq_file *s, void *data)
 	struct ci_hw_req *req = NULL;
 	struct td_node *node, *tmpnode;
 	unsigned i, j, qsize = sizeof(struct ci_hw_td)/sizeof(u32);
+	u32 req_count;
 
 	if (ci->role != CI_ROLE_GADGET) {
 		seq_printf(s, "not in gadget mode\n");
@@ -164,8 +246,26 @@ static int ci_requests_show(struct seq_file *s, void *data)
 	}
 
 	spin_lock_irqsave(&ci->lock, flags);
-	for (i = 0; i < ci->hw_ep_max; i++)
+	for (i = 0; i < ci->hw_ep_max; i++) {
+		seq_printf(s, "%s Endpoint %d dTD Queue Dump:\n",
+				       ((i < ci->hw_ep_max/2) ?  "RX" : "TX"),
+					     i % (ci->hw_ep_max / 2));
+
 		list_for_each_entry(req, &ci->ci_hw_ep[i].qh.queue, queue) {
+				seq_printf(s, "\n"
+						          "HW Req #%d (ptr=0x%llx): \n", req_count, (u64) req);
+				req_count++;
+				seq_printf(s, "  struct usb_request (ptr=0x%llx) = {\n",
+						          (u64) &(req->req));
+				seq_printf(s, "      .status=%d\n", req->req.status);
+				seq_printf(s, "      .complete=(%s)\n",
+												req->req.complete == NULL ? "NULL" : "Registered");
+				seq_printf(s, "      .actual=%d\n", req->req.actual);
+				seq_printf(s, "      .length=%d\n", req->req.length);
+				seq_printf(s, "      .DMA Method=%s\n",
+						               req->req.num_mapped_sgs ? "ScatterList" : "Direct");
+				seq_printf(s, "  };\n\n");
+
 			list_for_each_entry_safe(node, tmpnode, &req->tds, td) {
 				seq_printf(s, "EP=%02i: TD=%08X %s\n",
 					   i % (ci->hw_ep_max / 2),
@@ -178,6 +278,10 @@ static int ci_requests_show(struct seq_file *s, void *data)
 						   *((u32 *)node->ptr + j));
 			}
 		}
+
+		seq_printf(s, "\n-------------------------------------------------\n");
+	}
+
 	spin_unlock_irqrestore(&ci->lock, flags);
 
 	return 0;
@@ -350,6 +454,7 @@ void dbg_create_files(struct ci_hdrc *ci)
 	debugfs_create_file("port_test", S_IRUGO | S_IWUSR, dir, ci, &ci_port_test_fops);
 	debugfs_create_file("qheads", S_IRUGO, dir, ci, &ci_qheads_fops);
 	debugfs_create_file("requests", S_IRUGO, dir, ci, &ci_requests_fops);
+	debugfs_create_file("stats", S_IRUGO, dir, ci, &ci_stats_fops);
 
 	if (ci_otg_is_fsm_mode(ci))
 		debugfs_create_file("otg", S_IRUGO, dir, ci, &ci_otg_fops);

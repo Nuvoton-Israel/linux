@@ -244,7 +244,7 @@ static int hw_ep_prime(struct ci_hdrc *ci, struct ci_hw_ep *hwep, int num, int d
 
 	/* Synchronize before ep prime */
 	wmb();
-	
+
 	/* We add the read from qh.ptr->td.token to make sure the previous
 	   write to it indeed got into the mamory so when we prime the DMA
 	   will read the updated data */
@@ -647,8 +647,6 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 	hwreq->req.actual = 0;
 	if (!list_empty(&hwep->qh.queue)) {
 		struct ci_hw_req *hwreqprev;
-		int n = hw_ep_bit(hwep->num, hwep->dir);
-		int tmp_stat;
 		struct td_node *prevlastnode;
 		u32 next = firstnode->dma & TD_ADDR_MASK;
 
@@ -657,8 +655,25 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 		prevlastnode = list_entry(hwreqprev->tds.prev,
 				struct td_node, td);
 
-		prevlastnode->ptr->next = cpu_to_le32(next);
+		prevlastnode->ptr->next = cpu_to_le32(next); // Ref-A-code-line
 		wmb();
+
+		goto done;
+
+/************************************************************
+ We won't tell the hardware that there are new TDs. If the device controller
+ is processing a TD before this new request, then the device controller would
+ naturally see it. If the QH is processing the prevlastnode at the same time
+ Ref-A-code-line is executing, the QH will either see the update or it doesn't
+ when it copies the prevlastnode TD into the overlay area (a.k.a the QH).
+
+ If it missed it, then the interrupt handler will reprime when the completion
+ interrupt occurs and start from this TD.
+
+ Therefore, the code below doesn't need to happen and we don't need to modify
+ the QH which is likely active and thus this function can return immediately.
+
+		int n = hw_ep_bit(hwep->num, hwep->dir);
 
 		if (ci->rev == CI_REVISION_22) {
 			if (!hw_read(ci, OP_ENDPTSTAT, BIT(n)))
@@ -674,6 +689,7 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 		hw_write(ci, OP_USBCMD, USBCMD_ATDTW, 0);
 		if (tmp_stat)
 			goto done;
+	****************************************************************************/
 	}
 
 	/*  QH configuration */
@@ -692,6 +708,12 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 
 	ret = hw_ep_prime(ci, hwep, hwep->num, hwep->dir,
 			   hwep->type == USB_ENDPOINT_XFER_CONTROL);
+
+	if (hwep->type != USB_ENDPOINT_XFER_CONTROL) {
+		mod_timer(&hwep->no_interrupt_timer, jiffies + 
+				      msecs_to_jiffies(hwep->no_interrupt_timer_timeout_ms));
+	}
+
 done:
 	return ret;
 }
@@ -724,6 +746,59 @@ static int reprime_dtd(struct ci_hdrc *ci, struct ci_hw_ep *hwep,
 				hwep->type == USB_ENDPOINT_XFER_CONTROL);
 }
 
+static inline bool dtD_was_skipped(struct ci_hw_ep *hwep,
+																	 struct ci_hw_req *hwreq,
+																	 struct td_node * this_td) {
+	struct ci_hw_req *next_hwreq = NULL;
+	struct td_node * next_td;
+	u32 next_td_token, next_request_td_token;
+
+	/* This function requires both hwep list and hwreq list to not be empty.
+	 * Additionally, this function is meant to be called by the ISR.
+	 * This function also assumes this_td is still active. */
+
+	// First, we get the token status of the next dTD in the same request.
+	if (list_is_last(&this_td->td, &hwreq->tds)) {
+		// We fake the token value.
+		next_td_token = TD_STATUS_ACTIVE;
+	}
+	else {
+		// Get the token of the next td in this request.
+		next_td = list_next_entry(this_td, td);
+		next_td_token = next_td->ptr->token;
+	}
+
+	// Second, we get the token status of the first dTD in the next request.
+	if (list_is_last(&hwreq->queue, &hwep->qh.queue)) {
+		/* This request is the last in its list. So, we fake the token status of
+		 * the next request's token.  */
+		next_request_td_token = TD_STATUS_ACTIVE;
+	}
+	else {
+		/*
+		 * We look at the next hwreq in the
+		 * hw EP queue for the first dTD in that list because that would be the
+		 * next dTD the device controller will have moved to.*/
+		next_hwreq = list_next_entry(hwreq, queue);
+		next_td = list_first_entry(&next_hwreq->tds, struct td_node, td);
+		next_request_td_token = next_td->ptr->token;
+
+		// It's possible that the next request was also skipped and to figure that
+		// out we would need to analyze the first request of every request from this
+		// point to the end of the list. Since the original failure signature
+		// only showed a skip of one request, this function trades off complete
+		// detection for performance since this functions is called from an ISR.
+	}
+
+	if (next_td_token & next_request_td_token & TD_STATUS_ACTIVE) {
+		// Since the next token or the next request's first token are still active
+		// we consider this scenario not skipped.
+		return false;
+	}
+
+	return true;
+}
+
 /**
  * _hardware_dequeue: handles a request at hardware level
  * @hwep: endpoint
@@ -738,21 +813,53 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 	unsigned remaining_length;
 	unsigned actual = hwreq->req.length;
 	struct ci_hdrc *ci = hwep->ci;
+	struct ci_ep_stats * stats = &hwep->stats;
+	u64 success_count = 0;
+	bool kill_request = false;
 
-	if (hwreq->req.status != -EALREADY)
+	if (hwreq->req.status != -EALREADY) {
+		stats->dTD_invalid_status_count++;
 		return -EINVAL;
+	}
 
 	hwreq->req.status = 0;
 
 	list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
 		tmptoken = le32_to_cpu(node->ptr->token);
 		trace_ci_complete_td(hwep, hwreq, node);
+
+		if (kill_request == true) {
+			/* We need to free up the remaining TDs in this request if we encounter
+			 * a failed TD. */
+			if (hwep->pending_td)
+				free_pending_td(hwep);
+
+			hwep->pending_td = node;
+			list_del_init(&node->td);
+			continue;
+		}
+
 		if ((TD_STATUS_ACTIVE & tmptoken) != 0) {
 			int n = hw_ep_bit(hwep->num, hwep->dir);
+			int qh_at_last_td = hwep->qh.ptr->td.next & TD_TERMINATE;
+			int qh_status = hwep->qh.ptr->td.token & TD_STATUS;
+			bool do_reprime = false;
 
-			if (ci->rev == CI_REVISION_24)
-				if (!hw_read(ci, OP_ENDPTSTAT, BIT(n)))
+			if (dtD_was_skipped(hwep, hwreq, node)) {
+				stats->dTD_skipped_count++;
+			}
+
+			if (qh_at_last_td && !qh_status) {
+				do_reprime = true;
+			}
+
+			if ((ci->rev == CI_REVISION_24) || do_reprime) {
+				if (!hw_read(ci, OP_ENDPTSTAT, BIT(n))) {
+					stats->dTD_reprime_count++;
 					reprime_dtd(ci, hwep, node);
+				}
+			}
+
 			hwreq->req.status = -EALREADY;
 			return -EBUSY;
 		}
@@ -764,21 +871,24 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 		hwreq->req.status = tmptoken & TD_STATUS;
 		if ((TD_STATUS_HALTED & hwreq->req.status)) {
 			hwreq->req.status = -EPIPE;
-			break;
+			stats->dTD_halted_count++;
+			kill_request = true;
 		} else if ((TD_STATUS_DT_ERR & hwreq->req.status)) {
 			hwreq->req.status = -EPROTO;
-			break;
+			stats->dTD_buffer_err_count++;
+			kill_request = true;
 		} else if ((TD_STATUS_TR_ERR & hwreq->req.status)) {
+			stats->dTD_transaction_err_count++;
 			hwreq->req.status = -EILSEQ;
-			break;
-		}
-
-		if (remaining_length) {
+			kill_request = true;
+		} else if (remaining_length) {
 			if (hwep->dir == TX) {
+				stats->dTD_partial_tx_count++;
 				hwreq->req.status = -EPROTO;
-				break;
+				kill_request = true;
 			}
 		}
+
 		/*
 		 * As the hardware could still address the freed td
 		 * which will run the udc unusable, the cleanup of the
@@ -789,6 +899,7 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 
 		hwep->pending_td = node;
 		list_del_init(&node->td);
+		success_count++;
 	}
 
 	usb_gadget_unmap_request_by_dev(hwep->ci->dev->parent,
@@ -796,9 +907,17 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 
 	hwreq->req.actual += actual;
 
-	if (hwreq->req.status)
-		return hwreq->req.status;
+	if (hwreq->req.status) {
+		struct history_info * hi;
+		int dst = stats->token_history.index;
+		hi = &(stats->token_history.hist_data[dst]);
+		hi->data = tmptoken;
+		hi->jiffies = get_jiffies_64();
+		stats->token_history.index = CI_HISTORY_INCR(dst);
+		return -EIO;
+	}
 
+	stats->dTD_completed_count += success_count;
 	return hwreq->req.actual;
 }
 
@@ -1033,8 +1152,10 @@ static int _ep_queue(struct usb_ep *ep, struct usb_request *req,
 
 	if (retval == -EALREADY)
 		retval = 0;
-	if (!retval)
+	if (!retval) {
 		list_add_tail(&hwreq->queue, &hwep->qh.queue);
+		hwep->stats.enqueue_count++;
+	}
 
 	return retval;
 }
@@ -1174,7 +1295,7 @@ __acquires(hwep->lock)
 	list_for_each_entry_safe(hwreq, hwreqtemp, &hwep->qh.queue,
 			queue) {
 		retval = _hardware_dequeue(hwep, hwreq);
-		if (retval < 0)
+		if (retval == -EBUSY)
 			break;
 		list_del_init(&hwreq->queue);
 		if (hwreq->req.complete != NULL) {
@@ -1184,6 +1305,16 @@ __acquires(hwep->lock)
 				hweptemp = hwep->ci->ep0in;
 			usb_gadget_giveback_request(&hweptemp->ep, &hwreq->req);
 			spin_lock(hwep->lock);
+		}
+	}
+
+	if (hwep->type != USB_ENDPOINT_XFER_CONTROL) {
+		if (list_empty(&hwep->qh.queue)) {
+			del_timer(&hwep->no_interrupt_timer);
+		}
+		else {
+			mod_timer(&hwep->no_interrupt_timer, jiffies + 
+				      msecs_to_jiffies(hwep->no_interrupt_timer_timeout_ms));
 		}
 	}
 
@@ -1204,7 +1335,7 @@ static int otg_a_alt_hnp_support(struct ci_hdrc *ci)
  * isr_setup_packet_handler: setup packet handler
  * @ci: UDC descriptor
  *
- * This function handles setup packet 
+ * This function handles setup packet
  */
 static void isr_setup_packet_handler(struct ci_hdrc *ci)
 __releases(ci->lock)
@@ -1649,6 +1780,7 @@ static int ep_dequeue(struct usb_ep *ep, struct usb_request *req)
 		spin_lock(hwep->lock);
 	}
 
+	hwep->stats.dequeue_count++;
 	spin_unlock_irqrestore(hwep->lock, flags);
 	return 0;
 }
@@ -1908,6 +2040,26 @@ static const struct usb_gadget_ops usb_gadget_ops = {
 	.match_ep 	= ci_udc_match_ep,
 };
 
+static void no_interrupt_timeout (struct timer_list * t) {
+	struct ci_hw_ep * hwep = from_timer(hwep, t, no_interrupt_timer);
+	int ret;
+	unsigned long flags;
+
+	spin_lock_irqsave(hwep->lock, flags);
+
+	// For an RX endpoint, this counter may increase but this does not necessary
+	// mean there is a problem because the other end may not be sending this
+	// endpoint any data. For some higher layer protocols, this scenario is
+	// valid but the timer will still fire periodically.
+	hwep->stats.dTD_no_interrupt_count++;
+
+	// The control endpoint does not have a timer and thus we don't need
+	// to worry about a negative return value from isr_tr_complete_low().
+	ret = isr_tr_complete_low(hwep);
+	
+	spin_unlock_irqrestore(hwep->lock, flags);
+}
+
 static int init_eps(struct ci_hdrc *ci)
 {
 	int retval = 0, i, j;
@@ -1969,6 +2121,22 @@ static int init_eps(struct ci_hdrc *ci)
 
 				usb_ep_set_maxpacket_limit(&hwep->ep, CTRL_PAYLOAD_MAX);
 				continue;
+			}
+
+			if (i != 0) {
+#define NO_INTERRUPT_TIMEOUT_TX_MS 10 /* 10 ms */
+#define NO_INTERRUPT_TIMEOUT_RX_MS (5 * 1000) /* 5 seconds */
+				// Add a timer to free up dTDs when a non-control endpoint stalls.
+				timer_setup(&hwep->no_interrupt_timer, no_interrupt_timeout, 0);
+
+				if (j == TX) {
+					hwep->no_interrupt_timer_timeout_ms = NO_INTERRUPT_TIMEOUT_TX_MS;
+				}
+				else {
+					hwep->no_interrupt_timer_timeout_ms = NO_INTERRUPT_TIMEOUT_RX_MS;
+				}
+#undef NO_INTERRUPT_TIMEOUT_TX_MS
+#undef NO_INTERRUPT_TIMEOUT_RX_MS
 			}
 
 			list_add_tail(&hwep->ep.ep_list, &ci->gadget.ep_list);
@@ -2106,7 +2274,17 @@ static irqreturn_t udc_irq(struct ci_hdrc *ci)
 			return IRQ_NONE;
 		}
 	}
+
 	intr = hw_test_and_clear_intr_active(ci);
+
+	if (intr & USBi_UEI) {
+		struct ci_hw_ep *hwep  = &ci->ci_hw_ep[0];
+
+		// Since we don't know what endpoint this occurred on, we will just
+		// log it to RX control endpoint 0.
+		hwep->stats.error_interrupt_occurred++;
+		dev_warn(ci->dev, "USB Error Interrupt occurred: 0x%x.\n", intr);
+	}
 
 	if (intr) {
 		/* order defines priority - do NOT change it */

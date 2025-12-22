@@ -58,7 +58,8 @@ struct ci_hw_qh {
 } __attribute__ ((packed, aligned(4)));
 
 struct td_node {
-	struct list_head	td;
+	struct list_head	td; // This is a node in a list of struct td_node. The
+												// head pointer to this list is in ci_hw_req.
 	dma_addr_t		dma;
 	struct ci_hw_td		*ptr;
 	int			td_remaining_size;
@@ -71,10 +72,26 @@ struct td_node {
  * @tds: link to TD list
  */
 struct ci_hw_req {
-	struct usb_request	req;
-	struct list_head	queue;
-	struct list_head	tds;
+	struct usb_request	req; // This is the gadget level USB request.
+	struct list_head	queue; // This is a list of struct ci_hw_req. The head
+													 // pointer is in struct ci_hw_ep.qh.queue.
+	struct list_head	tds;  // This is the head pointer for a list of
+													// struct td_node specific to this instance of
+													// ci_hw_req.
 };
+
+/*
+ * In general, the device driver uses kernel list (i.e. list.h) to
+ * represent a list of hw_req where each hw_req has a list of dTDs. The device
+ * driver code attempts to append a new list of TDs created from the new
+ * request to the existing chain for performance reasons. Effectively, it is
+ * chaining across gadget level requests (i.e. struct usb_request).
+ * From the perspective of the device controller, it looks like a very long
+ * single chain where the last TD (ci_hw_td in struct td_node) in each
+ * ci_hw_req has the IOC bit set.
+ *
+ * This can be seen in the _hardware_enqueue() function.
+ */
 
 #ifdef CONFIG_USB_CHIPIDEA_UDC
 
