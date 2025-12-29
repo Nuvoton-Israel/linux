@@ -240,6 +240,7 @@ struct npcm_fiu_chip {
 	void __iomem *flash_region_mapped_ptr;
 	struct npcm_fiu_spi *fiu;
 	unsigned long clkrate;
+	bool disable_direct;
 #ifdef CONFIG_NPCM_FIU_WR_DR_EN
 	bool directw_wr_en;
 #endif
@@ -654,6 +655,13 @@ static int npcm_fiu_dirmap_create(struct spi_mem_dirmap_desc *desc)
 		desc->nodirmap = true;
 		return 0;
 	}
+
+	if (chip->disable_direct) {
+		dev_warn(fiu->dev, "CS%d Direct read and write disabled\n",spi_get_chipselect(desc->mem->spi, 0));
+		desc->nodirmap = true;
+		return 0;
+	}
+
 #ifdef CONFIG_NPCM_FIU_WR_DR_EN
 	if (!fiu->spix_mode && !chip->directw_wr_en && desc->info.op_tmpl.data.dir == SPI_MEM_DATA_OUT) {
 #else
@@ -754,10 +762,12 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 	struct spi_controller *ctrl;
 	struct npcm_fiu_spi *fiu;
 	void __iomem *regbase;
+	u32 dir_dis[NPCM_MAX_CHIP_NUM];
+	int dir_cnt, i;
 	int id;
 #ifdef CONFIG_NPCM_FIU_WR_DR_EN
 	u32 wr_en[NPCM_MAX_CHIP_NUM];
-	int wr_cnt, i;
+	int wr_cnt;
 #endif
 
 	ctrl = devm_spi_alloc_host(dev, sizeof(*fiu));
@@ -802,6 +812,14 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 
 	fiu->spix_mode = of_property_read_bool(dev->of_node,
 					       "nuvoton,spix-mode");
+
+	dir_cnt = of_property_count_elems_of_size(dev->of_node, "nuvoton-disable-direct-cs", sizeof(u32));
+	if (dir_cnt > 0) {
+		of_property_read_u32_array(dev->of_node, "nuvoton-disable-direct-cs", dir_dis, dir_cnt);
+		for (i = 0 ; i < dir_cnt ; i++)
+			if (dir_dis[i] < fiu->info->max_cs)
+				fiu->chip[dir_dis[i]].disable_direct = true;
+	}
 
 #ifdef CONFIG_NPCM_FIU_WR_DR_EN
 	/* 
