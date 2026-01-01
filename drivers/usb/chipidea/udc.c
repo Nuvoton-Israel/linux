@@ -815,28 +815,46 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 	struct ci_hdrc *ci = hwep->ci;
 	struct ci_ep_stats * stats = &hwep->stats;
 	u64 success_count = 0;
-	bool kill_request = false;
+	bool kill_request = hwreq->kill_request;
+	bool okay_to_kill_remaining_tds = false;
 
-	if (hwreq->req.status != -EALREADY) {
-		stats->dTD_invalid_status_count++;
-		return -EINVAL;
+	if (!kill_request) {
+		if (hwreq->req.status != -EALREADY) {
+			stats->dTD_invalid_status_count++;
+			hwreq->kill_request = true;
+			kill_request = true;
+		}
+		else {
+			hwreq->req.status = 0;
+		}
 	}
-
-	hwreq->req.status = 0;
 
 	list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
 		tmptoken = le32_to_cpu(node->ptr->token);
 		trace_ci_complete_td(hwep, hwreq, node);
 
 		if (kill_request == true) {
-			/* We need to free up the remaining TDs in this request if we encounter
-			 * a failed TD. */
-			if (hwep->pending_td)
-				free_pending_td(hwep);
+			if (!okay_to_kill_remaining_tds) {
+				int qh_at_last_td = hwep->qh.ptr->td.next & TD_TERMINATE;
+				int qh_status = hwep->qh.ptr->td.token & TD_STATUS;
 
-			hwep->pending_td = node;
-			list_del_init(&node->td);
-			continue;
+				if (qh_at_last_td && !qh_status) {
+					okay_to_kill_remaining_tds = true;
+				}
+			}
+
+			if (okay_to_kill_remaining_tds || ((TD_STATUS_ACTIVE & tmptoken) == 0)) {
+				/* We need to free up the remaining TDs in this request if we encounter
+				 * a failed TD. */
+				if (hwep->pending_td)
+					free_pending_td(hwep);
+
+				hwep->pending_td = node;
+				list_del_init(&node->td);
+				continue;
+			}
+
+			return -EBUSY;
 		}
 
 		if ((TD_STATUS_ACTIVE & tmptoken) != 0) {
@@ -887,6 +905,10 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 				hwreq->req.status = -EPROTO;
 				kill_request = true;
 			}
+		}
+
+		if (kill_request) {
+			hwreq->kill_request = true;
 		}
 
 		/*
@@ -1669,6 +1691,7 @@ static struct usb_request *ep_alloc_request(struct usb_ep *ep, gfp_t gfp_flags)
 	if (hwreq != NULL) {
 		INIT_LIST_HEAD(&hwreq->queue);
 		INIT_LIST_HEAD(&hwreq->tds);
+		hwreq->kill_request = false;
 	}
 
 	return (hwreq == NULL) ? NULL : &hwreq->req;

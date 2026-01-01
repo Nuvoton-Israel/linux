@@ -73,6 +73,7 @@ struct td_node {
  */
 struct ci_hw_req {
 	struct usb_request	req; // This is the gadget level USB request.
+	bool kill_request;
 	struct list_head	queue; // This is a list of struct ci_hw_req. The head
 													 // pointer is in struct ci_hw_ep.qh.queue.
 	struct list_head	tds;  // This is the head pointer for a list of
