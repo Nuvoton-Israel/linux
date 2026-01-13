@@ -601,7 +601,7 @@ static int npcm_espi_flash_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcm_espi_flash_remove(struct platform_device *pdev)
+static void npcm_espi_flash_remove(struct platform_device *pdev)
 {
 	struct npcm_espi_flash *priv = platform_get_drvdata(pdev);
 
@@ -609,7 +609,6 @@ static int npcm_espi_flash_remove(struct platform_device *pdev)
 	kfree(priv->miscdev.name);
 	mutex_destroy(&priv->lock);
 	kfree(priv);
-	return 0;
 }
 
 static const struct of_device_id npcm_espi_flash_match[] = {
