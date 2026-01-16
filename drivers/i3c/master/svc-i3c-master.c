@@ -17,6 +17,7 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/reset.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
@@ -1980,6 +1981,7 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct svc_i3c_master *master;
+	struct reset_control *reset;
 	int ret, i;
 	u32 val;
 
@@ -2020,6 +2022,12 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 	ret = clk_bulk_prepare_enable(master->num_clks, master->clks);
 	if (ret)
 		return dev_err_probe(dev, ret, "can't enable I3C clocks\n");
+
+	reset = devm_reset_control_get(&pdev->dev, NULL);
+	if (!IS_ERR(reset)) {
+		reset_control_assert(reset);
+		reset_control_deassert(reset);
+	}
 
 	mutex_init(&master->lock);
 
