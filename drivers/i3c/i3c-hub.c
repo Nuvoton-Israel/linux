@@ -1181,14 +1181,13 @@ err_exit:
 	return ret;
 }
 
-static int i3c_hub_smbus_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
-			      int num)
+static int i3c_hub_smbus_xfer_one(struct i2c_adapter *adap, struct i2c_msg *wr_msg,
+				  struct i2c_msg *rd_msg)
 {
 	struct smbus_agent *agent = adap->algo_data;
 	struct i3c_hub *priv = agent->hub;
 	int port_id = agent->port_id;
-	int ret = 0;
-	int ret_num = 1;
+	int ret;
 
 	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE] = { 0 };
 	u8 *out = NULL, *in = NULL;
@@ -1196,26 +1195,36 @@ static int i3c_hub_smbus_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 	u8 page = I3C_HUB_CONTROLLER_BUFFER_PAGE + 4 * port_id;
 	u8 reg_status = HUB_REG_TP_SMBUS_AGNT_STS(port_id);
 
-	if ((msgs[0].flags & I2C_M_RD) == 0) {
-		desc[0] = msgs[0].addr << 1;
-		desc[1] = I3C_HUB_SMBUS_400kHz;
-		desc[2] = wr_len = msgs[0].len;
-		out = msgs[0].buf;
-		/* Check if there is a Read after Write transaction */
-		if (num > 1 && msgs[1].flags & I2C_M_RD && msgs[0].addr == msgs[1].addr) {
-			desc[1] |= BIT(0);
-			desc[3] = rd_len = msgs[1].len;
-			in = msgs[1].buf;
-			ret_num++;
-		} else {
-			desc[3] = 0;
+	/*
+	 * The len is only 1 in the smbus block read transfer, need to
+	 * extend the read length.
+	 */
+	if (rd_msg && (rd_msg->flags & I2C_M_RECV_LEN))
+		rd_msg->len += I2C_SMBUS_BLOCK_MAX;
+
+	if (wr_msg && rd_msg) {
+		if (wr_msg->addr != rd_msg->addr) {
+			dev_err(&adap->dev, "different addr in i2c wr and rd msgs\n");
+			return -EINVAL;
 		}
-	} else {
-		desc[0] = msgs[0].addr << 1 | BIT(0);
+		desc[0] = wr_msg->addr << 1;
+		desc[1] = I3C_HUB_SMBUS_400kHz | BIT(0); /* A write followed by a read*/
+		desc[2] = wr_len = wr_msg->len;
+		desc[3] = rd_len = rd_msg->len;
+		out = wr_msg->buf;
+		in = rd_msg->buf;
+	} else if (wr_msg) {
+		desc[0] = wr_msg->addr << 1;
+		desc[1] = I3C_HUB_SMBUS_400kHz;
+		desc[2] = wr_len = wr_msg->len;
+		desc[3] = 0;
+		out = wr_msg->buf;
+	} else if (rd_msg) {
+		desc[0] = rd_msg->addr << 1 | BIT(0);
 		desc[1] = I3C_HUB_SMBUS_400kHz;
 		desc[2] = 0;
-		desc[3] = rd_len = msgs[0].len;
-		in = msgs[0].buf;
+		desc[3] = rd_len = rd_msg->len;
+		in = rd_msg->buf;
 	}
 
 	if (wr_len + rd_len > I3C_HUB_SMBUS_PAYLOAD_SIZE) {
@@ -1232,15 +1241,15 @@ static int i3c_hub_smbus_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 	ret = regmap_bulk_write(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF,
 				desc, I3C_HUB_SMBUS_DESCRIPTOR_SIZE);
 	if (ret)
-		return ret;
+		goto err_exit;
 
-	if (out && wr_len) {
+	if (wr_msg && wr_len) {
 		/* Fill payload for write */
 		ret = regmap_bulk_write(priv->regmap,
 					I3C_HUB_CONTROLLER_AGENT_BUFF_DATA,
 					out, wr_len);
 		if (ret)
-			return ret;
+			goto err_exit;
 	}
 
 	reinit_completion(&agent->completion);
@@ -1250,41 +1259,71 @@ static int i3c_hub_smbus_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 	/* Start the transaction */
 	ret = regmap_write(priv->regmap, I3C_HUB_TP_SMBUS_AGNT_TRANS_START, BIT(port_id));
 	if (ret)
-		return ret;
+		goto err_exit;
 
-	ret = wait_for_completion_timeout(&agent->completion, agent->adap.timeout);
-	if (ret < 0) {
-		dev_info(&adap->dev, "wait_for_complete ret %d\n", ret);
+	if (wait_for_completion_timeout(&agent->completion, agent->adap.timeout) < 0) {
+		dev_info(&adap->dev, "wait_for_complete timeout\n");
 		i3c_hub_reset_smbus_agent(agent);
-		ret_num = ret;
+		ret = -ETIMEDOUT;
 		goto err_exit;
 	}
 
 	if ((agent->tx_res & I3C_HUB_SMBUS_MASTER_STATUS_MASK) != I3C_HUB_XFER_SUCCESS) {
 		dev_dbg(&adap->dev, "TX error: status = 0x%x\n", agent->tx_res);
-		ret_num = -EIO;
+		ret = -EIO;
 		goto err_exit;
 	}
 
-	if (in) {
+	if (rd_msg) {
 		/* Read the data of read transaction */
 		ret = regmap_bulk_read(priv->regmap,
 				       I3C_HUB_CONTROLLER_AGENT_BUFF_DATA + wr_len,
 				       in, rd_len);
 		if (ret)
-			return ret;
+			goto err_exit;
+		/* Update the actual read length for smbus block read */
+		if (rd_msg->flags & I2C_M_RECV_LEN)
+			rd_msg->len = min_t(unsigned int, in[0], I2C_SMBUS_BLOCK_MAX) + 1;
 	}
 err_exit:
-	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
-	if (ret)
-		return ret;
+	/* Restore page pointer */
+	regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
 
-	return ret_num;
+	return ret;
+}
+
+static int i3c_hub_smbus_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
+			      int num)
+{
+	struct i2c_msg *wr_msg, *rd_msg;
+	int i = 0;
+	int ret;
+
+	while (i < num) {
+		if (!(msgs[i].flags & I2C_M_RD)) {
+			wr_msg = &msgs[i++];
+			rd_msg = NULL;
+			/* If a read msg followed by write msg is to the same address, combine it*/
+			if (i < num && msgs[i].addr == wr_msg->addr &&
+			    (msgs[i].flags & I2C_M_RD)) {
+				rd_msg = &msgs[i++];
+			}
+		} else {
+			wr_msg = NULL;
+			rd_msg = &msgs[i++];
+		}
+
+		ret = i3c_hub_smbus_xfer_one(adap, wr_msg, rd_msg);
+		if (ret)
+			return ret;
+	}
+
+	return num;
 }
 
 static u32 i3c_hub_i2c_funcs(struct i2c_adapter *adapter)
 {
-	return I2C_FUNC_SMBUS_EMUL | I2C_FUNC_I2C;
+	return I2C_FUNC_SMBUS_EMUL | I2C_FUNC_I2C | I2C_FUNC_SMBUS_BLOCK_DATA;
 }
 
 static int i3c_hub_agent_i2c_reg_target(struct i2c_client *client)
