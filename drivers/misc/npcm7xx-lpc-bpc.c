@@ -143,7 +143,7 @@ static irqreturn_t npcm7xx_bpc_irq(int irq, void *arg)
 			kfifo_skip(&lpc_bpc->ch[addr_index].fifo);
 		kfifo_put(&lpc_bpc->ch[addr_index].fifo, Data);
 		if (fifo_st & FIFO_OVERFLOW)
-			pr_info("BIOS Post Codes FIFO Overflow!!!\n");
+			pr_warn_ratelimited("BIOS Post Codes FIFO Overflow!!!\n");
 
 		fifo_st = ioread8(lpc_bpc->base + NPCM7XX_BPCFSTAT_REG);
 		if (lpc_bpc->en_dwcap) {
