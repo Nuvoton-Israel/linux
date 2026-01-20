@@ -141,7 +141,7 @@ static irqreturn_t npcm_bpc_irq(int irq, void *arg)
 			kfifo_skip(&bpc->ch[addr_index].fifo);
 		kfifo_put(&bpc->ch[addr_index].fifo, data);
 		if (fifo_st & FIFO_OVERFLOW)
-			dev_warn(bpc->dev, "BIOS Post Codes FIFO Overflow\n");
+			dev_warn_ratelimited(bpc->dev, "BIOS Post Codes FIFO Overflow\n");
 
 		fifo_st = ioread8(bpc->base + NPCM_BPCFSTAT_REG);
 		if (bpc->en_dwcap) {
