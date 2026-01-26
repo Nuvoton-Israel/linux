@@ -709,8 +709,8 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 	if (ret)
 		return ret;
 
-	/* Set Open-Drain / Push-Pull compatible for I3C mode */
-	ret = regmap_clear_bits(priv->regmap, I3C_HUB_TP_IO_MODE_CONF, i3c_val);
+	/* Set Open-Drain / Push-Pull compatible for I3C/GPIO mode */
+	ret = regmap_clear_bits(priv->regmap, I3C_HUB_TP_IO_MODE_CONF, i3c_val | gpio_val);
 	if (ret)
 		return ret;
 
