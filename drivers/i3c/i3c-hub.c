@@ -297,8 +297,6 @@ struct i3c_hub {
 	struct dt_settings settings;
 	int hub_pin_sel_id;
 	int hub_pin_cp1_id;
-	int hub_dt_sel_id;
-	int hub_dt_cp1_id;
 
 	/* Offset for reading HUB's register. */
 	u8 reg_addr;
@@ -784,43 +782,74 @@ static int i3c_hub_read_id(struct device *dev)
 	return 0;
 }
 
-static struct device_node *i3c_hub_get_dt_hub_node(struct device_node *node,
-						   struct i3c_hub *priv)
+static struct device_node *i3c_hub_get_dt_hub_node(struct device *dev, struct i3c_hub *priv)
 {
-	struct device_node *hub_node_no_id = NULL;
+	struct device_node *parent_node = dev->parent->of_node;
+	struct device_node *matched_node = NULL;
 	struct device_node *hub_node;
-	u32 hub_id;
-	int found_id = 0;
+	int id_matched = 0;
+	int hub_dt_sel_id;
+	int hub_dt_cp1_id;
+	int matched;
 
-	for_each_available_child_of_node(node, hub_node) {
-		if (strstr(hub_node->name, "hub")) {
-			if (!of_property_read_u32(hub_node, "id", &hub_id)) {
-				if (hub_id == (u32)priv->hub_pin_sel_id)
-					found_id = 1;
-				priv->hub_dt_sel_id = hub_id;
-			}
+	/*
+	 * HW ID definition:
+	 * CP SEL pin:
+	 *  - Low:		"id" = 0
+	 *  - Floating:		"id" = 1
+	 *  - High:		"id" = 3
+	 *
+	 * CP1 SDA/SCL pins:
+	 *  - SDA=0,SCL=0:	"id-cp1" = 0
+	 *  - SDA=0,SCL=1:	"id-cp1" = 1
+	 *  - SDA=1,SCL=0:	"id-cp1" = 2
+	 *  - SDA=1,SCL=1:	"id-cp1" = 3
+	 */
+	dev_info(dev, "Hub HW ID: sel=%d, cp1=%d\n", priv->hub_pin_sel_id,
+		 priv->hub_pin_cp1_id);
 
-			if (!of_property_read_u32(hub_node, "id-cp1", &hub_id)) {
-				if (hub_id == (u32)priv->hub_pin_cp1_id)
-					found_id = 1;
-				priv->hub_dt_cp1_id = hub_id;
-			}
+	for_each_available_child_of_node(parent_node, hub_node) {
+		if (!of_node_name_eq(hub_node, "hub"))
+			continue;
 
-			if (!found_id) {
-				/*
-				 * Just keep reference to first HUB node with no ID in case no ID
-				 * matching
-				 */
-				if (!hub_node_no_id && priv->hub_dt_sel_id == -1 &&
-				    priv->hub_dt_cp1_id == -1)
-					hub_node_no_id = hub_node;
-			} else {
-				return hub_node;
-			}
+		matched = 0;
+
+		/* Match optional "id" property */
+		if (!of_property_read_u32(hub_node, "id", &hub_dt_sel_id)) {
+			dev_dbg(dev, "DT node '%s': id=%u\n",
+				of_node_full_name(hub_node), hub_dt_sel_id);
+
+			if (hub_dt_sel_id != priv->hub_pin_sel_id)
+				continue;
+
+			matched++;
+		}
+
+		/* Match optional "id-cp1" property */
+		if (!of_property_read_u32(hub_node, "id-cp1", &hub_dt_cp1_id)) {
+			dev_dbg(dev, "DT node '%s': id-cp1=%u\n",
+				of_node_full_name(hub_node), hub_dt_cp1_id);
+
+			if (hub_dt_cp1_id != priv->hub_pin_cp1_id)
+				continue;
+
+			matched++;
+		}
+
+		/*
+		 * Selection policy:
+		 * - Prefer more matches.
+		 * - If no candidate, use the first "hub" node.
+		 */
+		if (!matched_node || matched > id_matched) {
+			dev_dbg(dev, "DT %s selected (matched=%d)\n",
+				of_node_full_name(hub_node), matched);
+			id_matched = matched;
+			matched_node = hub_node;
 		}
 	}
 
-	return hub_node_no_id;
+	return matched_node;
 }
 
 static int fops_access_reg_get(void *ctx, u64 *val)
@@ -1593,31 +1622,19 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		node = of_node_get(dev->of_node);
 	} else {
 		/* Find the hub node by hub_id */
-		priv->hub_dt_sel_id = -1;
-		priv->hub_dt_cp1_id = -1;
 		ret = i3c_hub_read_id(dev);
 		if (ret)
 			goto error;
 
 		if (priv->hub_pin_cp1_id >= 0 && priv->hub_pin_sel_id >= 0)
 			/* Find hub node in DT matching HW ID or just first without ID provided in DT */
-			node = i3c_hub_get_dt_hub_node(dev->parent->of_node, priv);
+			node = i3c_hub_get_dt_hub_node(dev, priv);
 
-		if (node) {
-			if (priv->hub_dt_sel_id == priv->hub_pin_sel_id)
-				dev_info(dev, "Matched hub node (id=%d)\n", priv->hub_dt_sel_id);
-			else if (priv->hub_dt_cp1_id == priv->hub_pin_cp1_id)
-				dev_info(dev, "Matched hub node (id-cp1=%d)\n", priv->hub_dt_cp1_id);
-			else
-				dev_info(dev, "Use first hub node\n");
-		} else {
-			/* Just get first hub node from DT */
-			node = of_get_child_by_name(dev->parent->of_node, "hub");
-		}
 	}
 	if (!node) {
 		dev_warn(dev, "Failed to find DT entry for the driver. Running with defaults.\n");
 	} else {
+		dev_info(dev, "Use %s DT node\n", of_node_full_name(node));
 		i3c_hub_of_get_configuration(dev, node);
 		of_node_put(node);
 		priv->node = node;
