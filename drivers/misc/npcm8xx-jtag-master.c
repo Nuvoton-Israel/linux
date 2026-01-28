@@ -45,12 +45,12 @@ struct tck_bitbang {
 	__u8     tms;
 	__u8     tdi;
 	__u8     tdo;
-} __attribute__((__packed__));
+} __packed;
 
 struct bitbang_packet {
 	struct tck_bitbang *data;
 	__u32	length;
-} __attribute__((__packed__));
+} __packed;
 
 struct jtag_xfer {
 	__u8	type;
@@ -506,7 +506,7 @@ static int jtag_set_tapstate(struct npcm_jtm *jtag,
 		return 0;
 
 	if (from > JTAG_STATE_CURRENT || to > JTAG_STATE_CURRENT)
-		return -1;
+		return -EINVAL;
 
 	tms[0] = tmscyclelookup[from][to].tmsbits;
 	count   = tmscyclelookup[from][to].count;
@@ -638,7 +638,7 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		bitbang_data = memdup_user((void __user *)bitbang.data,
 					   data_size);
 		if (IS_ERR(bitbang_data))
-			return -EFAULT;
+			return PTR_ERR(bitbang_data);
 
 		dev_dbg(priv->miscdev.parent, "JTAG_IOCBITBANG: len %u",
 			bitbang.length);
@@ -728,7 +728,7 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		data_size = DIV_ROUND_UP(xfer.length, BITS_PER_BYTE);
 		xfer_data = memdup_user((void __user *)xfer.tdio, data_size);
 		if (IS_ERR(xfer_data))
-			return -EFAULT;
+			return PTR_ERR(xfer_data);
 
 		print_size = data_size > 128 ? 128 : data_size;
 		print_hex_dump_debug("I:", DUMP_PREFIX_NONE, 16, 1, xfer_data,
@@ -922,9 +922,9 @@ static void npcm_jtm_remove(struct platform_device *pdev)
 		return;
 
 	misc_deregister(&jtag->miscdev);
+	ida_free(&jtag_ida, jtag->id);
 	kfree(jtag->miscdev.name);
 	kfree(jtag);
-	ida_free(&jtag_ida, jtag->id);
 }
 
 static const struct of_device_id npcm_jtm_id[] = {
