@@ -177,6 +177,10 @@
 #define I3C_HUB_DT_LDO_1_8V				0x04
 #define I3C_HUB_DT_LDO_NOT_DEFINED			0xFF
 
+/* VIO Source settings */
+#define I3C_HUB_DT_VIO_SOURCE_INTERNAL			0x00
+#define I3C_HUB_DT_VIO_SOURCE_EXTERNAL			0x01
+
 /* Pull-up DT settings */
 #define I3C_HUB_DT_PULLUP_DISABLED			0x00
 #define I3C_HUB_DT_PULLUP_250R				0x01
@@ -245,6 +249,10 @@ struct dt_settings {
 	u8 cp1_ldo;
 	u8 tp0145_ldo;
 	u8 tp2367_ldo;
+	u8 cp0_vio_source;
+	u8 cp1_vio_source;
+	u8 tp0145_vio_source;
+	u8 tp2367_vio_source;
 	u8 tp0145_pullup;
 	u8 tp2367_pullup;
 	u8 cp0_io_strength;
@@ -327,6 +335,11 @@ static const struct hub_setting ldo_settings[] = {
 	{"1.1V",	I3C_HUB_DT_LDO_1_1V},
 	{"1.2V",	I3C_HUB_DT_LDO_1_2V},
 	{"1.8V",	I3C_HUB_DT_LDO_1_8V},
+};
+
+static const struct hub_setting vio_source_settings[] = {
+	{"internal",	I3C_HUB_DT_VIO_SOURCE_INTERNAL},
+	{"external",	I3C_HUB_DT_VIO_SOURCE_EXTERNAL},
 };
 
 static const struct hub_setting pullup_settings[] = {
@@ -515,6 +528,15 @@ static void i3c_hub_of_get_configuration(struct device *dev, const struct device
 	if (ret)
 		dev_warn(dev, "Invalid or not specified setting for tp2367-pullup\n");
 
+	i3c_hub_of_get_setting(node, "cp0-vio-source", vio_source_settings,
+			       ARRAY_SIZE(vio_source_settings), &priv->settings.cp0_vio_source);
+	i3c_hub_of_get_setting(node, "cp1-vio-source", vio_source_settings,
+			       ARRAY_SIZE(vio_source_settings), &priv->settings.cp1_vio_source);
+	i3c_hub_of_get_setting(node, "tp0145-vio-source", vio_source_settings,
+			       ARRAY_SIZE(vio_source_settings), &priv->settings.tp0145_vio_source);
+	i3c_hub_of_get_setting(node, "tp2367-vio-source", vio_source_settings,
+			       ARRAY_SIZE(vio_source_settings), &priv->settings.tp2367_vio_source);
+
 	i3c_hub_of_get_setting(node, "cp0-io-strength", io_strength_settings,
 			       ARRAY_SIZE(io_strength_settings), &priv->settings.cp0_io_strength);
 	i3c_hub_of_get_setting(node, "cp1-io-strength", io_strength_settings,
@@ -536,6 +558,10 @@ static void i3c_hub_of_default_configuration(struct device *dev)
 	priv->settings.cp1_ldo = I3C_HUB_DT_LDO_NOT_DEFINED;
 	priv->settings.tp0145_ldo = I3C_HUB_DT_LDO_NOT_DEFINED;
 	priv->settings.tp2367_ldo = I3C_HUB_DT_LDO_NOT_DEFINED;
+	priv->settings.cp0_vio_source = I3C_HUB_DT_VIO_SOURCE_INTERNAL;
+	priv->settings.cp1_vio_source = I3C_HUB_DT_VIO_SOURCE_INTERNAL;
+	priv->settings.tp0145_vio_source = I3C_HUB_DT_VIO_SOURCE_INTERNAL;
+	priv->settings.tp2367_vio_source = I3C_HUB_DT_VIO_SOURCE_INTERNAL;
 	priv->settings.tp0145_pullup = I3C_HUB_DT_PULLUP_NOT_DEFINED;
 	priv->settings.tp2367_pullup = I3C_HUB_DT_PULLUP_NOT_DEFINED;
 	priv->settings.cp0_io_strength = I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED;
@@ -616,6 +642,24 @@ static int i3c_hub_hw_configure_ldo(struct device *dev)
 			ldo_en |= TP2367_LDO_EN;
 		mask_all |= TP2367_LDO_VOLTAGE_MASK;
 		val_all |= val;
+	}
+
+	/* Disalbe LDO if using external LDO */
+	if (priv->settings.cp0_vio_source == I3C_HUB_DT_VIO_SOURCE_EXTERNAL) {
+		ldo_dis |= CP0_LDO_EN;
+		ldo_en &= ~CP0_LDO_EN;
+	}
+	if (priv->settings.cp1_vio_source == I3C_HUB_DT_VIO_SOURCE_EXTERNAL) {
+		ldo_dis |= CP1_LDO_EN;
+		ldo_en &= ~CP1_LDO_EN;
+	}
+	if (priv->settings.tp0145_vio_source == I3C_HUB_DT_VIO_SOURCE_EXTERNAL) {
+		ldo_dis |= TP0145_LDO_EN;
+		ldo_en &= ~TP0145_LDO_EN;
+	}
+	if (priv->settings.tp2367_vio_source == I3C_HUB_DT_VIO_SOURCE_EXTERNAL) {
+		ldo_dis |= TP2367_LDO_EN;
+		ldo_en &= ~TP2367_LDO_EN;
 	}
 
 	/* Disable all LDOs if LDO configuration is going to be changed. */
