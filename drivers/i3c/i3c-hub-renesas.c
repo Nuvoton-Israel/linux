@@ -977,6 +977,7 @@ static int i3c_hub_port_init_smbus_agent(struct i3c_hub *hub,
 					 unsigned int port_nr)
 {
 	struct i3c_hub_smbus_agent *agent;
+	int id = -ENODEV;
 	u32 val;
 	int ret;
 
@@ -1048,7 +1049,13 @@ static int i3c_hub_port_init_smbus_agent(struct i3c_hub *hub,
 	port->agent = agent;
 	ret = regmap_set_bits(hub->regmap, HUB_REG_TP_IBI_CONF, agent->port_mask);
 
-	ret = i2c_add_adapter(&agent->i2c);
+	id = of_alias_get_id(agent->port->of_node, "i2c");;
+	if (id >= 0) {
+		agent->i2c.nr = id;
+		ret = i2c_add_numbered_adapter(&agent->i2c);
+	} else {
+		ret = i2c_add_adapter(&agent->i2c);
+	}
 	if (ret)
 		devm_kfree(&hub->i3cdev->dev, agent);
 
@@ -2421,6 +2428,9 @@ static void i3c_hub_remove(struct i3c_device *i3cdev)
 	debugfs_remove_recursive(hub->debug_dir);
 
 	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
+		if (hub->ports[i].agent)
+			i2c_del_adapter(&hub->ports[i].agent->i2c);
+
 		if (hub->ports[i].bridge)
 			i3c_master_unregister(&hub->ports[i].bridge->i3c);
 	}
