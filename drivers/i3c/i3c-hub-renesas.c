@@ -2373,6 +2373,14 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 
 	i3c_hub_populate_target_ports(hub);
 
+	if (hub->of_node && of_property_read_bool(hub->of_node, "smbus-timeout-disable")) {
+		ret = regmap_set_bits(hub->regmap, HUB_REG_ONCHIP_TD_AND_SMBUS_AGNT_CONF, 0x8);
+		if (ret)
+			dev_err(dev, "Failed to disable SMBus timeout (reg 0x6C).\n");
+		else
+			dev_dbg(dev, "SMBus timeout disabled via DTS property.\n");
+	}
+
 	i3c_hub_protect_register(hub);
 
 #ifndef CONFIG_I3C_HUB_POLLING_MODE
