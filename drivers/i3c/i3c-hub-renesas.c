@@ -1437,6 +1437,8 @@ static int i3c_hub_port_init_i3c_bridge(struct i3c_hub *hub,
 		return ret;
 	}
 
+	i3c_master_do_setdasa(hub->driving_master);
+
 	ret = i3c_master_do_daa(hub->driving_master);
 	if (ret)
 		dev_warn(&hub->i3cdev->dev, "Failed to run DAA - port:%i\n", port->port_nr);
