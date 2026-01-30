@@ -5,4 +5,5 @@ obj-$(CONFIG_I3CDEV)		+= i3cdev.o
 obj-$(CONFIG_I3C)		+= master/
 obj-$(CONFIG_I3C)		+= mctp/
 obj-$(CONFIG_I3C_HUB)		+= i3c-hub.o
+obj-$(CONFIG_I3C_HUB_RENESAS)	+= i3c-hub-renesas.o
 obj-$(CONFIG_I3C_NPCM_BIC)	+= i3c-npcm-bic.o
