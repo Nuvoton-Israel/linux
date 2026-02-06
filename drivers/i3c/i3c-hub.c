@@ -1762,7 +1762,7 @@ static void i3c_hub_notify_bus_remove(struct i3c_bus *bus)
 
 	mutex_lock(&hubdevs_lock);
 	list_for_each_entry_safe(hub, tmp, &hubdevs, list) {
-		if (hub->ibi_enabled) {
+		if (hub->i3cdev->bus == bus && hub->ibi_enabled) {
 			i3c_device_disable_ibi(hub->i3cdev);
 			desc = hub->i3cdev->desc;
 			if (desc && desc->ibi)
