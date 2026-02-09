@@ -27,6 +27,10 @@ static int i2c_mux_npcm_select(struct i2c_mux_core *muxc, u32 chan)
 	struct i2c_mux_npcm *mux = i2c_mux_priv(muxc);
 	u32 smbxss = 0;
 
+	if (chan >= MAX_MUX_NUMBER) {
+		dev_err(muxc->dev, "Channel index out of bounds: %u\n", chan);
+		return -EINVAL;
+	}
 	/* Adding WENxSS */
 	if (mux->i2c_number < 6)
 		smbxss = BIT(mux->i2c_number + 12) | 
@@ -92,13 +96,15 @@ static int i2c_mux_npcm_probe(struct platform_device *pdev)
 	mux->gcr_regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "syscon");
 	if (IS_ERR(mux->gcr_regmap)) {
 		dev_err(&pdev->dev, "Failed to find syscon\n");
-		return PTR_ERR(mux->gcr_regmap);
+		ret = PTR_ERR(mux->gcr_regmap);
+		goto err_put_parent;
 	}
 
 	if (of_property_read_u32(pdev->dev.of_node, "nuvoton,i2c-number",
 				  &mux->i2c_number)) {
 		dev_err(&pdev->dev, "nuvoton,i2c-number not found");
-		return -ENODEV;
+		ret =  -ENODEV;
+		goto err_put_parent;
 	}
 
 	platform_set_drvdata(pdev, muxc);
@@ -113,8 +119,7 @@ static int i2c_mux_npcm_probe(struct platform_device *pdev)
 	}
 
 	muxc->mux_locked = true;
-	if (muxc->mux_locked)
-		dev_info(dev, "mux-locked i2c mux\n");
+	dev_info(dev, "mux-locked i2c mux\n");
 
 	/* Do not add any adapter for the idle state (if it's there at all). */
 	for (i = 0; i < num_segments - !!muxc->deselect; i++) {
