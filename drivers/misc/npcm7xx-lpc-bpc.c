@@ -55,8 +55,11 @@ struct npcm7xx_bpc_channel {
 
 struct npcm7xx_bpc {
 	void __iomem			*base;
+	struct device			*dev;
 	int				irq;
 	bool				en_dwcap;
+	int				dwcnt;
+	u8				data[4];
 	struct npcm7xx_bpc_channel	ch[NUM_BPC_CHANNELS];
 };
 
@@ -121,13 +124,10 @@ static const struct file_operations npcm7xx_bpc_fops = {
 static irqreturn_t npcm7xx_bpc_irq(int irq, void *arg)
 {
 	struct npcm7xx_bpc *lpc_bpc = arg;
-	u8 fifo_st;
-	u8 host_st;
-	u8 addr_index = 0;
-	u8 Data;
-	u8 padzero[3] = {0};
-	u8 code_size = 0;
+	u8 fifo_st, host_st, data;
 	bool isr_flag = false;
+	u8 padzero[3] = {0};
+	u8 addr_index = 0;
 
 	fifo_st = ioread8(lpc_bpc->base + NPCM7XX_BPCFSTAT_REG);
 	while (FIFO_DATA_VALID & fifo_st) {
@@ -135,31 +135,48 @@ static irqreturn_t npcm7xx_bpc_irq(int irq, void *arg)
 		if (!lpc_bpc->en_dwcap)
 			addr_index = fifo_st & FIFO_ADDR_DECODE;
 		else
-			code_size++;
+			addr_index = 0;
 
-		/*Read data from FIFO to clear interrupt*/
-		Data = ioread8(lpc_bpc->base + NPCM7XX_BPCFDATA_REG);
-		if (kfifo_is_full(&lpc_bpc->ch[addr_index].fifo))
-			kfifo_skip(&lpc_bpc->ch[addr_index].fifo);
-		kfifo_put(&lpc_bpc->ch[addr_index].fifo, Data);
+		if (lpc_bpc->dwcnt && lpc_bpc->en_dwcap && (fifo_st & FIFO_ADDR_DECODE)){
+			if (lpc_bpc->dwcnt == 4) {
+				while (kfifo_avail(&lpc_bpc->ch[addr_index].fifo) < 4)
+					kfifo_skip(&lpc_bpc->ch[addr_index].fifo);
+				kfifo_in(&lpc_bpc->ch[addr_index].fifo, lpc_bpc->data, lpc_bpc->dwcnt);
+				lpc_bpc->dwcnt = 0;
+				isr_flag = true;
+			} else if(lpc_bpc->dwcnt) {
+				while (kfifo_avail(&lpc_bpc->ch[addr_index].fifo) < 4)
+					kfifo_skip(&lpc_bpc->ch[addr_index].fifo);
+				kfifo_in(&lpc_bpc->ch[addr_index].fifo, lpc_bpc->data, lpc_bpc->dwcnt);
+				kfifo_in(&lpc_bpc->ch[addr_index].fifo, padzero, 4 - lpc_bpc->dwcnt);
+				lpc_bpc->dwcnt = 0;
+				isr_flag = true;
+			}
+		}
+
+		/* Read data from FIFO to clear interrupt */
+		data = ioread8(lpc_bpc->base + NPCM7XX_BPCFDATA_REG);
+		if (lpc_bpc->en_dwcap){
+			lpc_bpc->data[lpc_bpc->dwcnt] = data;
+			lpc_bpc->dwcnt++;
+			if (lpc_bpc->dwcnt == 4) {
+				while (kfifo_avail(&lpc_bpc->ch[addr_index].fifo) < 4)
+					kfifo_skip(&lpc_bpc->ch[addr_index].fifo);
+				kfifo_in(&lpc_bpc->ch[addr_index].fifo, lpc_bpc->data, lpc_bpc->dwcnt);
+				lpc_bpc->dwcnt = 0;
+				isr_flag = true;
+			}
+		} else {
+			if (kfifo_is_full(&lpc_bpc->ch[addr_index].fifo))
+				kfifo_skip(&lpc_bpc->ch[addr_index].fifo);
+			kfifo_put(&lpc_bpc->ch[addr_index].fifo, data);
+			isr_flag = true;
+		}
+
 		if (fifo_st & FIFO_OVERFLOW)
-			pr_warn_ratelimited("BIOS Post Codes FIFO Overflow!!!\n");
+			dev_warn(lpc_bpc->dev, "BIOS Post Codes FIFO Overflow\n");
 
 		fifo_st = ioread8(lpc_bpc->base + NPCM7XX_BPCFSTAT_REG);
-		if (lpc_bpc->en_dwcap) {
-			if ((fifo_st & FIFO_ADDR_DECODE) ||
-			    ((FIFO_DATA_VALID & fifo_st) == 0)) {
-				while (kfifo_avail(&lpc_bpc->ch[addr_index].fifo) < (4 - code_size))
-					kfifo_skip(&lpc_bpc->ch[addr_index].fifo);
-				if (4 - code_size > 0) {
-					kfifo_in(&lpc_bpc->ch[addr_index].fifo,
-						 padzero, 4 - code_size);
-				}
-			}
-			if (code_size == 4)
-				code_size = 0;
-		}
-		isr_flag = true;
 	}
 
 	host_st = ioread8(lpc_bpc->base + NPCM7XX_BPCFMSTAT_REG);
@@ -329,6 +346,8 @@ static int npcm7xx_bpc_probe(struct platform_device *pdev)
 	lpc_bpc->en_dwcap =
 		of_property_read_bool(dev->of_node, "bpc-en-dwcapture");
 
+	lpc_bpc->dev = dev;
+	lpc_bpc->dwcnt = 0;
 	rc = npcm7xx_bpc_config_irq(lpc_bpc, pdev);
 	if (rc)
 		return rc;
