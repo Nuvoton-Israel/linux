@@ -1435,86 +1435,6 @@ static const struct i3c_ibi_setup i3c_hub_ibi_setup = {
 	.handler = i3c_hub_ibi,
 };
 
-static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
-{
-	struct device *dev = &hub->i3cdev->dev;
-	struct i2c_adapter *adap;
-	int ret, id = -ENODEV;
-	int i = port;
-
-	init_completion(&hub->agents[i].completion);
-	/* Disconnect slave port from hub network */
-	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_NET_CON_CONF, BIT(i), 0);
-	if (ret)
-		return ret;
-
-	/* Unlock access to protected registers */
-	ret = regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_UNLOCK_CODE);
-	if (ret) {
-		dev_err(dev, "Failed to unlock HUB's protected registers\n");
-		return ret;
-	}
-	/* Clear Agent flags */
-	ret = regmap_write(hub->regmap, HUB_REG_TP_SMBUS_AGNT_STS(i), 0x0F);
-	if (ret)
-		return ret;
-
-	/* Enable agent IBI */
-	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i), BIT(i));
-	if (ret)
-		return ret;
-
-	INIT_LIST_HEAD(&hub->agents[i].devs);
-	hub->agents[i].hub = hub;
-	hub->agents[i].port_id = i;
-	adap = &hub->agents[i].adap;
-	adap->dev.parent = dev->parent;
-	adap->owner = THIS_MODULE;
-	adap->algo = &i3c_hub_i2c_algo;
-	adap->algo_data = &hub->agents[i];
-	adap->timeout = 1000;
-	adap->retries = 3;
-	snprintf(adap->name, sizeof(adap->name), "i3c-hub-port%d", i);
-
-	i2c_set_adapdata(adap, &hub->agents[i]);
-	id = of_alias_get_id(hub->child_nodes[i], "i2c");
-	if (id >= 0) {
-		adap->nr = id;
-		ret = i2c_add_numbered_adapter(adap);
-	} else {
-		ret = i2c_add_adapter(adap);
-	}
-	if (ret < 0) {
-		dev_err(dev, "failed to add i2c-adapter %u (error=%d)\n", i, ret);
-		regmap_update_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i), 0);
-	}
-
-	ret = regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
-	if (ret)
-		dev_err(dev, "Failed to lock HUB's protected registers\n");
-
-	return ret;
-}
-
-static void i3c_hub_del_smbus_adapter(struct i3c_hub *hub)
-{
-	struct smbus_device *dev;
-	bool use_ibi = false;
-	int i;
-
-	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
-		if (hub->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_SMBUS)
-			continue;
-
-		list_for_each_entry(dev, &hub->agents[i].devs, list) {
-			i2c_unregister_device(dev->client);
-			kfree(dev);
-		}
-		i2c_del_adapter(&hub->agents[i].adap);
-		use_ibi = true;
-	}
-}
-
 static int i3c_hub_register_i2c_devices(struct i3c_hub *hub, int port)
 {
 	struct i2c_adapter *adap;
@@ -1547,6 +1467,118 @@ static int i3c_hub_register_i2c_devices(struct i3c_hub *hub, int port)
 	return 0;
 }
 
+static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
+{
+	struct device *dev = &hub->i3cdev->dev;
+	struct i3c_device *i3cdev = hub->i3cdev;
+	struct i2c_adapter *adap;
+	int ret, id = -ENODEV;
+	int i = port;
+
+	/* Disconnect slave port from hub network */
+	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_NET_CON_CONF, BIT(i), 0);
+	if (ret)
+		return ret;
+
+	/* Unlock access to protected registers */
+	ret = regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_UNLOCK_CODE);
+	if (ret) {
+		dev_err(dev, "Failed to unlock HUB's protected registers\n");
+		return ret;
+	}
+	/* Disable TP */
+	ret = regmap_clear_bits(hub->regmap, I3C_HUB_TP_ENABLE, BIT(i));
+	if (ret)
+		return ret;
+
+	/* Clear Agent flags */
+	ret = regmap_write(hub->regmap, HUB_REG_TP_SMBUS_AGNT_STS(i), 0x0F);
+	if (ret)
+		return ret;
+
+	/* Set OD-Only */
+	ret = regmap_set_bits(hub->regmap, I3C_HUB_TP_IO_MODE_CONF, BIT(i));
+	if (ret)
+		return ret;
+	/* Enable agent IBI */
+	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i), BIT(i));
+	if (ret)
+		return ret;
+
+	/* Enable TP */
+	ret = regmap_set_bits(hub->regmap, I3C_HUB_TP_ENABLE, BIT(i));
+	if (ret)
+		return ret;
+
+	init_completion(&hub->agents[i].completion);
+	INIT_LIST_HEAD(&hub->agents[i].devs);
+	hub->agents[i].hub = hub;
+	hub->agents[i].port_id = i;
+	adap = &hub->agents[i].adap;
+	adap->dev.parent = dev->parent;
+	adap->owner = THIS_MODULE;
+	adap->algo = &i3c_hub_i2c_algo;
+	adap->algo_data = &hub->agents[i];
+	adap->timeout = 1000;
+	adap->retries = 3;
+	snprintf(adap->name, sizeof(adap->name), "i3c-hub-port%d", i);
+
+	i2c_set_adapdata(adap, &hub->agents[i]);
+	id = of_alias_get_id(hub->child_nodes[i], "i2c");
+	if (id >= 0) {
+		adap->nr = id;
+		ret = i2c_add_numbered_adapter(adap);
+	} else {
+		ret = i2c_add_adapter(adap);
+	}
+	if (ret < 0) {
+		dev_err(dev, "failed to add i2c-adapter %u (error=%d)\n", i, ret);
+		regmap_update_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i), 0);
+	}
+
+	ret = regmap_write(hub->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
+	if (ret)
+		dev_err(dev, "Failed to lock HUB's protected registers\n");
+
+	if (!hub->ibi_enabled) {
+		ret = i3c_device_request_ibi(i3cdev, &i3c_hub_ibi_setup);
+		if (ret) {
+			dev_err(&i3cdev->dev, "Failed requesting IBI\n");
+			return ret;
+		}
+		ret = i3c_device_enable_ibi(i3cdev);
+		if (ret) {
+			i3c_device_free_ibi(i3cdev);
+			dev_err(&i3cdev->dev, "Failed enabling IBI\n");
+			return ret;
+		}
+		hub->ibi_enabled = true;
+	}
+
+	i3c_hub_register_i2c_devices(hub, port);
+
+	return ret;
+}
+
+static void i3c_hub_del_smbus_adapter(struct i3c_hub *hub)
+{
+	struct smbus_device *dev;
+	bool use_ibi = false;
+	int i;
+
+	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
+		if (hub->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_SMBUS)
+			continue;
+
+		list_for_each_entry(dev, &hub->agents[i].devs, list) {
+			i2c_unregister_device(dev->client);
+			kfree(dev);
+		}
+		i2c_del_adapter(&hub->agents[i].adap);
+		use_ibi = true;
+	}
+}
+
 static void i3c_hub_init_gpio(struct i3c_hub *hub, int port)
 {
 	struct device_node *tp_node = hub->child_nodes[port];
@@ -1568,34 +1600,14 @@ static void i3c_hub_init_gpio(struct i3c_hub *hub, int port)
 
 static int i3c_hub_setup_child_nodes(struct i3c_hub *hub)
 {
-	struct i3c_device *i3cdev = hub->i3cdev;
-	bool enable_ibi = false;
-	int ret, i;
+	int i;
 
 	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
 		if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS) {
-			if (!i3c_hub_add_smbus_adapter(hub, i)) {
-				enable_ibi = true;
-				i3c_hub_register_i2c_devices(hub, i);
-			}
+			i3c_hub_add_smbus_adapter(hub, i);
 		} else if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_GPIO) {
 			i3c_hub_init_gpio(hub, i);
 		}
-	}
-
-	if (enable_ibi) {
-		ret = i3c_device_request_ibi(i3cdev, &i3c_hub_ibi_setup);
-		if (ret) {
-			dev_err(&i3cdev->dev, "Failed requesting IBI\n");
-			return ret;
-		}
-		ret = i3c_device_enable_ibi(i3cdev);
-		if (ret) {
-			i3c_device_free_ibi(i3cdev);
-			dev_err(&i3cdev->dev, "Failed enabling IBI\n");
-			return ret;
-		}
-		hub->ibi_enabled = true;
 	}
 
 	return 0;
