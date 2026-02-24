@@ -318,6 +318,11 @@ struct i3c_hub {
 	struct list_head list;
 
 	bool ibi_enabled;
+	unsigned int cur_page;
+	/* protects page access */
+	struct mutex lock;
+	/* Sequential execution of IBI handler*/
+	struct mutex ibi_lock;
 };
 
 /* List of i3c_hub devices */
@@ -1024,6 +1029,50 @@ static int i3c_hub_connect_tp(struct device *dev)
 	return regmap_clear_bits(priv->regmap, I3C_HUB_TP_NET_CON_CONF, tp_dis_val);
 }
 
+static int i3c_hub_write_paged(struct i3c_hub *hub, unsigned int page,
+			       unsigned int addr, const void *data, size_t size)
+{
+	int ret;
+
+	mutex_lock(&hub->lock);
+
+	if (hub->cur_page != page) {
+		ret = regmap_write(hub->regmap, I3C_HUB_PAGE_PTR, page);
+		if (ret)
+			goto exit_unlock;
+		hub->cur_page = page;
+	}
+
+	ret = regmap_bulk_write(hub->regmap, 128 + addr, data, size);
+
+exit_unlock:
+	mutex_unlock(&hub->lock);
+
+	return ret;
+}
+
+static int i3c_hub_read_paged(struct i3c_hub *hub, unsigned int page,
+			      unsigned int addr, void *data, size_t size)
+{
+	int ret;
+
+	mutex_lock(&hub->lock);
+
+	if (hub->cur_page != page) {
+		ret = regmap_write(hub->regmap, I3C_HUB_PAGE_PTR, page);
+		if (ret)
+			goto exit_unlock;
+		hub->cur_page = page;
+	}
+
+	ret = regmap_bulk_read(hub->regmap, 128 + addr, data, size);
+
+exit_unlock:
+	mutex_unlock(&hub->lock);
+
+	return ret;
+}
+
 #if IS_ENABLED(CONFIG_I2C_SLAVE)
 static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
 {
@@ -1038,16 +1087,13 @@ static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
 
 	/* Switch to RX BUF page */
 	page = HUB_PAGE_AGENT_RX_BUF(agent->port_id, buf_idx);
-	ret = regmap_write(hub->regmap, I3C_HUB_PAGE_PTR, page);
-	if (ret)
-		goto ack;
 
 	/* We need the length to figure out the size of our read. But we also
 	 * read the first byte of i2c data in the same read; the hardware has
 	 * no facility for filtering on incoming local addresses, so we have a
 	 * fast-path to aborting the transaction if it's not targeted to us.
 	 */
-	ret = regmap_bulk_read(hub->regmap, 0x80, &hdr, sizeof(hdr));
+	ret = i3c_hub_read_paged(hub, page, 0, &hdr, sizeof(hdr));
 	if (ret)
 		goto ack;
 
@@ -1066,7 +1112,7 @@ static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
 		goto ack;
 
 	memset(agent->target_rx_buf, 0, sizeof(agent->target_rx_buf));
-	ret = regmap_bulk_read(hub->regmap, 0x82, agent->target_rx_buf, len - 1);
+	ret = i3c_hub_read_paged(hub, page, 2, agent->target_rx_buf, len - 1);
 	if (ret)
 		goto ack;
 
@@ -1083,9 +1129,6 @@ static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
 	}
 
 stop:
-	/* Switch to page 0 */
-	regmap_write(hub->regmap, I3C_HUB_PAGE_PTR, 0x00);
-
 	tmp = 0;
 	i2c_slave_event(agent->client, I2C_SLAVE_STOP, &tmp);
 
@@ -1159,38 +1202,6 @@ static void i3c_hub_agent_ibi(struct smbus_agent *agent)
 #endif
 }
 
-static int i3c_hub_disable_agent_ibi(struct i3c_hub *hub)
-{
-	int ret = 0;
-
-#ifndef CONFIG_I3C_HUB_POLLING_MODE
-	struct i3c_master_controller *master = hub->i3cdev->desc->common.master;
-
-	i3c_bus_normaluse_lock(&master->bus);
-	ret = i3c_master_disec_locked(master,
-				      hub->i3cdev->desc->info.dyn_addr,
-				      I3C_CCC_EVENT_SIR);
-	i3c_bus_normaluse_unlock(&master->bus);
-#endif
-	return ret;
-}
-
-static int i3c_hub_enable_agent_ibi(struct i3c_hub *hub)
-{
-	int ret = 0;
-
-#ifndef CONFIG_I3C_HUB_POLLING_MODE
-	struct i3c_master_controller *master = hub->i3cdev->desc->common.master;
-
-	i3c_bus_normaluse_lock(&master->bus);
-	ret = i3c_master_enec_locked(master,
-				     hub->i3cdev->desc->info.dyn_addr,
-				     I3C_CCC_EVENT_SIR);
-	i3c_bus_normaluse_unlock(&master->bus);
-#endif
-	return ret;
-}
-
 static void i3c_hub_ibi(struct i3c_device *i3c,
 			const struct i3c_ibi_payload *payload)
 {
@@ -1198,7 +1209,7 @@ static void i3c_hub_ibi(struct i3c_device *i3c,
 	const struct i3c_hub_ibi_payload *p = NULL;
 	int i;
 
-	i3c_hub_disable_agent_ibi(hub);
+	mutex_lock(&hub->ibi_lock);
 
 	if (payload->len == sizeof(*p))
 		p = payload->data;
@@ -1222,7 +1233,7 @@ static void i3c_hub_ibi(struct i3c_device *i3c,
 		}
 	}
 exit:
-	i3c_hub_enable_agent_ibi(hub);
+	mutex_unlock(&hub->ibi_lock);
 }
 
 static int i3c_hub_reset_smbus_agent(struct smbus_agent *agent)
@@ -1258,7 +1269,7 @@ static int i3c_hub_smbus_xfer_one(struct i2c_adapter *adap, struct i2c_msg *wr_m
 				  struct i2c_msg *rd_msg)
 {
 	struct smbus_agent *agent = adap->algo_data;
-	struct i3c_hub *priv = agent->hub;
+	struct i3c_hub *hub = agent->hub;
 	int port_id = agent->port_id;
 	int ret;
 
@@ -1305,62 +1316,51 @@ static int i3c_hub_smbus_xfer_one(struct i2c_adapter *adap, struct i2c_msg *wr_m
 		return -EINVAL;
 	}
 
-	/* Switch to Bus Agent Data page */
-	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, page);
-	if (ret)
-		return ret;
-
 	/* Fill descriptor */
-	ret = regmap_bulk_write(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF,
-				desc, I3C_HUB_SMBUS_DESCRIPTOR_SIZE);
-	if (ret)
-		goto err_exit;
-
+	ret = i3c_hub_write_paged(hub, page, 0, desc, I3C_HUB_SMBUS_DESCRIPTOR_SIZE);
+	if (ret) {
+		dev_err(&adap->dev, "Write descriptor failed %d\n", ret);
+		return ret;
+	}
 	if (wr_msg && wr_len) {
 		/* Fill payload for write */
-		ret = regmap_bulk_write(priv->regmap,
-					I3C_HUB_CONTROLLER_AGENT_BUFF_DATA,
-					out, wr_len);
-		if (ret)
-			goto err_exit;
+		ret = i3c_hub_write_paged(hub, page, 4, out, wr_len);
+		if (ret) {
+			dev_err(&adap->dev, "write data failed %d\n", ret);
+			return ret;
+		}
 	}
 
 	reinit_completion(&agent->completion);
 	/* Clear master agent status */
-	regmap_write(priv->regmap, reg_status, I3C_HUB_SMBUS_MASTER_STATUS_MASK);
+	regmap_write(hub->regmap, reg_status, I3C_HUB_SMBUS_MASTER_STATUS_MASK);
 
 	/* Start the transaction */
-	ret = regmap_write(priv->regmap, I3C_HUB_TP_SMBUS_AGNT_TRANS_START, BIT(port_id));
+	ret = regmap_write(hub->regmap, I3C_HUB_TP_SMBUS_AGNT_TRANS_START, BIT(port_id));
 	if (ret)
-		goto err_exit;
+		return ret;
 
 	if (wait_for_completion_timeout(&agent->completion, agent->adap.timeout) < 0) {
 		dev_info(&adap->dev, "wait_for_complete timeout\n");
 		i3c_hub_reset_smbus_agent(agent);
 		ret = -ETIMEDOUT;
-		goto err_exit;
+		return ret;
 	}
 
 	if ((agent->tx_res & I3C_HUB_SMBUS_MASTER_STATUS_MASK) != I3C_HUB_XFER_SUCCESS) {
 		dev_dbg(&adap->dev, "TX error: status = 0x%x\n", agent->tx_res);
 		ret = -EIO;
-		goto err_exit;
+		return ret;
 	}
 
 	if (rd_msg) {
 		/* Read the data of read transaction */
-		ret = regmap_bulk_read(priv->regmap,
-				       I3C_HUB_CONTROLLER_AGENT_BUFF_DATA + wr_len,
-				       in, rd_len);
-		if (ret)
-			goto err_exit;
+		ret = i3c_hub_read_paged(hub, page, 4 + wr_len,
+					 in, rd_len);
 		/* Update the actual read length for smbus block read */
 		if (rd_msg->flags & I2C_M_RECV_LEN)
 			rd_msg->len = min_t(unsigned int, in[0], I2C_SMBUS_BLOCK_MAX) + 1;
 	}
-err_exit:
-	/* Restore page pointer */
-	regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
 
 	return ret;
 }
@@ -1667,6 +1667,8 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	}
 
 	priv->regmap = regmap;
+	mutex_init(&priv->lock);
+	mutex_init(&priv->ibi_lock);
 
 	ret = regmap_write(priv->regmap, I3C_HUB_CP_MUX_SET, BIT(0));
 	if (ret) {
