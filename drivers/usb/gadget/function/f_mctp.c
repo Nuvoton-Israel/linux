@@ -66,10 +66,33 @@ static struct usb_interface_descriptor mctp_usbg_intf = {
 
 /* descriptors, full speed only */
 
+static struct usb_endpoint_descriptor fs_mctp_source_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+
+	.bEndpointAddress =	USB_DIR_IN,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+};
+
+static struct usb_endpoint_descriptor fs_mctp_sink_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+
+	.bEndpointAddress =	USB_DIR_OUT,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+};
+
+static struct usb_descriptor_header *fs_mctp_descs[] = {
+	(struct usb_descriptor_header *) &mctp_usbg_intf,
+	(struct usb_descriptor_header *) &fs_mctp_sink_desc,
+	(struct usb_descriptor_header *) &fs_mctp_source_desc,
+	NULL,
+};
+
 static struct usb_endpoint_descriptor hs_mctp_source_desc = {
 	.bLength =		USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =	USB_DT_ENDPOINT,
-	.wMaxPacketSize =	cpu_to_le16(MCTP_USB_XFER_SIZE),
+	.wMaxPacketSize =	cpu_to_le16(512),
 
 	.bEndpointAddress =	USB_DIR_IN,
 	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
@@ -78,7 +101,7 @@ static struct usb_endpoint_descriptor hs_mctp_source_desc = {
 static struct usb_endpoint_descriptor hs_mctp_sink_desc = {
 	.bLength =		USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =	USB_DT_ENDPOINT,
-	.wMaxPacketSize =	cpu_to_le16(MCTP_USB_XFER_SIZE),
+	.wMaxPacketSize =	cpu_to_le16(512),
 
 	.bEndpointAddress =	USB_DIR_OUT,
 	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
@@ -124,19 +147,24 @@ static int mctp_usbg_bind(struct usb_configuration *c, struct usb_function *f)
 
 	mctp_usbg_strings[0].id = id;
 
-	mctp->in_ep = usb_ep_autoconfig(cdev->gadget, &hs_mctp_source_desc);
+	mctp->in_ep = usb_ep_autoconfig(cdev->gadget, &fs_mctp_source_desc);
 	if (!mctp->in_ep) {
 		ERROR(cdev, "%s in_ep autoconfig failed\n", f->name);
 		return -ENODEV;
 	}
 
-	mctp->out_ep = usb_ep_autoconfig(cdev->gadget, &hs_mctp_sink_desc);
+	mctp->out_ep = usb_ep_autoconfig(cdev->gadget, &fs_mctp_sink_desc);
 	if (!mctp->out_ep) {
 		ERROR(cdev, "%s out_ep autoconfig failed\n", f->name);
 		return -ENODEV;
 	}
 
-	rc = usb_assign_descriptors(f, NULL, hs_mctp_descs, NULL, NULL);
+	hs_mctp_source_desc.bEndpointAddress =
+		fs_mctp_source_desc.bEndpointAddress;
+	hs_mctp_sink_desc.bEndpointAddress =
+		fs_mctp_sink_desc.bEndpointAddress;
+
+	rc = usb_assign_descriptors(f, fs_mctp_descs, hs_mctp_descs, NULL, NULL);
 	if (rc) {
 		ERROR(cdev, "assign_descriptors failed %d\n", rc);
 		return rc;
