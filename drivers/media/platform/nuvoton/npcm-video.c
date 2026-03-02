@@ -170,7 +170,7 @@ static const struct npcm_fmt npcm_fmt_list[] = {
 #define NUM_FORMATS ARRAY_SIZE(npcm_fmt_list)
 
 struct res_tbl {
-	char *name;
+	const char *name;
 	unsigned int hdisp; /* displayed pixels (width) */
 	unsigned int vdisp; /* displayed lines (height) */
 };
@@ -748,7 +748,7 @@ static void npcm_video_adjust_dvodel(struct npcm_video *video)
 
 	if (detWidth < 1440) {
 		if ((hact == 0x88) && (detWidth == 1024) && (detHeight == 768) &&
-		    (detPixelclock == 65000)) {
+		    (detPixelclock == 65000000)) {
 			vdelay = npcm_video_vbp(video) + video->vdelay_add + 0x6;
 		} else if ((detWidth == 720) && (detHeight == 400)) {
 			vdelay = npcm_video_vbp(video) + video->vdelay_add + 0xa;
@@ -866,6 +866,9 @@ static void npcm_video_command(struct npcm_video *video, unsigned int value)
 		video->full_capture_cnt--;
 	}
 
+	reinit_completion(&video->irq_cmp);
+	cancel_work(&video->irq_timeout_work);
+
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 	regmap_read(vcd, VCD_CMD, &cmd);
 	cmd |= FIELD_PREP(VCD_CMD_OPERATION, value);
@@ -874,7 +877,6 @@ static void npcm_video_command(struct npcm_video *video, unsigned int value)
 	regmap_update_bits(vcd, VCD_CMD, VCD_CMD_GO, VCD_CMD_GO);
 	video->op_cmd = value;
 
-	reinit_completion(&video->irq_cmp);
 	schedule_work(&video->irq_timeout_work);
 }
 
@@ -1052,6 +1054,9 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 				}
 				if (valid_res)
 					break;
+
+				/* Add a delay to allow resolution to stabilize */
+				usleep_range(1000, 2000);
 			}
 		}
 
