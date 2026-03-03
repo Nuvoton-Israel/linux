@@ -894,7 +894,9 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct device *dev, struct i3
 			dev_dbg(dev, "DT %s selected (matched=%d)\n",
 				of_node_full_name(hub_node), matched);
 			id_matched = matched;
-			matched_node = hub_node;
+			if (matched_node)
+				of_node_put(matched_node);
+			matched_node = of_node_get(hub_node);
 		}
 	}
 
@@ -1694,7 +1696,6 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	} else {
 		dev_info(dev, "Use %s DT node\n", of_node_full_name(node));
 		i3c_hub_of_get_configuration(dev, node);
-		of_node_put(node);
 		priv->node = node;
 	}
 
@@ -1760,6 +1761,8 @@ static void i3c_hub_remove(struct i3c_device *i3cdev)
 	i3c_hub_del_smbus_adapter(priv);
 	debugfs_remove_recursive(priv->debug_dir);
 	sysfs_remove_file(&i3cdev->dev.kobj, &dev_attr_tp_connect.attr);
+	if (priv->node)
+		of_node_put(priv->node);
 }
 
 static struct i3c_driver i3c_hub = {
