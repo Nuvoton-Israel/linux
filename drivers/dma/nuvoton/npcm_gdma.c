@@ -174,6 +174,10 @@ static void npcm_gdma_issue_pending(struct dma_chan *chan)
 		writel(gdma_chan->cfg.src_addr, gdma->gdmac_reg + GDMA_SRCB(chan_id));
 		writel(gdma_desc->addr, gdma->gdmac_reg + GDMA_DSTB(chan_id));
 		ctl = GDMA_CTL_SAFIX;
+	} else {
+		/* Unsupported direction, return early */
+		spin_unlock_irqrestore(&gdma->lock, flags);
+		return;
 	}
 
 	/* Set transfer count */
