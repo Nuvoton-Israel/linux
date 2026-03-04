@@ -107,6 +107,9 @@
 #define I3C_HUB_DEV_AND_IBI_STS				0x20
 #define I3C_HUB_TP_SMBUS_AGNT_IBI_STS			0x21
 
+/* Use the Scratch register as SW-assigned ID */
+#define I3C_HUB_ID					0x30
+
 /* Controller Port Control/Status Registers */
 #define I3C_HUB_CP_MUX_SET				0x38
 #define I3C_HUB_CP_MUX_STS				0x39
@@ -839,7 +842,9 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct device *dev, struct i3
 	int id_matched = 0;
 	int hub_dt_sel_id;
 	int hub_dt_cp1_id;
+	int hub_dt_sw_id, sw_id = -1;
 	int matched;
+	int ret;
 
 	/*
 	 * HW ID definition:
@@ -885,6 +890,20 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct device *dev, struct i3
 			matched++;
 		}
 
+		/* Match optional "id-sw" property */
+		if (!of_property_read_u32(hub_node, "id-sw", &hub_dt_sw_id)) {
+			dev_dbg(dev, "DT node '%s': id-sw=%u\n",
+				of_node_full_name(hub_node), hub_dt_sw_id);
+
+			ret = regmap_read(priv->regmap, I3C_HUB_ID, &sw_id);
+			if (!ret)
+				dev_info(dev, "SW-assigned ID=%d\n", sw_id);
+
+			if (hub_dt_sw_id != sw_id)
+				continue;
+
+			matched++;
+		}
 		/*
 		 * Selection policy:
 		 * - Prefer more matches.
@@ -1437,6 +1456,29 @@ static const struct i3c_ibi_setup i3c_hub_ibi_setup = {
 	.handler = i3c_hub_ibi,
 };
 
+static int i3c_hub_smbus_write(struct i2c_adapter *i2c_adap, u8 addr, u8 reg, u8 val)
+{
+	struct i2c_msg xfer;
+	char buf[2];
+	int ret;
+
+	buf[0] = reg;
+	buf[1] = val;
+	xfer.addr = addr;
+	xfer.flags = 0;
+	xfer.len = 2;
+	xfer.buf = (void *)buf;
+	ret = i2c_transfer(i2c_adap, &xfer, 1);
+	dev_dbg(&i2c_adap->dev, "%s: addr 0x%x reg 0x%x val 0x%x ret %d\n",
+		__func__, addr, reg, val, ret);
+	if (ret == 1)
+		return 0;
+	else if (ret < 0)
+		return ret;
+	else
+		return -EIO;
+}
+
 static int i3c_hub_register_i2c_devices(struct i3c_hub *hub, int port)
 {
 	struct i2c_adapter *adap;
@@ -1448,7 +1490,24 @@ static int i3c_hub_register_i2c_devices(struct i3c_hub *hub, int port)
 	tp_node = hub->child_nodes[port];
 	adap = &hub->agents[port].adap;
 	for_each_child_of_node(tp_node, child) {
+		u32 assigned_id;
+
 		dev_dbg(&adap->dev, "of_i2c: register %pOF\n", child);
+
+		if (of_device_is_compatible(child, "i3c-hub") &&
+		    !of_property_read_u32(child, "assigned-id", &assigned_id)) {
+			u32 addr;
+
+			ret = of_property_read_u32(child, "reg", &addr);
+			if (ret) {
+				dev_warn(&adap->dev, "%pOF missing reg, skip assigned-id\n", child);
+				continue;
+			}
+
+			dev_info(&adap->dev, "assigned id %d to downstream hub\n", assigned_id);
+			i3c_hub_smbus_write(adap, addr & 0x7f, I3C_HUB_ID, assigned_id);
+			continue;
+		}
 
 		ret = of_i2c_get_board_info(&adap->dev, child, &info);
 		if (ret)
