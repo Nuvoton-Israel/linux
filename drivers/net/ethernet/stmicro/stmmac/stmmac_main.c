@@ -2730,8 +2730,11 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue,
 
 		status = stmmac_tx_status(priv,	&priv->xstats, p, priv->ioaddr);
 		/* Check if the descriptor is owned by the DMA */
-		if (unlikely(status & tx_dma_own))
+		if (unlikely(status & tx_dma_own)) {
+			if ((stmmac_status_dma(priv, priv->ioaddr, queue) & 0x600000) == 0x600000)
+				stmmac_enable_dma_transmission(priv, priv->ioaddr, queue);
 			break;
+		}
 
 		count++;
 
