@@ -329,6 +329,7 @@ struct i3c_hub_target_port {
 		PORT_MODE_DISABLED = 0,
 		PORT_MODE_I3C,
 		PORT_MODE_AGENT,
+		PORT_MODE_GPIO,
 	} mode;
 	struct device_node *of_node;
 	u32 port_nr;
@@ -1061,6 +1062,48 @@ static int i3c_hub_port_init_smbus_agent(struct i3c_hub *hub,
 
 	return ret;
 }
+
+static int i3c_hub_port_init_gpio(struct i3c_hub *hub, struct i3c_hub_target_port *port, unsigned int port_nr)
+{
+	int ret;
+	u32 scl, sda;
+
+	/* Set OD/PP compatible IO  mode */
+	ret = regmap_clear_bits(hub->regmap, HUB_REG_TP_IO_MODE_CONF, port->port_mask);
+	if (ret)
+		return -EIO;
+
+	/* Enable GPIO mode */
+	ret = regmap_set_bits(hub->regmap, HUB_REG_TP_GPIO_MODE_EN, port->port_mask);
+	if (ret)
+		return -EIO;
+
+	/* Enable target port */
+	ret = regmap_set_bits(hub->regmap, HUB_REG_TP_ENABLE, port->port_mask);
+	if (ret)
+		return -EIO;
+
+	if (port->of_node && !of_property_read_u32(port->of_node, "scl-output", &scl)) {
+		ret = regmap_update_bits(hub->regmap, HUB_REG_TP_SCL_OUT_LEVEL, port->port_mask, (scl << port_nr));
+		if (ret)
+			return -EIO;
+		ret = regmap_set_bits(hub->regmap, HUB_REG_TP_SCL_OUT_EN, port->port_mask);
+		if (ret)
+			return -EIO;
+	}
+
+	if (port->of_node && !of_property_read_u32(port->of_node, "sda-output", &sda)) {
+		ret = regmap_update_bits(hub->regmap, HUB_REG_TP_SDA_OUT_LEVEL, port->port_mask, (sda << port_nr));
+		if (ret)
+			return -EIO;
+		ret = regmap_set_bits(hub->regmap, HUB_REG_TP_SDA_OUT_EN, port->port_mask);
+		if (ret)
+			return -EIO;
+	}
+
+	return ret;
+}
+
 
 /* I3C Bridge */
 struct i3c_hub_bridge {
@@ -2160,6 +2203,9 @@ static int i3c_hub_port_init(struct i3c_hub *hub, u32 port_nr)
 		if (port->bridge)
 			ret = i3c_hub_bridge_disconnect(port->bridge);
 		break;
+	case PORT_MODE_GPIO:
+		ret = i3c_hub_port_init_gpio(hub, port, port_nr);
+		break;
 	default:
 		/* Disable the port*/
 		ret = i3c_hub_port_disable(hub, port_nr);
@@ -2184,6 +2230,8 @@ static void i3c_hub_populate_target_ports(struct i3c_hub *hub)
 			mode = PORT_MODE_AGENT;
 		else if (of_device_is_compatible(np, "i3c-hub-i3c"))
 			mode = PORT_MODE_I3C;
+		else if (of_device_is_compatible(np, "i3c-hub-gpio"))
+			mode = PORT_MODE_GPIO;
 		else
 			continue;
 
@@ -2299,11 +2347,23 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 
 	i3c_hub_unprotect_register(hub);
 
+	/* Initialize GPIO ports first to setup id-cp1 for downstram hub */
 	for (i = 0; i < hub->devinfo->n_ports; ++i) {
-		dev_info(dev, "Init target port[%d] ...\n", i);
-		ret = i3c_hub_port_init(hub, i);
-		if (ret)
-			dev_err(dev, "ports init failed\n");
+		if (hub->ports[i].mode == PORT_MODE_GPIO) {
+			dev_info(dev, "Init target port[%d] ...\n", i);
+			ret = i3c_hub_port_init(hub, i);
+			if (ret)
+				dev_err(dev, "ports init failed\n");
+		}
+	}
+
+	for (i = 0; i < hub->devinfo->n_ports; ++i) {
+		if (hub->ports[i].mode != PORT_MODE_GPIO) {
+			dev_info(dev, "Init target port[%d] ...\n", i);
+			ret = i3c_hub_port_init(hub, i);
+			if (ret)
+				dev_err(dev, "ports init failed\n");
+		}
 	}
 
 	for (i = 0; i < hub->devinfo->n_ports; ++i) {
