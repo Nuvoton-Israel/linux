@@ -2053,7 +2053,7 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct i3c_hub *hub)
 	struct device_node *node = hub->i3cdev->dev.parent->of_node;
 	struct device_node *matched_node = NULL;
 	int max_ids_matched;
-	struct device_node *hub_node, *from;
+	struct device_node *hub_node;
 	int node_ids_matched;
 	u8 dcr;
 	u32 id_csel, id_cp1, id_tpx;
@@ -2061,19 +2061,13 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct i3c_hub *hub)
 
 	max_ids_matched = 0;
 
-	hub_node = NULL;
-	from = node;
-	while (1) {
-		hub_node = of_find_node_by_name(from, "hub");
-		if (!hub_node)
-			break;
-		from = hub_node;
+	for_each_child_of_node(node, hub_node) {
+		if (!of_node_name_eq(hub_node, "hub"))
+			continue;
 
 		ret = of_property_read_u8(hub_node, "dcr", &dcr);
 		if (ret || dcr != I3C_DCR_HUB)
 			continue;
-
-		from = hub_node;
 
 		if (is_node_used(hub_node))
 			continue;
