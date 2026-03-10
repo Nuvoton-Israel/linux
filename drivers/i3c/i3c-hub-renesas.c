@@ -121,6 +121,9 @@
 #define HUB_REG_DEV_AND_PORT_IBI_STS		0x20
 #define HUB_REG_TP_SMBUS_AGNT_IBI_STS		0x21
 
+/* Use the Scratch register as SW-assigned ID */
+#define HUB_REG_SW_ID				0x30
+
 /* Controller Port Control/Status Registers */
 #define HUB_REG_CP_MUX_SET			0x38
 #define  CONTROLLER_PORT_MUX_REQ		BIT(0)
@@ -352,9 +355,11 @@ struct i3c_hub {
 	int hub_pin_sel_id;
 	int hub_pin_cp1_id;
 	int hub_pin_tpx_id;
+	int hub_reg_sw_id;
 	int hub_dt_sel_id;
 	int hub_dt_cp1_id;
 	int hub_dt_tpx_id;
+	int hub_dt_sw_id;
 
 	struct i3c_hub_cp_port cp_port;
 	struct i3c_hub_tp_group tp_groups[2];
@@ -1999,6 +2004,11 @@ static int i3c_hub_read_id(struct i3c_hub *hub)
 	hub->hub_pin_sel_id = CP_SEL_PIN_INPUT_CODE_GET(reg_val);
 	hub->hub_pin_cp1_id = CP_SDA1_SCL1_PINS_CODE_GET(reg_val);
 	hub->hub_pin_tpx_id = i3c_hub_read_identify_tp(hub);
+	ret = regmap_read(hub->regmap, HUB_REG_SW_ID, &reg_val);
+	if (ret)
+		return ret;
+	hub->hub_reg_sw_id = reg_val;
+
 	return 0;
 }
 
@@ -2056,7 +2066,7 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct i3c_hub *hub)
 	struct device_node *hub_node;
 	int node_ids_matched;
 	u8 dcr;
-	u32 id_csel, id_cp1, id_tpx;
+	u32 id_csel, id_cp1, id_tpx, id_sw;
 	int ret;
 
 	max_ids_matched = 0;
@@ -2085,6 +2095,10 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct i3c_hub *hub)
 		if (ret == 0 && id_tpx == (u32)hub->hub_pin_tpx_id)
 			node_ids_matched += 1;
 
+		ret = of_property_read_u32(hub_node, "id-sw", &id_sw);
+		if (ret == 0 && id_sw == (u32)hub->hub_reg_sw_id)
+			node_ids_matched += 1;
+
 		if (node_ids_matched > max_ids_matched) {
 			matched_node = hub_node;
 			max_ids_matched = node_ids_matched;
@@ -2105,10 +2119,12 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct i3c_hub *hub)
 	hub->hub_dt_cp1_id = ret == 0 ? id_cp1 : -1;
 	ret = of_property_read_u32(matched_node, "id-tpx", &id_tpx);
 	hub->hub_dt_tpx_id = ret == 0 ? id_tpx : -1;
+	ret = of_property_read_u32(matched_node, "id-sw", &id_sw);
+	hub->hub_dt_sw_id = ret == 0 ? id_sw : -1;
 
-	dev_info(&hub->i3cdev->dev, "Node matching:pin:<%d, %d, %d>, dt:<%d, %d, %d>\n",
-		 hub->hub_pin_sel_id, hub->hub_pin_cp1_id, hub->hub_pin_tpx_id,
-		 hub->hub_dt_sel_id, hub->hub_dt_cp1_id, hub->hub_dt_tpx_id);
+	dev_info(&hub->i3cdev->dev, "Node matching:pin:<%d, %d, %d, %d>, dt:<%d, %d, %d, %d>\n",
+		 hub->hub_pin_sel_id, hub->hub_pin_cp1_id, hub->hub_pin_tpx_id, hub->hub_reg_sw_id,
+		 hub->hub_dt_sel_id, hub->hub_dt_cp1_id, hub->hub_dt_tpx_id, hub->hub_dt_sw_id);
 	dev_info(&hub->i3cdev->dev, "Node matched:%s\n", matched_node->full_name);
 
 	return matched_node;
@@ -2501,6 +2517,50 @@ static struct i3c_driver i3c_hub = {
 };
 
 module_i3c_driver(i3c_hub);
+
+static int i3c_hub_i2c_probe(struct i2c_client *client)
+{
+	struct device *dev = &client->dev;
+	struct regmap *regmap;
+	u32 assigned_id;
+
+	if (!client->dev.of_node)
+		return 0;
+
+	if (of_property_read_u32(client->dev.of_node, "assigned-id", &assigned_id))
+		return 0;
+
+	regmap = devm_regmap_init_i2c(client, &i3c_hub_regmap_config);
+	if (IS_ERR(regmap))
+		return PTR_ERR(regmap);
+
+	dev_dbg(dev, "Assign ID %d to downstream hub\n", assigned_id);
+	return regmap_write(regmap, HUB_REG_SW_ID, assigned_id);
+}
+
+static const struct i2c_device_id i3c_hub_i2c_ids[] = {
+	{ "i3c-hub", 0 },
+	{ }
+};
+
+MODULE_DEVICE_TABLE(i2c, i3c_hub_i2c_ids);
+
+static const struct of_device_id i3c_hub_i2c_of_match[] = {
+	{ .compatible = "i3c-hub" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, mctp_i2c_of_match);
+
+static struct i2c_driver i3c_hub_i2c_driver = {
+	.driver = {
+		.name	= "i3c-hub-i2c",
+		.of_match_table = i3c_hub_i2c_of_match,
+	},
+	.probe_new = i3c_hub_i2c_probe,
+	.id_table = i3c_hub_i2c_ids,
+};
+
+module_i2c_driver(i3c_hub_i2c_driver);
 
 MODULE_AUTHOR("Zbigniew Lukwinski <zbigniew.lukwinski@linux.intel.com>");
 MODULE_AUTHOR("Steven Niu <steven.niu.uj@renesas.com>");
