@@ -25,6 +25,7 @@
 		udc5 = &udc5;
 		udc6 = &udc6;
 		udc7 = &udc7;
+		udc8 = &udc8;
 		fiu0 = &fiu0;
 		fiu1 = &fiu3;
 		fiu2 = &fiux;
@@ -284,10 +285,6 @@
 	status = "okay";
 };
 
-&ehci2 {
-	status = "okay";
-};
-
 &ohci1 {
         status = "okay";
 };
@@ -336,6 +333,10 @@
 };
 
 &udc7 {
+	status = "okay";
+};
+
+&udc8 {
 	status = "okay";
 };
 
