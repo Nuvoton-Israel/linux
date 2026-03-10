@@ -25,6 +25,7 @@
 		udc5 = &udc5;
 		udc6 = &udc6;
 		udc7 = &udc7;
+		udc8 = &udc8;
 		fiu0 = &fiu0;
 		fiu1 = &fiu3;
 		fiu2 = &fiux;
@@ -346,10 +347,6 @@
 	status = "okay";
 };
 
-&ehci2 {
-	status = "okay";
-};
-
 &ohci1 {
         status = "okay";
 };
@@ -405,13 +402,8 @@
 	status = "okay";
 };
 
-&gcr {
-	udc9_mux: mux-controller {
-		compatible = "mmio-mux";
-		#mux-control-cells = <1>;
-		mux-reg-masks = <0x9C 0x3000>;
-		idle-states = <0x3000>;
-	};
+&udc8 {
+	status = "okay";
 };
 
 &lpc_kcs {
