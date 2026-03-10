@@ -2401,13 +2401,6 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	mutex_init(&hub->lock);
 	mutex_init(&hub->ibi_lock);
 
-	/* Disable all slave ports */
-	i3c_hub_unprotect_register(hub);
-	ret = regmap_write(hub->regmap, HUB_REG_TP_ENABLE, 0x00);
-	if (ret)
-		return ret;
-	i3c_hub_protect_register(hub);
-
 	hub->driving_master = i3c_dev_get_master(i3cdev->desc);
 
 	ret = i3c_hub_read_id(hub);
