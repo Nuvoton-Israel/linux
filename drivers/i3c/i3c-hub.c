@@ -147,6 +147,7 @@
 #define I3C_HUB_TP6_SMBUS_AGNT_STS			0x6A
 #define I3C_HUB_TP7_SMBUS_AGNT_STS			0x6B
 #define I3C_HUB_ONCHIP_TD_AND_SMBUS_AGNT_CONF		0x6C
+#define SMBUS_TIMEOUT_DISABLE				BIT(3)
 
 #define HUB_REG_AGENT_CNTRL_STATUS_FINISH		1
 #define HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0		2
@@ -807,6 +808,12 @@ static int i3c_hub_configure_hw(struct device *dev)
 		ret = regmap_update_bits(priv->regmap, I3C_HUB_NET_OPER_MODE_CONF, ANALOG_SWITCH_EN, ANALOG_SWITCH_EN);
 		if (ret)
 			return ret;
+	}
+
+	if (priv->node && of_property_read_bool(priv->node, "smbus-timeout-disable")) {
+		if (regmap_update_bits(priv->regmap, I3C_HUB_ONCHIP_TD_AND_SMBUS_AGNT_CONF,
+				       SMBUS_TIMEOUT_DISABLE, SMBUS_TIMEOUT_DISABLE))
+			dev_err(dev, "Failed to disable SMBus timeout\n");
 	}
 
 	return i3c_hub_hw_configure_tp(dev);
