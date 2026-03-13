@@ -145,8 +145,8 @@
 #define I3C_SCL_PP_PERIOD_NS_MIN 40
 #define I3C_SCL_OD_LOW_PERIOD_NS_MIN 200
 
-#define SVC_I3C_EVENT_IBI	GENMASK(7, 0)
-#define SVC_I3C_EVENT_HOTJOIN	BIT(31)
+#define SVC_I3C_EVENT_IBI	GENMASK(31, 0)
+#define SVC_I3C_EVENT_HOTJOIN	0x100000000ULL
 
 struct svc_i3c_cmd {
 	u8 addr;
@@ -230,7 +230,7 @@ struct svc_i3c_master {
 		spinlock_t lock;
 	} ibi;
 	struct mutex lock;
-	u32 enabled_events;
+	u64 enabled_events;
 	u32 mctrl_config;
 	struct dentry *debugfs;
 
@@ -261,7 +261,7 @@ static void svc_i3c_master_err_stats(struct svc_i3c_master *master, u8 code)
 	master->err_code = code;
 }
 
-static inline bool is_events_enabled(struct svc_i3c_master *master, u32 mask)
+static inline bool is_events_enabled(struct svc_i3c_master *master, u64 mask)
 {
 	return !!(master->enabled_events & mask);
 }
@@ -1788,20 +1788,29 @@ static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
+	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	int ret;
 
-	master->enabled_events++;
+	ret = i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
+	if (ret)
+		return ret;
+
+	if (data->ibi >= 0)
+		master->enabled_events |= (1 << data->ibi);
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
 
-	return i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
+	return 0;
 }
 
 static int svc_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
+	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
 	int ret;
 
-	master->enabled_events--;
+	if (data->ibi >= 0)
+		master->enabled_events &= ~(1 << data->ibi);
 	if (!master->enabled_events)
 		svc_i3c_master_disable_interrupts(master);
 
