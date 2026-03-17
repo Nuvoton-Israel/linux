@@ -21,6 +21,8 @@
 #include <linux/property.h>
 #include <linux/regmap.h>
 
+#include "../pinctrl-utils.h"
+
 /* GCR registers */
 #define NPCM8XX_GCR_SRCNT	0x068
 #define NPCM8XX_GCR_FLOCKR1	0x074
@@ -2053,18 +2055,12 @@ static int npcm8xx_dt_node_to_map(struct pinctrl_dev *pctldev,
 					      PIN_MAP_TYPE_INVALID);
 }
 
-static void npcm8xx_dt_free_map(struct pinctrl_dev *pctldev,
-				struct pinctrl_map *map, u32 num_maps)
-{
-	kfree(map);
-}
-
 static const struct pinctrl_ops npcm8xx_pinctrl_ops = {
 	.get_groups_count = npcm8xx_get_groups_count,
 	.get_group_name = npcm8xx_get_group_name,
 	.get_group_pins = npcm8xx_get_group_pins,
 	.dt_node_to_map = npcm8xx_dt_node_to_map,
-	.dt_free_map = npcm8xx_dt_free_map,
+	.dt_free_map = pinctrl_utils_free_map,
 };
 
 static int npcm8xx_get_functions_count(struct pinctrl_dev *pctldev)
