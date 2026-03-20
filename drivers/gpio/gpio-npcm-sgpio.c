@@ -37,6 +37,8 @@
 
 #define GPIO_BANK(x)    ((x) / 8)
 #define GPIO_BIT(x)     ((x) % 8)
+#define HZ_PER_MHZ	1000000UL
+#define NPCM_CLK_MHZ    (8 * HZ_PER_MHZ)
 
 /*
  * Slect the freqency of shift clock.
@@ -296,13 +298,11 @@ static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio,
 	apb_freq = clk_get_rate(gpio->pclk);
 	tmp = ioread8(gpio->base + IOXCFG1) & ~IOXCFG1_SFT_CLK;
 
-	for (i = 0; i < clk_cfg->cfg_opt; i++) {
+	for (i = clk_cfg->cfg_opt-1; i > 0; i--) {
 		val = apb_freq / clk_cfg->SFT_CLK[i];
-		if ((sgpio_freq < val) && (i !=0) ) {
-			iowrite8(clk_cfg->CLK_SEL[i-1] | tmp, gpio->base + IOXCFG1);
-			return 0;
-		} else if (i == (clk_cfg->cfg_opt-1) && (sgpio_freq > val)) {
-			iowrite8(clk_cfg->CLK_SEL[i] | tmp, gpio->base + IOXCFG1);
+		if (sgpio_freq >= val) {
+			iowrite8(clk_cfg->CLK_SEL[i] | tmp,
+				 gpio->base + IOXCFG1);
 			return 0;
 		}
 	}
@@ -581,7 +581,7 @@ static int __init npcm_sgpio_probe(struct platform_device *pdev)
 	rc = device_property_read_u32(&pdev->dev, "bus-frequency", &sgpio_freq);
 	if (rc < 0) {
 		dev_err(&pdev->dev, "Could not read bus-frequency property\n");
-		return -EINVAL;
+		sgpio_freq = NPCM_CLK_MHZ;
 	}
 
 	gpio->pclk = devm_clk_get(&pdev->dev, NULL);
