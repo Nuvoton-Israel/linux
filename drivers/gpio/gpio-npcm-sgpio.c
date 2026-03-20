@@ -281,7 +281,7 @@ static void npcm_sgpio_setup_enable(struct npcm_sgpio *gpio, bool enable)
 }
 
 static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio,
-				const struct npcm_clk_cfg *clk_cfg)
+				const struct npcm_clk_cfg *clk_cfg, u32 sgpio_freq)
 {
 	unsigned long apb_freq;
 	u32 val;
@@ -293,7 +293,7 @@ static int npcm_sgpio_setup_clk(struct npcm_sgpio *gpio,
 
 	for (i = clk_cfg->cfg_opt-1; i > 0; i--) {
 		val = apb_freq / clk_cfg->sft_clk[i];
-		if (NPCM_CLK_MHZ > val) {
+		if (sgpio_freq >= val) {
 			iowrite8(clk_cfg->clk_sel[i] | tmp,
 				 gpio->base + NPCM_IOXCFG1);
 			return 0;
@@ -501,7 +501,7 @@ static int npcm_sgpio_probe(struct platform_device *pdev)
 	struct npcm_sgpio *gpio;
 	const struct npcm_clk_cfg *clk_cfg;
 	int rc;
-	u32 nin_gpios, nout_gpios;
+	u32 nin_gpios, nout_gpios, sgpio_freq;
 
 	gpio = devm_kzalloc(&pdev->dev, sizeof(*gpio), GFP_KERNEL);
 	if (!gpio)
@@ -531,11 +531,17 @@ static int npcm_sgpio_probe(struct platform_device *pdev)
 	    gpio->nout_sgpio > MAX_NR_HW_SGPIO)
 		return dev_err_probe(&pdev->dev, -EINVAL, "Number of GPIOs exceeds the maximum of %d: input: %d output: %d\n", MAX_NR_HW_SGPIO, nin_gpios, nout_gpios);
 
+	rc = device_property_read_u32(&pdev->dev, "bus-frequency", &sgpio_freq);
+	if (rc < 0) {
+		dev_err(&pdev->dev, "Could not read bus-frequency property\n");
+		sgpio_freq = NPCM_CLK_MHZ;
+	}
+
 	gpio->pclk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(gpio->pclk))
 		return dev_err_probe(&pdev->dev, PTR_ERR(gpio->pclk), "Could not get pclk\n");
 
-	rc = npcm_sgpio_setup_clk(gpio, clk_cfg);
+	rc = npcm_sgpio_setup_clk(gpio, clk_cfg, sgpio_freq);
 	if (rc < 0)
 		return dev_err_probe(&pdev->dev, rc, "Failed to setup clock\n");
 
