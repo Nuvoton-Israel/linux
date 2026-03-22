@@ -1117,10 +1117,7 @@ static int npcm_aes_ecb_encrypt(struct skcipher_request *req)
 			break;
 	}
 
-	if (!err)
-		//ablkcipher_walk_complete(&walk);
-		mutex_unlock(&npcm_aes_lock);
-
+	mutex_unlock(&npcm_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*NPCM-AES: ecb encrypt done, err = %d\n\n\n", err);
 
@@ -1184,10 +1181,8 @@ static int npcm_aes_ecb_decrypt(struct skcipher_request *req)
 		if (err)
 			break;
 	}
-	if (!err)
-		//ablkcipher_walk_complete(&walk);
 
-		mutex_unlock(&npcm_aes_lock);
+	mutex_unlock(&npcm_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*NPCM-AES: ecb decrypt done, err = %d\n\n\n", err);
 
