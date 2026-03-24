@@ -692,11 +692,7 @@
 			&pin6_slew
 			&pin7_slew
 			&pin108_slew
-			&pin109_slew
-			&pin240_slew
-			&pin241_slew
-			&pin242_slew
-			&pin243_slew>;
+			&pin109_slew>;
 };
 
 &vcd {
