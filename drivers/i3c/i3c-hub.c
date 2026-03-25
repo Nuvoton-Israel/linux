@@ -1589,7 +1589,8 @@ static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
 	adap->algo_data = &hub->agents[i];
 	adap->timeout = 1000;
 	adap->retries = 3;
-	snprintf(adap->name, sizeof(adap->name), "i3c-hub-port%d", i);
+	snprintf(adap->name, sizeof(adap->name), "hub%s.port%d",
+		 dev_name(&hub->i3cdev->dev), i);
 
 	i2c_set_adapdata(adap, &hub->agents[i]);
 	id = of_alias_get_id(hub->child_nodes[i], "i2c");
