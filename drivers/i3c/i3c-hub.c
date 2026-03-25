@@ -333,6 +333,8 @@ struct i3c_hub {
 static LIST_HEAD(hubdevs);
 static DEFINE_MUTEX(hubdevs_lock);
 
+static struct workqueue_struct *i3chub_wq;
+
 struct hub_setting {
 	const char * const name;
 	const u8 value;
@@ -1800,7 +1802,7 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	list_add(&priv->list, &hubdevs);
 	mutex_unlock(&hubdevs_lock);
 	INIT_DELAYED_WORK(&priv->delayed_work, i3c_hub_delayed_work);
-	schedule_delayed_work(&priv->delayed_work, msecs_to_jiffies(100));
+	queue_delayed_work(i3chub_wq, &priv->delayed_work, msecs_to_jiffies(100));
 	/* TBD: Apply special/security lock here using DEV_CMD register */
 
 	return 0;
@@ -1877,6 +1879,10 @@ static __init int i3c_hub_init(void)
 {
 	int rc;
 
+	i3chub_wq = alloc_ordered_workqueue("i3chub", 0);
+	if (!i3chub_wq)
+		return -ENOMEM;
+
 	i3c_register_notifier(&i3c_hub_notifier);
 
 	rc = i3c_driver_register(&i3c_hub);
@@ -1891,6 +1897,8 @@ static __exit void i3c_hub_exit(void)
 	i3c_driver_unregister(&i3c_hub);
 
 	i3c_unregister_notifier(&i3c_hub_notifier);
+
+	destroy_workqueue(i3chub_wq);
 }
 
 module_init(i3c_hub_init);
