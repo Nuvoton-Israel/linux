@@ -182,7 +182,9 @@ static void mctp_rx_input_test_to_desc(const struct mctp_rx_input_test *t,
 KUNIT_ARRAY_PARAM(mctp_rx_input, mctp_rx_input_tests,
 		  mctp_rx_input_test_to_desc);
 
-/* set up a local dev, route on EID 8, and a socket listening on type 0 */
+/* set up a local dev (with addr 8), route on EID 8, and a socket listening on
+ * type 0
+ */
 static void __mctp_route_test_init(struct kunit *test,
 				   struct mctp_test_dev **devp,
 				   struct mctp_dst *dst,
@@ -199,6 +201,10 @@ static void __mctp_route_test_init(struct kunit *test,
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
 	if (netid != MCTP_NET_ANY)
 		WRITE_ONCE(dev->mdev->net, netid);
+
+	dev->mdev->addrs = kmalloc_objs(u8, 1, GFP_KERNEL);
+	dev->mdev->num_addrs = 1;
+	dev->mdev->addrs[0] = 8;
 
 	mctp_test_dst_setup(test, dst, dev, tpq, 68);
 
@@ -950,11 +956,6 @@ static void mctp_test_flow_init(struct kunit *test,
 	 */
 	__mctp_route_test_init(test, &dev, dst, tpq, sock, MCTP_NET_ANY);
 
-	/* Assign a single EID. ->addrs is freed on mctp netdev release */
-	dev->mdev->addrs = kmalloc(sizeof(u8), GFP_KERNEL);
-	dev->mdev->num_addrs = 1;
-	dev->mdev->addrs[0] = 8;
-
 	skb = alloc_skb(len + sizeof(struct mctp_hdr) + 1, GFP_KERNEL);
 	KUNIT_ASSERT_TRUE(test, skb);
 	__mctp_cb(skb);
@@ -1084,14 +1085,14 @@ static void mctp_test_route_output_key_create(struct kunit *test)
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
 	WRITE_ONCE(dev->mdev->net, netid);
 
-	mctp_test_dst_setup(test, &dst, dev, &tpq, 68);
-
 	rc = sock_create_kern(&init_net, AF_MCTP, SOCK_DGRAM, 0, &sock);
 	KUNIT_ASSERT_EQ(test, rc, 0);
 
 	dev->mdev->addrs = kmalloc(sizeof(u8), GFP_KERNEL);
 	dev->mdev->num_addrs = 1;
 	dev->mdev->addrs[0] = src_eid;
+
+	mctp_test_dst_setup(test, &dst, dev, &tpq, 68);
 
 	skb = alloc_skb(sizeof(struct mctp_hdr) + 1 + len, GFP_KERNEL);
 	KUNIT_ASSERT_TRUE(test, skb);
@@ -1192,7 +1193,7 @@ static void mctp_test_route_gw_lookup(struct kunit *test)
 	struct mctp_test_dev *dev;
 	int rc;
 
-	dev = mctp_test_create_dev();
+	dev = mctp_test_create_dev_with_addr(8);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
 
 	/* 8 (local) -> 10 (gateway) via 9 (direct) */
@@ -1222,7 +1223,7 @@ static void mctp_test_route_gw_loop(struct kunit *test)
 	struct mctp_test_dev *dev;
 	int rc;
 
-	dev = mctp_test_create_dev();
+	dev = mctp_test_create_dev_with_addr(8);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
 
 	/* two routes using each other as the gw */
@@ -1281,7 +1282,7 @@ static void mctp_test_route_gw_mtu(struct kunit *test)
 	unsigned int netid;
 	int rc;
 
-	dev = mctp_test_create_dev();
+	dev = mctp_test_create_dev_with_addr(8);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
 	dev->ndev->mtu = mtus->dev;
 	mdev = dev->mdev;

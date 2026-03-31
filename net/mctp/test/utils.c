@@ -71,6 +71,26 @@ struct mctp_test_dev *mctp_test_create_dev(void)
 	return __mctp_test_create_dev(0, NULL);
 }
 
+struct mctp_test_dev *mctp_test_create_dev_with_addr(mctp_eid_t addr)
+{
+	struct mctp_test_dev *dev;
+
+	dev = __mctp_test_create_dev(0, NULL);
+	if (!dev)
+		return NULL;
+
+	dev->mdev->addrs = kmalloc_objs(u8, 1, GFP_KERNEL);
+	if (!dev->mdev->addrs) {
+		mctp_test_destroy_dev(dev);
+		return NULL;
+	}
+
+	dev->mdev->num_addrs = 1;
+	dev->mdev->addrs[0] = 8;
+
+	return dev;
+}
+
 struct mctp_test_dev *mctp_test_create_dev_lladdr(unsigned short lladdr_len,
 						  const unsigned char *lladdr)
 {
@@ -175,6 +195,8 @@ void mctp_test_dst_setup(struct kunit *test, struct mctp_dst *dst,
 			 struct mctp_test_dev *dev,
 			 struct mctp_test_pktqueue *tpq, unsigned int mtu)
 {
+	unsigned long flags;
+
 	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, dev);
 
 	memset(dst, 0, sizeof(*dst));
@@ -183,6 +205,11 @@ void mctp_test_dst_setup(struct kunit *test, struct mctp_dst *dst,
 	__mctp_dev_get(dst->dev->dev);
 	dst->mtu = mtu;
 	dst->output = mctp_test_dst_output;
+	dst->saddr = MCTP_ADDR_NULL;
+	spin_lock_irqsave(&dev->mdev->addrs_lock, flags);
+	if (dev->mdev->num_addrs)
+		dst->saddr = dev->mdev->addrs[0];
+	spin_unlock_irqrestore(&dev->mdev->addrs_lock, flags);
 	mctp_test_pktqueue_init(tpq);
 	test->priv = tpq;
 }
