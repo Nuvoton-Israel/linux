@@ -6,6 +6,7 @@
  * Copyright (C) 2021-2022 Advanced Micro Devices, Inc.
  */
 #include <linux/err.h>
+#include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/regmap.h>
@@ -16,10 +17,15 @@
 #define SW_ALERT_MASK	0x2
 /* Mask to check H/W Alert status bit */
 #define HW_ALERT_MASK	0x80
+/* Mask to check Mailbox status register support */
+#define SW_MB_MASK	0x20
 
 /* Software Interrupt for triggering */
 #define START_CMD	0x80
 #define TRIGGER_MAILBOX	0x01
+
+/* Mailbox error with additional data */
+#define ERR_WITH_DATA	0x5
 
 /* Default message lengths as per APML command protocol */
 /* MSR */
@@ -41,6 +47,13 @@
 #define CPUID_MCA_CMD	0x73
 #define RD_CPUID_CMD	0x91
 #define RD_MCA_CMD	0x86
+
+/* CPUID RE-READ using Status cmd if timeout in v1.0 */
+#define TIMEOUT_ERROR		0x11
+#define STATUS_CMD		0x72
+#define WR_DLEN_STATUS_CMD	0x1
+#define WR_LEN_STATUS_CMD	0x3
+#define I2C_XFER_RW_LEN		2
 
 /* SB-RMI registers */
 enum sbrmi_reg {
@@ -66,6 +79,20 @@ enum sbrmi_reg {
 	SBRMI_SW_INTERRUPT,
 	SBRMI_THREAD128CS	= 0x4b,
 };
+
+/* input for bulk write to v10 of CPUID and MSR protocol */
+struct cpu_msr_indata_v10 {
+	u8 cpu_mca_cmd;	/* const value */
+	u8 wr_len;	/* const value */
+	u8 rd_len;	/* const value */
+	u8 proto_cmd;	/* const value */
+	u8 thread;	/* thread number */
+	union {
+		u8 reg_offset[4];	/* input value */
+		u32 value;
+	};
+	u8 ext; /* extended function */
+} __packed;
 
 /* input for bulk write to v21 of CPUID and MSR protocol */
 struct cpu_msr_indata_v21 {
@@ -118,6 +145,15 @@ struct cpu_msr_outdata {
 	input.value =  func,						\
 	input.ext =  ext_func
 
+#define prepare_cpuid_in_msg_v10(input, thread_id, func, ext_func, wr_data_len)	\
+	input.cpu_mca_cmd = CPUID_MCA_CMD,				\
+	input.rd_len = CPUID_RD_DATA_LEN,				\
+	input.wr_len = wr_data_len,				\
+	input.proto_cmd = RD_CPUID_CMD,					\
+	input.thread = thread_id << 1,					\
+	input.value =  func,						\
+	input.ext =  ext_func
+
 static int sbrmi_get_rev(struct apml_sbrmi_device *rmi_dev)
 {
 	struct apml_message msg = { 0 };
@@ -135,25 +171,43 @@ static int sbrmi_get_rev(struct apml_sbrmi_device *rmi_dev)
 	return 0;
 }
 
-/*
- * For Mailbox command software alert status bit is set by firmware
- * to indicate command completion
- * For RMI Rev 0x20, new h/w status bit is introduced. which is used
- * by firmware to indicate completion of commands (0x71, 0x72, 0x73).
- * wait for the status bit to be set by the firmware before
- * reading the data out.
- */
-static int sbrmi_wait_status(struct apml_sbrmi_device *rmi_dev,
-			     int *status, int mask)
+static int poll_sw_interrupt_reg(struct apml_sbrmi_device *rmi_dev)
 {
-	int ret, retry = 100;
+	int ret = 0, retry = 100;
+	int sw_int = 0;
 
 	do {
-		ret = regmap_read(rmi_dev->regmap, SBRMI_STATUS, status);
+		ret = regmap_read(rmi_dev->regmap, SBRMI_SW_INTERRUPT, &sw_int);
 		if (ret < 0)
 			return ret;
 
-		if (*status & mask)
+		if (!(sw_int & 0x1))
+			break;
+
+		/* Wait 1~2 second for firmware to return data out */
+		if (retry > 95)
+			usleep_range(50, 100);
+		else
+			usleep_range(10000, 20000);
+	} while (retry--);
+
+	if (retry < 0)
+		ret = -ETIMEDOUT;
+	return ret;
+}
+
+static int poll_status_register(struct apml_sbrmi_device *rmi_dev,
+				int mask)
+{
+	int ret = 0, retry = 100;
+	int status;
+
+	do {
+		ret = regmap_read(rmi_dev->regmap, SBRMI_STATUS, &status);
+		if (ret < 0)
+			return ret;
+
+		if (status & mask)
 			break;
 
 		/* Wait 1~2 second for firmware to return data out */
@@ -215,13 +269,47 @@ static int msr_datain_v21(struct apml_sbrmi_device *rmi_dev,
 	return ret;
 }
 
+/*
+ * For Mailbox command software alert status bit is set by firmware
+ * to indicate command completion
+ * For RMI Rev 0x20, new h/w status bit is introduced. which is used
+ * by firmware to indicate completion of commands (0x71, 0x72, 0x73).
+ * wait for the status bit to be set by the firmware before
+ * reading the data out.
+ */
+static int sbrmi_wait_status(struct apml_sbrmi_device *rmi_dev,
+			     int mask)
+{
+	int ctrl_val = 0;
+	int ret = 0;
+
+	/* cache the rev value to identify if protocol is supported or not */
+	/* should be called here or in mailbox_xfer ? */
+	if (!rmi_dev->rev) {
+		ret = sbrmi_get_rev(rmi_dev);
+		if (ret < 0)
+			return ret;
+	}
+
+	if (mask != SW_ALERT_MASK || rmi_dev->rev == 0x10)
+		return poll_status_register(rmi_dev, mask);
+
+	ret = regmap_read(rmi_dev->regmap, SBRMI_CTRL, &ctrl_val);
+	if (ret < 0)
+		return ret;
+
+	if (ctrl_val & SW_MB_MASK)
+		return poll_status_register(rmi_dev, mask);
+	else
+		return poll_sw_interrupt_reg(rmi_dev);
+}
+
 /* MCA MSR protocol */
 int rmi_mca_msr_read(struct apml_sbrmi_device *rmi_dev,
 		     struct apml_message *msg)
 {
 	struct cpu_msr_outdata output = {0};
 	int ret;
-	int hw_status;
 
 	if (!rmi_dev->regmap)
 		return ENODEV;
@@ -244,6 +332,7 @@ int rmi_mca_msr_read(struct apml_sbrmi_device *rmi_dev,
 
 		break;
 	case 0x21:
+	case 0x31:
 		ret = msr_datain_v21(rmi_dev, msg);
 		if (ret < 0)
 			goto exit_unlock;
@@ -252,7 +341,7 @@ int rmi_mca_msr_read(struct apml_sbrmi_device *rmi_dev,
 		return -EOPNOTSUPP;
 	}
 
-	ret = sbrmi_wait_status(rmi_dev, &hw_status, HW_ALERT_MASK);
+	ret = sbrmi_wait_status(rmi_dev, HW_ALERT_MASK);
 	if (ret < 0)
 		goto exit_unlock;
 
@@ -278,6 +367,82 @@ int rmi_mca_msr_read(struct apml_sbrmi_device *rmi_dev,
 	msg->data_out.cpu_msr_out = output.value;
 
 exit_unlock:
+	return ret;
+}
+
+static int cpuid_datain_v10(struct apml_sbrmi_device *rmi_dev,
+			    struct apml_message *msg)
+{
+	struct cpu_msr_outdata output = {0};
+	struct cpu_msr_indata_v10 input = {0};
+	struct i2c_msg xfer[2];
+	u8 in_status[3];
+	int ret;
+
+	prepare_cpuid_in_msg_v10(input, msg->data_in.reg_in[THREAD_LOW_INDEX],
+				 msg->data_in.mb_in[RD_WR_DATA_INDEX],
+				 msg->data_in.reg_in[EXT_FUNC_INDEX],
+				 CPUID_WR_DATA_LEN);
+
+	if (!rmi_dev->client)
+		return -ENODEV;
+
+	xfer[0].addr = rmi_dev->client->addr;
+	xfer[0].flags = 0;
+	xfer[0].len = CPUID_RD_REG_LEN;
+	xfer[0].buf = (void *)&input;
+
+	xfer[1].addr = rmi_dev->client->addr;
+	xfer[1].flags = I2C_M_RD;
+	xfer[1].len = CPUID_RD_REG_LEN;
+	xfer[1].buf = (u8 *)&output;
+
+	ret = i2c_transfer(rmi_dev->client->adapter, xfer, I2C_XFER_RW_LEN);
+	if (ret == I2C_XFER_RW_LEN)
+		ret = 0;
+	else
+		return -EIO;
+
+	if (output.num_bytes != CPUID_RD_REG_LEN - 1)
+		return -EMSGSIZE;
+
+	if (output.status && output.status != 0x11) {
+		ret = -EPROTOTYPE;
+		msg->fw_ret_code = output.status;
+		return ret;
+	}
+
+	if (output.status == TIMEOUT_ERROR) {
+		in_status[0] = STATUS_CMD;
+		in_status[1] = WR_DLEN_STATUS_CMD;
+		in_status[2] = CPUID_RD_DATA_LEN;
+
+		xfer[0].addr = rmi_dev->client->addr;
+		xfer[0].flags = 0;
+		xfer[0].len = WR_LEN_STATUS_CMD;
+		xfer[0].buf = (void *)in_status;
+
+		xfer[1].addr = rmi_dev->client->addr;
+		xfer[1].flags = I2C_M_RD;
+		xfer[1].len = CPUID_RD_REG_LEN;
+		xfer[1].buf = (u8 *)&output;
+
+		ret = i2c_transfer(rmi_dev->client->adapter, xfer, I2C_XFER_RW_LEN);
+		if (ret == I2C_XFER_RW_LEN)
+			ret = 0;
+		else
+			return -EIO;
+
+		if (output.num_bytes != CPUID_RD_REG_LEN - 1)
+			return -EMSGSIZE;
+
+		if (output.status) {
+			msg->fw_ret_code = output.status;
+			return -EPROTOTYPE;
+		}
+	}
+
+	msg->data_out.cpu_msr_out = output.value;
 	return ret;
 }
 
@@ -334,28 +499,30 @@ int rmi_cpuid_read(struct apml_sbrmi_device *rmi_dev,
 		   struct apml_message *msg)
 {
 	struct cpu_msr_outdata output = {0};
-	int ret, hw_status;
+	int ret;
 
 	if (!rmi_dev->regmap)
 		return ENODEV;
 
-	/* cache the rev value to identify if protocol is supported or not */
+	/* Cache the rev value */
 	if (!rmi_dev->rev) {
 		ret = sbrmi_get_rev(rmi_dev);
 		if (ret < 0)
 			return ret;
 	}
 
-	switch(rmi_dev->rev) {
+	switch (rmi_dev->rev) {
 	/* CPUID protocol for REV 0x10 is not supported*/
 	case 0x10:
-		return -EOPNOTSUPP;
+		ret = cpuid_datain_v10(rmi_dev, msg);
+		goto exit_unlock;
 	case 0x20:
 		ret = cpuid_datain_v20(rmi_dev, msg);
 		if (ret < 0)
 			goto exit_unlock;
 		break;
 	case 0x21:
+	case 0x31:
 		ret = cpuid_datain_v21(rmi_dev, msg);
 		if (ret < 0)
 			goto exit_unlock;
@@ -364,7 +531,7 @@ int rmi_cpuid_read(struct apml_sbrmi_device *rmi_dev,
 		return -EOPNOTSUPP;
 	}
 
-	ret = sbrmi_wait_status(rmi_dev, &hw_status, HW_ALERT_MASK);
+	ret = sbrmi_wait_status(rmi_dev, HW_ALERT_MASK);
 	if (ret < 0)
 		goto exit_unlock;
 
@@ -413,7 +580,6 @@ int rmi_mailbox_xfer(struct apml_sbrmi_device *rmi_dev,
 {
 	unsigned int bytes = 0, ec = 0;
 	int i, ret;
-	int sw_status;
 	u8 byte = 0;
 
 	if (!rmi_dev->regmap)
@@ -460,12 +626,26 @@ int rmi_mailbox_xfer(struct apml_sbrmi_device *rmi_dev,
 	 * an ALERT (if enabled) to initiator (BMC) to indicate completion
 	 * of the requested command
 	 */
-	ret = sbrmi_wait_status(rmi_dev, &sw_status, SW_ALERT_MASK);
+	ret = sbrmi_wait_status(rmi_dev, SW_ALERT_MASK);
+	if (ret)
+		goto exit_unlock;
+	/*
+	 * The firmware mirrors the original mailbox command to
+	 * SBRMI::OutBndMsg_inst0 (SBRMI_x30). Validating the command ID
+	 * against this register detects I2C transmission errors, bit-flips,
+	 * and signal noise, ensuring reliable command execution.
+	 */
+	ret = regmap_read(rmi_dev->regmap, SBRMI_OUTBNDMSG0, &bytes);
 	if (ret)
 		goto exit_unlock;
 
+	if (bytes != msg->cmd) {
+		ret = -EIO;
+		goto exit_unlock;
+	}
+
 	ret = regmap_read(rmi_dev->regmap, SBRMI_OUTBNDMSG7, &ec);
-	if (ret || ec)
+	if (ret || (ec && ec != ERR_WITH_DATA))
 		goto exit_clear_alert;
 
 	/*

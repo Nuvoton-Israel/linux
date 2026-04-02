@@ -54,6 +54,33 @@ enum sbrmi_msg_id {
 	SBRMI_READ_PKG_MAX_PWR_LIMIT,
 };
 
+static int sbrmi_prepare_lock(struct apml_sbrmi_device *rmi_dev)
+{
+	mutex_lock(&rmi_dev->lock);
+	/* Verify device unbind/remove is not invoked */
+	if (atomic_read(&rmi_dev->no_new_trans)) {
+		mutex_unlock(&rmi_dev->lock);
+		return -EBUSY;
+	}
+
+	/*
+	 * Set the in_progress variable to true, to wait for
+	 * completion during unbind/remove of driver
+	 */
+	atomic_set(&rmi_dev->in_progress, 1);
+	return 0;
+}
+
+static void sbrmi_prepare_unlock(struct apml_sbrmi_device *rmi_dev)
+{
+	/* Send complete only if device is unbinded/remove */
+	if (atomic_read(&rmi_dev->no_new_trans))
+		complete(&rmi_dev->misc_fops_done);
+
+	atomic_set(&rmi_dev->in_progress, 0);
+	mutex_unlock(&rmi_dev->lock);
+}
+
 static int sbrmi_get_max_pwr_limit(struct apml_sbrmi_device *rmi_dev)
 {
 	struct apml_message msg = { 0 };
@@ -78,6 +105,12 @@ static int sbrmi_read(struct device *dev, enum hwmon_sensor_types type,
 
 	if (type != hwmon_power)
 		return -EINVAL;
+
+	/*
+	 * If device remove/unbind is called do not allow new transaction
+	 */
+	if (atomic_read(&rmi_dev->no_new_trans))
+		return -EBUSY;
 	/* Configure regmap if not configured yet */
 	if (!rmi_dev->regmap) {
 		ret = configure_regmap(rmi_dev);
@@ -87,7 +120,10 @@ static int sbrmi_read(struct device *dev, enum hwmon_sensor_types type,
 		}
 	}
 
-	mutex_lock(&rmi_dev->lock);
+	ret = sbrmi_prepare_lock(rmi_dev);
+	if (ret)
+		return ret;
+
 	msg.data_in.reg_in[RD_FLAG_INDEX] = 1;
 
 	switch (attr) {
@@ -113,7 +149,7 @@ static int sbrmi_read(struct device *dev, enum hwmon_sensor_types type,
 		/* hwmon power attributes are in microWatt */
 		*val = (long)msg.data_out.mb_out[RD_WR_DATA_INDEX] * 1000;
 
-	mutex_unlock(&rmi_dev->lock);
+	sbrmi_prepare_unlock(rmi_dev);
 	return ret;
 }
 
@@ -126,6 +162,12 @@ static int sbrmi_write(struct device *dev, enum hwmon_sensor_types type,
 
 	if (type != hwmon_power && attr != hwmon_power_cap)
 		return -EINVAL;
+
+	/*
+	 * If device remove/unbind is called do not allow new transaction
+	 */
+	if (atomic_read(&rmi_dev->no_new_trans))
+		return -EBUSY;
 	/* Configure regmap if not configured yet */
 	if (!rmi_dev->regmap) {
 		ret = configure_regmap(rmi_dev);
@@ -146,9 +188,13 @@ static int sbrmi_write(struct device *dev, enum hwmon_sensor_types type,
 	msg.data_in.mb_in[RD_WR_DATA_INDEX] = val;
 	msg.data_in.reg_in[RD_FLAG_INDEX] = 0;
 
-	mutex_lock(&rmi_dev->lock);
+	ret = sbrmi_prepare_lock(rmi_dev);
+	if (ret)
+		return ret;
+
 	ret = rmi_mailbox_xfer(rmi_dev, &msg);
-	mutex_unlock(&rmi_dev->lock);
+
+	sbrmi_prepare_unlock(rmi_dev);
 	return ret;
 }
 
@@ -215,22 +261,13 @@ static long sbrmi_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	 * one time. Take lock across so no two protocol is
 	 * invoked at same time, modifying the register value.
 	 */
-	mutex_lock(&rmi_dev->lock);
-	/* Verify device unbind/remove is not invoked */
-	if (atomic_read(&rmi_dev->no_new_trans)) {
-		mutex_unlock(&rmi_dev->lock);
-		return -EBUSY;
-	}
+	ret = sbrmi_prepare_lock(rmi_dev);
+	if (ret)
+		return ret;
 
 	/* Is this a read/monitor/get request */
 	if (msg.data_in.reg_in[RD_FLAG_INDEX])
 		read = true;
-
-	/*
-	 * Set the in_progress variable to true, to wait for
-	 * completion during unbind/remove of driver
-	 */
-	atomic_set(&rmi_dev->in_progress, 1);
 
 	switch (msg.cmd) {
 	case 0 ... 0x999:
@@ -260,12 +297,7 @@ static long sbrmi_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 		break;
 	}
 
-	/* Send complete only if device is unbinded/remove */
-	if (atomic_read(&rmi_dev->no_new_trans))
-		complete(&rmi_dev->misc_fops_done);
-
-	atomic_set(&rmi_dev->in_progress, 0);
-	mutex_unlock(&rmi_dev->lock);
+	sbrmi_prepare_unlock(rmi_dev);
 
 	/* Copy results back to user only for get/monitor commands and firmware failures */
 	if ((read && !ret) || ret == -EPROTOTYPE) {
@@ -352,6 +384,23 @@ static int sbrmi_i2c_reg_read(struct i2c_client *i2cdev, int reg_size, u32 *val)
 	return i2c_transfer(i2cdev->adapter, xfer, I3C_I2C_MSG_XFER_SIZE);
 }
 
+static int update_reg_addr_size(u32 rev, u32 *size)
+{
+	switch (rev) {
+	case 0x10:
+	case 0x20:
+	case 0x30:
+		*size = SBRMI_REG_ADDR_SIZE_DEF;
+		return 0;
+	case 0x21:
+	case 0x31:
+		*size = SBRMI_REG_ADDR_SIZE_TWO_BYTE;
+		return 0;
+	default:
+		return -EIO;
+	}
+}
+
 static int sbrmi_i2c_identify_reg_addr_size(struct i2c_client *i2c, u32 *size, u32 *rev)
 {
 	u32 reg_size;
@@ -372,7 +421,13 @@ static int sbrmi_i2c_identify_reg_addr_size(struct i2c_client *i2c, u32 *size, u
 			break;
 		}
 	}
-	if (ret != I3C_I2C_MSG_XFER_SIZE) {
+
+	/*
+	 * Validate the rev value is not 0xFF, as this value can be incorrectly cached
+	 * when executing 2-byte address operations on SBRMI rev 0x10.
+	 * For SBRMI rev 0x20 an error is returned.
+	 */
+	if (ret != I3C_I2C_MSG_XFER_SIZE || *rev == 0xFF) {
 		reg_size = SBRMI_REG_ADDR_SIZE_DEF;
 		ret = sbrmi_i2c_reg_read(i2c, reg_size, rev);
 		if (ret != I3C_I2C_MSG_XFER_SIZE) {
@@ -381,8 +436,7 @@ static int sbrmi_i2c_identify_reg_addr_size(struct i2c_client *i2c, u32 *size, u
 		}
 	}
 
-	*size = reg_size;
-	return ret;
+	return update_reg_addr_size(*rev, size);
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
@@ -395,6 +449,7 @@ static int sbrmi_i2c_probe(struct i2c_client *client)
 	struct device *dev = &client->dev;
 	struct device *hwmon_dev;
 	struct apml_sbrmi_device *rmi_dev;
+	const char *name;
 
 	rmi_dev = devm_kzalloc(dev, sizeof(struct apml_sbrmi_device), GFP_KERNEL);
 	if (!rmi_dev)
@@ -407,15 +462,27 @@ static int sbrmi_i2c_probe(struct i2c_client *client)
 
 	dev_set_drvdata(dev, (void *)rmi_dev);
 
-	hwmon_dev = devm_hwmon_device_register_with_info(dev, client->name,
+	rmi_dev->dev_static_addr = client->addr;
+
+	switch(rmi_dev->dev_static_addr) {
+	case 0x3c:
+		name = devm_kasprintf(dev, GFP_KERNEL, "sbrmi_%s", "0.0");
+		break;
+	case 0x38:
+		name = devm_kasprintf(dev, GFP_KERNEL, "sbrmi_%s", "1.0");
+		break;
+	default:
+		name = devm_kasprintf(dev, GFP_KERNEL, "sbrmi_");
+		break;
+	}
+
+	hwmon_dev = devm_hwmon_device_register_with_info(dev, name,
 							 rmi_dev,
 							 &sbrmi_chip_info,
 							 NULL);
 
 	if (!hwmon_dev)
 		return PTR_ERR_OR_ZERO(hwmon_dev);
-
-	rmi_dev->dev_static_addr = client->addr;
 
 	init_completion(&rmi_dev->misc_fops_done);
 	return create_misc_rmi_device(rmi_dev, dev);
@@ -453,7 +520,13 @@ static int sbrmi_i3c_identify_reg_addr_size(struct i3c_device *i3cdev, u32 *size
 			break;
 		}
 	}
-	if (ret < 0) {
+
+	/*
+	 * Validate the rev value is not 0xFF, as this value can be incorrectly cached
+	 * when executing 2-byte address operations on SBRMI rev 0x10.
+	 * For SBRMI rev 0x20 an error is returned.
+	 */
+	if (ret < 0 || *rev == 0xFF) {
 		reg_size = SBRMI_REG_ADDR_SIZE_DEF;
 		ret = sbrmi_i3c_reg_read(i3cdev, reg_size, rev);
 		if (ret < 0) {
@@ -462,8 +535,7 @@ static int sbrmi_i3c_identify_reg_addr_size(struct i3c_device *i3cdev, u32 *size
 		}
 	}
 
-	*size = reg_size;
-	return ret;
+	return update_reg_addr_size(*rev, size);
 }
 
 static int init_rmi_regmap(struct apml_sbrmi_device *rmi_dev, u32 size, u32 rev)
@@ -533,6 +605,11 @@ static int sbrmi_i3c_probe(struct i3c_device *i3cdev)
 	struct device *dev = &i3cdev->dev;
 	struct device *hwmon_dev;
 	struct apml_sbrmi_device *rmi_dev;
+	const char *name;
+
+	if (!(I3C_PID_INSTANCE_ID(i3cdev->desc->info.pid) == 1 ||
+	    i3cdev->desc->info.pid == 0x22400000002))
+		return -ENXIO;
 
 	rmi_dev = devm_kzalloc(dev, sizeof(struct apml_sbrmi_device), GFP_KERNEL);
 	if (!rmi_dev)
@@ -545,14 +622,26 @@ static int sbrmi_i3c_probe(struct i3c_device *i3cdev)
 
 	dev_set_drvdata(dev, (void *)rmi_dev);
 
-	hwmon_dev = devm_hwmon_device_register_with_info(dev, "sbrmi_i3c", rmi_dev,
+	/* Need to verify for the static address for i3cdev */
+	rmi_dev->dev_static_addr = i3cdev->desc->info.static_addr;
+
+	switch(rmi_dev->dev_static_addr) {
+	case 0x3c:
+		name = devm_kasprintf(dev, GFP_KERNEL, "sbrmi_%s", "0.0");
+		break;
+	case 0x38:
+		name = devm_kasprintf(dev, GFP_KERNEL, "sbrmi_%s", "1.0");
+		break;
+	default:
+		name = devm_kasprintf(dev, GFP_KERNEL, "sbrmi_");
+		break;
+	}
+
+	hwmon_dev = devm_hwmon_device_register_with_info(dev, name, rmi_dev,
 							 &sbrmi_chip_info, NULL);
 
 	if (!hwmon_dev)
 		return PTR_ERR_OR_ZERO(hwmon_dev);
-
-	/* Need to verify for the static address for i3cdev */
-	rmi_dev->dev_static_addr = i3cdev->desc->info.static_addr;
 
 	init_completion(&rmi_dev->misc_fops_done);
 	return create_misc_rmi_device(rmi_dev, dev);
