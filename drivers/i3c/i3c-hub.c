@@ -235,9 +235,6 @@
 #define I3C_HUB_TP_BUFFER_STATUS_MASK			0xFF
 #define I3C_HUB_TP_TRANSACTION_CODE_MASK		0xF0
 
-/* SMBus transaction types fields */
-#define I3C_HUB_SMBUS_400kHz				BIT(2)
-
 /* Hub buffer size */
 #define I3C_HUB_CONTROLLER_BUFFER_SIZE			88
 #define I3C_HUB_SMBUS_DESCRIPTOR_SIZE			4
@@ -278,6 +275,7 @@ struct smbus_agent {
 	void *hub;
 	struct completion completion;
 
+	u32 clk_freq;
 	u32 port_id;
 	/* target handling */
 	struct i2c_client *client;
@@ -1295,12 +1293,37 @@ err_exit:
 	return ret;
 }
 
+static u8 tx_clk_to_type(u32 clk)
+{
+	u8 type;
+
+	switch (clk) {
+	case 100000:
+		type = 0x0;
+		break;
+	case 200000:
+		type = 0x1;
+		break;
+	case 400000:
+		type = 0x2;
+		break;
+	case 1000000:
+		type = 0x3;
+		break;
+	default:
+		type = 0x0;
+	};
+
+	return type << 1;
+}
+
 static int i3c_hub_smbus_xfer_one(struct i2c_adapter *adap, struct i2c_msg *wr_msg,
 				  struct i2c_msg *rd_msg)
 {
 	struct smbus_agent *agent = adap->algo_data;
 	struct i3c_hub *hub = agent->hub;
 	int port_id = agent->port_id;
+	u8 speed;
 	int ret;
 
 	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE] = { 0 };
@@ -1316,26 +1339,27 @@ static int i3c_hub_smbus_xfer_one(struct i2c_adapter *adap, struct i2c_msg *wr_m
 	if (rd_msg && (rd_msg->flags & I2C_M_RECV_LEN))
 		rd_msg->len += I2C_SMBUS_BLOCK_MAX;
 
+	speed = tx_clk_to_type(agent->clk_freq);
 	if (wr_msg && rd_msg) {
 		if (wr_msg->addr != rd_msg->addr) {
 			dev_err(&adap->dev, "different addr in i2c wr and rd msgs\n");
 			return -EINVAL;
 		}
 		desc[0] = wr_msg->addr << 1;
-		desc[1] = I3C_HUB_SMBUS_400kHz | BIT(0); /* A write followed by a read*/
+		desc[1] = speed | BIT(0); /* A write followed by a read*/
 		desc[2] = wr_len = wr_msg->len;
 		desc[3] = rd_len = rd_msg->len;
 		out = wr_msg->buf;
 		in = rd_msg->buf;
 	} else if (wr_msg) {
 		desc[0] = wr_msg->addr << 1;
-		desc[1] = I3C_HUB_SMBUS_400kHz;
+		desc[1] = speed;
 		desc[2] = wr_len = wr_msg->len;
 		desc[3] = 0;
 		out = wr_msg->buf;
 	} else if (rd_msg) {
 		desc[0] = rd_msg->addr << 1 | BIT(0);
-		desc[1] = I3C_HUB_SMBUS_400kHz;
+		desc[1] = speed;
 		desc[2] = 0;
 		desc[3] = rd_len = rd_msg->len;
 		in = rd_msg->buf;
@@ -1544,6 +1568,7 @@ static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
 	struct i2c_adapter *adap;
 	int ret, id = -ENODEV;
 	int i = port;
+	u32 val;
 
 	/* Disconnect slave port from hub network */
 	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_NET_CON_CONF, BIT(i), 0);
@@ -1625,6 +1650,12 @@ static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
 		}
 		hub->ibi_enabled = true;
 	}
+
+	if (!of_property_read_u32(hub->child_nodes[i], "clock-frequency", &val))
+		hub->agents[i].clk_freq = val;
+	else
+		hub->agents[i].clk_freq = 400000;
+	dev_dbg(&adap->dev, "clock frequency %u", hub->agents[i].clk_freq);
 
 	i3c_hub_register_i2c_devices(hub, port);
 
