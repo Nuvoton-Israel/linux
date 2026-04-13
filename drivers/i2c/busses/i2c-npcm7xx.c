@@ -1637,6 +1637,15 @@ static void npcm_i2c_irq_handle_nack(struct npcm_i2c *bus)
 					  !(val & NPCM_I2CCST_BUSY), 10, 200);
 		/* Verify no status bits are still set after bus is released */
 		npcm_i2c_clear_master_status(bus);
+
+		/*
+		 * The previous dummy-byte read advances the hardware FIFO index. If
+		 * the FIFO is not cleared, the next slave read/write transaction may
+		 * access stale or misaligned FIFO entries, causing data corruption.
+		 * Clearing the FIFO resets the index and ensures subsequent slave
+		 * operations behave correctly.
+		 */
+		iowrite8(NPCM_I2CFIF_CTS_CLR_FIFO, bus->reg + NPCM_I2CFIF_CTS);
 	}
 	bus->state = I2C_IDLE;
 
