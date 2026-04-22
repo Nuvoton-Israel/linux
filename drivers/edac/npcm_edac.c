@@ -312,13 +312,6 @@ static int setup_irq(struct mem_ctl_info *mci, struct platform_device *pdev)
 		return irq;
 	}
 
-	ret = devm_request_irq(&pdev->dev, irq, edac_ecc_isr, 0,
-			       dev_name(&pdev->dev), mci);
-	if (ret < 0) {
-		edac_printk(KERN_ERR, EDAC_MOD_NAME, "failed to request IRQ\n");
-		return ret;
-	}
-
 	/* enable the functional group of ECC and mask the others */
 	regmap_write(npcm_regmap, pdata->ctl_int_mask_master,
 		     pdata->int_mask_master_non_ecc_mask);
@@ -326,6 +319,13 @@ static int setup_irq(struct mem_ctl_info *mci, struct platform_device *pdev)
 	if (pdata->chip == NPCM8XX_CHIP)
 		regmap_write(npcm_regmap, pdata->ctl_int_mask_ecc,
 			     pdata->int_mask_ecc_non_event_mask);
+
+	ret = devm_request_irq(&pdev->dev, irq, edac_ecc_isr, 0,
+			       dev_name(&pdev->dev), mci);
+	if (ret < 0) {
+		edac_printk(KERN_ERR, EDAC_MOD_NAME, "failed to request IRQ\n");
+		return ret;
+	}
 
 	return 0;
 }
