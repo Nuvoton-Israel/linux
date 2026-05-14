@@ -38,6 +38,10 @@
 #define NPCM8XX_GCR_MFSEL6	0x274
 #define NPCM8XX_GCR_MFSEL7	0x278
 
+#define NPCM8XX_INTCR4_R1_EN	BIT(12)
+#define NPCM8XX_INTCR4_R2_EN	BIT(13)
+#define NPCM8XX_INTCR4_RMII3_EN	BIT(14)
+
 #define SRCNT_ESPI		BIT(3)
 
 /* GPIO registers */
@@ -407,7 +411,7 @@ static const int bu4_pins[] = { 54, 55 };
 static const int bu5b_pins[] = { 100, 101 };
 static const int bu5_pins[] = { 52, 53 };
 static const int bu6_pins[] = { 50, 51 };
-static const int rmii3_pins[] = { 110, 111, 209, 211, 210, 214, 215, 258 };
+static const int rmii3_pins[] = { 110, 111, 209, 211, 210, 214, 215 };
 
 static const int jm1_pins[] = { 136, 137, 138, 139, 140 };
 static const int jm2_pins[] = { 251 };
@@ -541,10 +545,10 @@ static const int mmccd_pins[] = { 155 };
 static const int mmcrst_pins[] = { 155 };
 static const int mmc8_pins[] = { 148, 149, 150, 151 };
 
-static const int r1_pins[] = { 178, 179, 180, 181, 182, 193, 201, 256 };
+static const int r1_pins[] = { 178, 179, 180, 181, 182, 193, 201 };
 static const int r1err_pins[] = { 56 };
 static const int r1md_pins[] = { 57, 58 };
-static const int r2_pins[] = { 84, 85, 86, 87, 88, 89, 200, 257 };
+static const int r2_pins[] = { 84, 85, 86, 87, 88, 89, 200 };
 static const int r2err_pins[] = { 90 };
 static const int r2md_pins[] = { 91, 92 };
 static const int sd1_pins[] = { 136, 137, 138, 139, 140, 141, 142, 143 };
@@ -1561,9 +1565,6 @@ static const struct npcm8xx_pincfg pincfg[] = {
 	NPCM8XX_PINCFG(253,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		GPI), /* SDHC1 power */
 	NPCM8XX_PINCFG(254,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		GPI), /* SDHC2 power */
 	NPCM8XX_PINCFG(255,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		GPI), /* DACOSEL */
-	NPCM8XX_PINCFG(256,	r1, INTCR4, 12,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
-	NPCM8XX_PINCFG(257,	r2, INTCR4, 13,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
-	NPCM8XX_PINCFG(258,	rmii3, INTCR4, 14,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 };
 
 /* number, name, drv_data */
@@ -1809,9 +1810,6 @@ static const struct pinctrl_pin_desc npcm8xx_pins[] = {
 	PINCTRL_PIN(247, "GPIO247/I3C3_SDA"),
 	PINCTRL_PIN(250, "GPIO250/RG2_REFCK/DVVSYNC"),
 	PINCTRL_PIN(251, "JM2/CP1_GPIO"),
-	PINCTRL_PIN(256, "RMII1 ENABLE"),
-	PINCTRL_PIN(257, "RMII2 ENABLE"),
-	PINCTRL_PIN(258, "RMII3 ENABLE"),
 	};
 
 /* Enable mode in pin group */
@@ -1851,6 +1849,30 @@ static void npcm8xx_setfunc(struct regmap *gcr_regmap, const unsigned int *pin,
 						   (cfg->fn4 == mode) ?
 						   BIT(cfg->bit4) : 0);
 		}
+	}
+}
+
+static void npcm8xx_update_intcr4_mux(struct regmap *gcr_regmap,
+				      unsigned int group)
+{
+	switch (group) {
+	case fn_r1:
+		regmap_update_bits(gcr_regmap, NPCM8XX_GCR_INTCR4,
+				   NPCM8XX_INTCR4_R1_EN,
+				   NPCM8XX_INTCR4_R1_EN);
+		break;
+	case fn_r2:
+		regmap_update_bits(gcr_regmap, NPCM8XX_GCR_INTCR4,
+				   NPCM8XX_INTCR4_R2_EN,
+				   NPCM8XX_INTCR4_R2_EN);
+		break;
+	case fn_rmii3:
+		regmap_update_bits(gcr_regmap, NPCM8XX_GCR_INTCR4,
+				   NPCM8XX_INTCR4_RMII3_EN,
+				   NPCM8XX_INTCR4_RMII3_EN);
+		break;
+	default:
+		break;
 	}
 }
 
@@ -2068,6 +2090,7 @@ static int npcm8xx_pinmux_set_mux(struct pinctrl_dev *pctldev,
 
 	npcm8xx_setfunc(npcm->gcr_regmap, npcm8xx_pingroups[group].pins,
 			npcm8xx_pingroups[group].npins, group);
+	npcm8xx_update_intcr4_mux(npcm->gcr_regmap, group);
 
 	return 0;
 }
