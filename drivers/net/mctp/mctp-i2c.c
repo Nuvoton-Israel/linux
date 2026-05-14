@@ -586,7 +586,7 @@ static int mctp_i2c_header_create(struct sk_buff *skb, struct net_device *dev,
 	u8 lldst, llsrc;
 	int rc;
 
-	if (len > MCTP_I2C_MAXMTU)
+	if (len > dev->max_mtu)
 		return -EMSGSIZE;
 
 	if (!daddr || !saddr)
@@ -739,6 +739,15 @@ static struct mctp_i2c_dev *mctp_i2c_midev_init(struct net_device *dev,
 {
 	struct mctp_i2c_dev *midev = netdev_priv(dev);
 	unsigned long flags;
+	unsigned int maxblock_size;
+
+	if (!device_property_read_u32(&mcli->client->dev, "mctp-i2c-maxblock",
+				      &maxblock_size)) {
+		maxblock_size = min_t(unsigned int, maxblock_size, MCTP_I2C_MAXBLOCK);
+		dev->mtu = maxblock_size - 1;
+		dev->max_mtu = maxblock_size - 1;
+		dev_info(&mcli->client->dev, "Set max_mtu to %u\n", dev->max_mtu);
+	}
 
 	midev->tx_thread = kthread_create(mctp_i2c_tx_thread, midev,
 					  "%s/tx", dev->name);
