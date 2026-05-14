@@ -584,8 +584,6 @@ static const int spi3quad_pins[] = { 188, 189 };
 static const int spi3cs2_pins[] = { 188 };
 static const int spi3cs3_pins[] = { 189 };
 
-static const int ddc_pins[] = { 204, 205, 206, 207 };
-
 static const int lpc_pins[] = { 95, 161, 163, 164, 165, 166, 167 };
 static const int espi_pins[] = { 95, 161, 163, 164, 165, 166, 167, 168 };
 
@@ -813,7 +811,6 @@ struct npcm8xx_pingroup {
 	NPCM8XX_GRP(spixcs1), \
 	NPCM8XX_GRP(spi1), \
 	NPCM8XX_GRP(pspi), \
-	NPCM8XX_GRP(ddc), \
 	NPCM8XX_GRP(clkreq), \
 	NPCM8XX_GRP(clkout), \
 	NPCM8XX_GRP(spi3), \
@@ -1059,7 +1056,6 @@ NPCM8XX_SFUNC(spix);
 NPCM8XX_SFUNC(spixcs1);
 NPCM8XX_SFUNC(spi1);
 NPCM8XX_SFUNC(pspi);
-NPCM8XX_SFUNC(ddc);
 NPCM8XX_SFUNC(clkreq);
 NPCM8XX_SFUNC(clkout);
 NPCM8XX_SFUNC(spi3);
@@ -1281,7 +1277,6 @@ static struct npcm8xx_func npcm8xx_funcs[] = {
 	NPCM8XX_MKFUNC(spixcs1),
 	NPCM8XX_MKFUNC(spi1),
 	NPCM8XX_MKFUNC(pspi),
-	NPCM8XX_MKFUNC(ddc),
 	NPCM8XX_MKFUNC(clkreq),
 	NPCM8XX_MKFUNC(clkout),
 	NPCM8XX_MKFUNC(spi3),
