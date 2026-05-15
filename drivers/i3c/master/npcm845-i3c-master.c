@@ -1319,15 +1319,6 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 	if (rdterm > SVC_I3C_MAX_RDTERM)
 		rdterm = 0;
 
-restart:
-	writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
-	       xfer_type |
-	       SVC_I3C_MCTRL_IBIRESP_NACK |
-	       SVC_I3C_MCTRL_DIR(rnw) |
-	       SVC_I3C_MCTRL_ADDR(addr) |
-	       SVC_I3C_MCTRL_RDTERM(rdterm),
-	       master->regs + SVC_I3C_MCTRL);
-
 	/*
 	 * HW issue:
 	 * I3C HW stalls the write transfer if the transmit FIFO becomes empty,
@@ -1346,6 +1337,15 @@ restart:
 		xfer_len -= len;
 		out += len;
 	}
+
+restart:
+	writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
+	       xfer_type |
+	       SVC_I3C_MCTRL_IBIRESP_NACK |
+	       SVC_I3C_MCTRL_DIR(rnw) |
+	       SVC_I3C_MCTRL_ADDR(addr) |
+	       SVC_I3C_MCTRL_RDTERM(rdterm),
+	       master->regs + SVC_I3C_MCTRL);
 
 	ret = readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
 				 SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
