@@ -1389,6 +1389,23 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 	if (max_rd_turn)
 		timeout = ktime_add_us(ktime_get(), max_rd_turn);
 
+	/* Pre-fill FIFO to work around the HW issue */
+	if (svc_has_quirk(master, SVC_I3C_QUIRK_FIFO_EMPTY) && !rnw && xfer_len) {
+		u32 space, end, len;
+
+		reg = readl(master->regs + SVC_I3C_MDATACTRL);
+		space = SVC_I3C_FIFO_SIZE - SVC_I3C_MDATACTRL_TXCOUNT(reg);
+		if (space) {
+			end = xfer_len > space ? 0 : SVC_I3C_MWDATAB_END;
+			len = min_t(u32, xfer_len, space);
+			writesb(master->regs + SVC_I3C_MWDATAB1, out, len - 1);
+			/* Mark END bit if this is the last byte */
+			writel(out[len - 1] | end, master->regs + SVC_I3C_MWDATAB);
+			xfer_len -= len;
+			out += len;
+		}
+	}
+
 	while (retry--) {
 		writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
 		       xfer_type |
@@ -1397,29 +1414,6 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 		       SVC_I3C_MCTRL_ADDR(addr) |
 		       SVC_I3C_MCTRL_RDTERM(*actual_len),
 		       master->regs + SVC_I3C_MCTRL);
-
-		/*
-		 * The entire transaction can consist of multiple write transfers.
-		 * Prefilling before EmitStartAddr causes the data to be emitted
-		 * immediately, becoming part of the previous transfer.
-		 * The only way to work around this hardware issue is to let the
-		 * FIFO start filling as soon as possible after EmitStartAddr.
-		 */
-		if (svc_has_quirk(master, SVC_I3C_QUIRK_FIFO_EMPTY) && !rnw && xfer_len) {
-			u32 space, end, len;
-
-			reg = readl(master->regs + SVC_I3C_MDATACTRL);
-			space = SVC_I3C_FIFO_SIZE - SVC_I3C_MDATACTRL_TXCOUNT(reg);
-			if (space) {
-				end = xfer_len > space ? 0 : SVC_I3C_MWDATAB_END;
-				len = min_t(u32, xfer_len, space);
-				writesb(master->regs + SVC_I3C_MWDATAB1, out, len - 1);
-				/* Mark END bit if this is the last byte */
-				writel(out[len - 1] | end, master->regs + SVC_I3C_MWDATAB);
-				xfer_len -= len;
-				out += len;
-			}
-		}
 
 		ret = readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
 				 SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
