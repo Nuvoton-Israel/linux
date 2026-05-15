@@ -1597,14 +1597,6 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 
 	if (rnw && max_rd_turn)
 		timeout = ktime_add_us(ktime_get(), max_rd_turn);
-restart:
-	writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
-	       xfer_type |
-	       SVC_I3C_MCTRL_IBIRESP_NACK |
-	       SVC_I3C_MCTRL_DIR(rnw) |
-	       SVC_I3C_MCTRL_ADDR(addr) |
-	       SVC_I3C_MCTRL_RDTERM(rdterm),
-	       master->regs + SVC_I3C_MCTRL);
 
 	/*
 	 * HW issue:
@@ -1629,6 +1621,16 @@ restart:
 		if (!xfer_len)
 			use_dma = false;
 	}
+
+restart:
+	writel(SVC_I3C_MCTRL_REQUEST_START_ADDR |
+	       xfer_type |
+	       SVC_I3C_MCTRL_IBIRESP_NACK |
+	       SVC_I3C_MCTRL_DIR(rnw) |
+	       SVC_I3C_MCTRL_ADDR(addr) |
+	       SVC_I3C_MCTRL_RDTERM(rdterm),
+	       master->regs + SVC_I3C_MCTRL);
+
 	if (use_dma && !restarted) {
 		master->dma_xfer.out = out;
 		master->dma_xfer.in = in;
