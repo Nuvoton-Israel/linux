@@ -1983,6 +1983,30 @@
 			groups = "bu6";
 			function = "bu6";
 		};
+		hsi1a_pins: hsi1a-pins {
+			groups = "hsi1a";
+			function = "hsi1a";
+		};
+		hsi2a_pins: hsi2a-pins {
+			groups = "hsi2a";
+			function = "hsi2a";
+		};
+		hsi1b_pins: hsi1b-pins {
+			groups = "hsi1b";
+			function = "hsi1b";
+		};
+		hsi2b_pins: hsi2b-pins {
+			groups = "hsi2b";
+			function = "hsi2b";
+		};
+		hsi1c_pins: hsi1c-pins {
+			groups = "hsi1c";
+			function = "hsi1c";
+		};
+		hsi2c_pins: hsi2c-pins {
+			groups = "hsi2c";
+			function = "hsi2c";
+		};
 		gpo187_pins: gpo187-pins {
 			groups = "gpo187";
 			function = "gpo187";
