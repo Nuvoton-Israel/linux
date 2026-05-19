@@ -162,6 +162,24 @@ void __vdma_copy_packets_from_buffer(receive_packet_func_t receive_packet_func ,
 			if(0==wasMisReception)
 			{
 				pr_info("<1>vdm: rx err addr=0x%x \n", (uint32_t)vdma_rx_buff + (currBuffReadPos<<2));
+				if (numOfElementsInBuf <= PCIe_MSG_HEADER_SIZE_INT + 2)
+				{
+					int retry;
+					const int max_retries = 3;
+					const int retry_delay_us = 5;
+
+					for (retry = 0; retry < max_retries; retry++) {
+						udelay(retry_delay_us);
+						dma_rmb();
+						PCIeHeaderUINT32 = vdma_rx_buff_virt_addr[testReadPos];
+						if ((PCIeHeaderUINT32 & VDM_VENDOR_ID_MASK_LSB_IN_U32) == VDM_VENDOR_ID_LSB_IN_U32)
+							break;
+					}
+					if ((PCIeHeaderUINT32 & VDM_VENDOR_ID_MASK_LSB_IN_U32) == VDM_VENDOR_ID_LSB_IN_U32) {
+						pr_debug("<1>vdm: rx recovered after %d retries\n", retry + 1);
+						break; 
+					}
+				}
 			}
 			wasMisReception=1;
 //			numOfElementsInBuf--;
