@@ -94,6 +94,12 @@ uint32_t get_buffer_state(uint32_t *pCurrBuffReadPos,uint32_t *pCurrBuffWritePos
 	*pCurrBuffWritePos =  (ioread32(vdma_virt_addr + VDMA_CDST_REG) - (uint32_t)vdma_rx_buff) >> 2; // we are working with uint32_t
 	*pCurrBuffReadPos =  	(ioread32(vdma_virt_addr + VDMA_ERDPNT_REG) - (uint32_t)vdma_rx_buff) >> 2; // we are working with uint32_t
 
+	/*
+	 * Ensure DMA writes to the buffer are visible before reading data.
+	 * The write pointer may advance before data is written to memory.
+	 */
+	dma_rmb();
+
 	if(*pCurrBuffWritePos >= *pCurrBuffReadPos)
 	{
 		numOfElementsInBuf=*pCurrBuffWritePos - *pCurrBuffReadPos;
