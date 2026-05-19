@@ -24,6 +24,7 @@
 #include "CircularBuffer.h"
 #include "vdm_common.h"
 #include <linux/delay.h>
+#include <linux/of_reserved_mem.h>
 
 #ifdef CONFIG_OF
 #include <linux/of.h>
@@ -1130,17 +1131,30 @@ static int vdm_init(void)
 	} else {
 		gcr_regmap = NULL;
 	}
+
+	if (np && vdm_pdev) {
+		vdm_pdev->dev.of_node = np;
+	}
 #endif
 
+	/* Attach the device to its memory-region (shared-dma-pool) */
+	ret = of_reserved_mem_device_init(&vdm_pdev->dev);
+	if (ret == -ENODEV) {
+		dev_info(&vdm_pdev->dev, "No memory-region; using default DMA pool\n");
+	} else if (ret) {
+		dev_warn(&vdm_pdev->dev, "memory-region invalid (%d) check reserved-memory node\n", ret);
+		/* you can continue; allocation will come from default pool */
+	}
+
 	vdma_buff_virt_addr = dma_alloc_coherent(&vdm_pdev->dev, VDMA_BUFF_BYTE_SIZE , (dma_addr_t*)&vdma_buff, GFP_KERNEL);
-	//printk( "<1>  vdm : dma_alloc_coherent virt_addr=0x%x ,phys_addr=0x%x   \n",(unsigned int)vdma_buff_virt_addr, (unsigned int)vdma_buff);
-	
+
 	if ((!vdma_buff_virt_addr) || (!vdma_buff))
 	{
 		//pr_debug( "<1>  vdm : vdma_buff_virt_addr or  vdma_buff allocation failed \n" );
 		ret = -EINVAL;
 		goto dma_alloc_coherent_failed ;
 	}
+	//pr_info("Memory DMA map at Physical 0x%x Virtual 0x%x\n",vdma_buff,vdma_buff_virt_addr);
 
 	spin_lock_init(&lock);
 
