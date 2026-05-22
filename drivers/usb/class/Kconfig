@@ -47,3 +47,57 @@ config USB_TMC
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called usbtmc.
+
+config USB_OBMF
+	tristate "USB OBMF-ICP Class support"
+	depends on USB
+	help
+	  USB class driver for OCP OBMF-ICP (Open Boot and Management
+	  Framework - Interface Consolidation Protocol).  Presents OBMF
+	  channels as virtual Linux subsystem devices (I2C adapters,
+	  GPIO chips, SPI controllers, TTY ports, IPMI misc devices).
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called obmf.
+
+config USB_OBMF_I2C
+	bool "OBMF I2C channel support"
+	depends on USB_OBMF && I2C
+	default y
+	help
+	  Enable OBMF-ICP I2C optimised channel (Type 04h).
+	  Registers virtual I2C adapters via i2c_add_adapter().
+
+config USB_OBMF_GPIO
+	bool "OBMF GPIO channel support"
+	depends on USB_OBMF && GPIOLIB
+	default y
+	help
+	  Enable OBMF-ICP GPIO optimised channel (Type 05h, v0.9).
+	  Registers virtual GPIO chips via gpiochip_add_data().
+
+config USB_OBMF_SPI
+	bool "OBMF SPI Controller channel support"
+	depends on USB_OBMF && MTD
+	default y
+	help
+	  Enable OBMF-ICP SPI Controller optimised channel (Type 08h, v0.9).
+	  Handles device-initiated SPI NOR operations via Linux MTD framework.
+
+config USB_OBMF_SERIAL
+	bool "OBMF Serial channel support"
+	depends on USB_OBMF && TTY
+	default y
+	help
+	  Enable OBMF-ICP Serial optimised channel (Type 03h).
+	  Creates /dev/ttyOBMF* devices via standalone tty_driver.
+
+config USB_OBMF_IPMI
+	bool "OBMF IPMI/SSIF channel support"
+	depends on USB_OBMF
+	default y
+	help
+	  Enable OBMF-ICP IPMI optimised channel (Type 06h).
+	  Creates /dev/obmf-ipmi-* misc devices.
+
+
