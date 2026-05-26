@@ -14,20 +14,21 @@
 #include "obmf.h"
 
 /*
- * IPMI Optimised Channel payload:
- *   Request:  Command(1) + NetFn/LUN(1) + Payload(N)
- *   Response: CompletionCode(1) + NetFn/LUN(1) + Payload(N)
+ * IPMI Optimised Channel payload (on the wire):
+ *   Request:  Command(1) + NetFn/LUN(1) + IPMI_Cmd(1) + Payload(N)
+ *   Response: Command(1) + NetFn/LUN(1) + IPMI_Cmd(1) + CC(1) + Payload(N)
+ *
+ * Userspace interface (/dev/obmf*-ipmi-*):
+ *   read():  [NetFn/LUN, IPMI_Cmd, Data...]      (OBMF Command byte stripped)
+ *   write(): [NetFn/LUN, IPMI_Cmd, CC, Data...]   (OBMF Command byte auto-prepended)
  */
 
 struct obmf_ipmi_data {
 	struct miscdevice	mdev;
 	struct obmf_channel	*ch;
 	char			name[32];
-
-	/* Response buffer for host-initiated read() */
-	u8			resp_buf[256];
-	int			resp_len;
-	bool			resp_ready;
+	unsigned long		flags;	/* bit 0: exclusive open */
+#define OBMF_IPMI_OPEN		0
 
 	/* Device-initiated request buffer */
 	u8			dev_req_buf[256];
@@ -43,47 +44,24 @@ static ssize_t obmf_ipmi_read(struct file *file, char __user *buf,
 			      size_t count, loff_t *ppos)
 {
 	struct obmf_ipmi_data *id = file->private_data;
-	const u8 *src;
-	int src_len;
-	bool *flag;
 	int rv;
 
-	mutex_lock(&id->flock);
-
-	while (!id->dev_req_ready && !id->resp_ready) {
-		mutex_unlock(&id->flock);
-		if (file->f_flags & O_NONBLOCK)
+	if (file->f_flags & O_NONBLOCK) {
+		if (!id->dev_req_ready)
 			return -EAGAIN;
-
-		rv = wait_event_interruptible(id->read_wait,
-					      id->dev_req_ready ||
-					      id->resp_ready);
+	} else {
+		rv = wait_event_interruptible(id->read_wait, id->dev_req_ready);
 		if (rv)
 			return rv;
-
-		mutex_lock(&id->flock);
 	}
 
-	/* Prioritise device-initiated requests */
-	if (id->dev_req_ready) {
-		src     = id->dev_req_buf;
-		src_len = id->dev_req_len;
-		flag    = &id->dev_req_ready;
-	} else {
-		src     = id->resp_buf;
-		src_len = id->resp_len;
-		flag    = &id->resp_ready;
-	}
-
-	if (count > src_len)
-		count = src_len;
-
-	if (copy_to_user(buf, src, count)) {
+	mutex_lock(&id->flock);
+	count = min_t(size_t, count, id->dev_req_len);
+	if (copy_to_user(buf, id->dev_req_buf, count)) {
 		mutex_unlock(&id->flock);
 		return -EFAULT;
 	}
-
-	*flag = false;
+	id->dev_req_ready = false;
 	mutex_unlock(&id->flock);
 
 	return count;
@@ -95,63 +73,48 @@ static ssize_t obmf_ipmi_write(struct file *file, const char __user *buf,
 	struct obmf_ipmi_data *id = file->private_data;
 	struct obmf_channel *ch = id->ch;
 	struct obmf_device *odev = ch->odev;
-	u8 req[256];
+	u8 resp[1 + 256]; /* [Command=0x00] + IPMI payload from userspace */
 	int rv;
 
-	if (count == 0 || count > sizeof(req))
+	if (count == 0 || count > sizeof(resp) - 1)
 		return -EINVAL;
 
-	if (copy_from_user(req, buf, count))
+	mutex_lock(&id->flock);
+
+	if (!id->dev_resp_pending) {
+		mutex_unlock(&id->flock);
+		return -ENOENT; /* no outstanding request to respond to */
+	}
+
+	id->dev_resp_pending = false;
+	mutex_unlock(&id->flock);
+
+	/*
+	 * Userspace writes pure IPMI: [NetFn/LUN, Cmd, CC, Data...].
+	 * Prepend the OBMF Command byte (0x00 = Send IPMI Message) to
+	 * form the spec-compliant OBMF IPMI response payload.
+	 */
+	resp[0] = 0x00; /* OBMF IPMI Command: Send IPMI Message */
+	if (copy_from_user(resp + 1, buf, count))
 		return -EFAULT;
 
-	mutex_lock(&id->flock);
-
-	if (id->dev_resp_pending) {
-		/*
-		 * Userspace is responding to a device-initiated request.
-		 * Send as response (Host = Responder).
-		 */
-		id->dev_resp_pending = false;
-		mutex_unlock(&id->flock);
-
-		rv = obmf_send_response(odev, ch->channel_id,
-					OBMF_TYPE_IPMI,
-					OBMF_STATUS_SUCCESS, req, count);
-		return rv < 0 ? rv : count;
-	}
-
-	mutex_unlock(&id->flock);
-
-	/* Host-initiated request (existing behavior) */
-	mutex_lock(&ch->lock);
-	mutex_lock(&id->flock);
-
-	rv = obmf_send_request(odev, ch, OBMF_TYPE_IPMI,
-			       req, count,
-			       id->resp_buf, sizeof(id->resp_buf),
-			       OBMF_DEFAULT_TIMEOUT_MS);
-
-	if (rv > 0) {
-		id->resp_len = rv;
-		id->resp_ready = true;
-		wake_up_interruptible(&id->read_wait);
-	}
-
-	mutex_unlock(&id->flock);
-	mutex_unlock(&ch->lock);
-
+	rv = obmf_send_response(odev, ch->channel_id,
+				OBMF_TYPE_IPMI,
+				OBMF_STATUS_SUCCESS, resp, count + 1);
 	return rv < 0 ? rv : count;
 }
 
 static __poll_t obmf_ipmi_poll(struct file *file, poll_table *wait)
 {
 	struct obmf_ipmi_data *id = file->private_data;
-	__poll_t mask = EPOLLOUT | EPOLLWRNORM;
+	__poll_t mask = 0;
 
 	poll_wait(file, &id->read_wait, wait);
 
-	if (id->resp_ready || id->dev_req_ready)
+	if (id->dev_req_ready)
 		mask |= EPOLLIN | EPOLLRDNORM;
+	if (id->dev_resp_pending)
+		mask |= EPOLLOUT | EPOLLWRNORM;
 
 	return mask;
 }
@@ -160,16 +123,29 @@ static int obmf_ipmi_open(struct inode *inode, struct file *file)
 {
 	struct obmf_ipmi_data *id = container_of(file->private_data,
 						  struct obmf_ipmi_data, mdev);
+
+	if (test_and_set_bit(OBMF_IPMI_OPEN, &id->flags))
+		return -EBUSY;
+
 	file->private_data = id;
 	return 0;
 }
 
+static int obmf_ipmi_release(struct inode *inode, struct file *file)
+{
+	struct obmf_ipmi_data *id = file->private_data;
+
+	clear_bit(OBMF_IPMI_OPEN, &id->flags);
+	return 0;
+}
+
 static const struct file_operations obmf_ipmi_fops = {
-	.owner	= THIS_MODULE,
-	.open	= obmf_ipmi_open,
-	.read	= obmf_ipmi_read,
-	.write	= obmf_ipmi_write,
-	.poll	= obmf_ipmi_poll,
+	.owner		= THIS_MODULE,
+	.open		= obmf_ipmi_open,
+	.release	= obmf_ipmi_release,
+	.read		= obmf_ipmi_read,
+	.write		= obmf_ipmi_write,
+	.poll		= obmf_ipmi_poll,
 };
 
 int obmf_ipmi_register(struct obmf_device *odev, struct obmf_channel *ch)
@@ -185,7 +161,7 @@ int obmf_ipmi_register(struct obmf_device *odev, struct obmf_channel *ch)
 	mutex_init(&id->flock);
 	init_waitqueue_head(&id->read_wait);
 
-	snprintf(id->name, sizeof(id->name), "obmf%d-ipmi-%u",
+	snprintf(id->name, sizeof(id->name), "ipmi-obmf%d-%u",
 		 odev->device_index, ch->channel_id);
 	id->mdev.minor = MISC_DYNAMIC_MINOR;
 	id->mdev.name  = id->name;
@@ -210,17 +186,21 @@ void obmf_ipmi_handle_dev_request(struct obmf_channel *ch,
 	struct obmf_ipmi_data *id = ch->priv;
 	struct obmf_device *odev = ch->odev;
 
-	if (!id) {
+	if (!id || len < 2) {
 		obmf_send_response(odev, ch->channel_id,
 				   OBMF_TYPE_IPMI,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}
 
+	/*
+	 * Strip the OBMF Command byte (data[0], always 0x00 = Send IPMI
+	 * Message) so userspace sees pure IPMI: [NetFn/LUN, Cmd, Data...].
+	 */
+
 	mutex_lock(&id->flock);
-	id->dev_req_len = min_t(int, len, (int)sizeof(id->dev_req_buf));
-	if (id->dev_req_len > 0)
-		memcpy(id->dev_req_buf, data, id->dev_req_len);
+	id->dev_req_len = min_t(int, len - 1, (int)sizeof(id->dev_req_buf));
+	memcpy(id->dev_req_buf, data + 1, id->dev_req_len);
 	id->dev_req_ready = true;
 	id->dev_resp_pending = true;
 	wake_up_interruptible(&id->read_wait);
