@@ -114,6 +114,37 @@ static void obmf_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
 		       &pair_in, 1, NULL, 0);
 }
 
+static void obmf_gpio_set_multiple(struct gpio_chip *gc,
+				   unsigned long *mask, unsigned long *bits)
+{
+	struct obmf_gpio_data *gd = gpiochip_get_data(gc);
+	u16 pairs[256];
+	int n = 0;
+	unsigned int i;
+
+	for_each_set_bit(i, mask, gc->ngpio) {
+		int val = test_bit(i, bits);
+
+		if (val)
+			set_bit(i, gd->output_val);
+		else
+			clear_bit(i, gd->output_val);
+
+		pairs[n++] = OBMF_GPIO_PACK(i,
+				val ? OBMF_GPIO_VAL_HIGH : OBMF_GPIO_VAL_LOW);
+
+		if (n == 256) {
+			obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_VALUES,
+				       pairs, n, NULL, 0);
+			n = 0;
+		}
+	}
+
+	if (n > 0)
+		obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_VALUES,
+			       pairs, n, NULL, 0);
+}
+
 static int obmf_gpio_get_direction(struct gpio_chip *gc, unsigned int offset)
 {
 	struct obmf_gpio_data *gd = gpiochip_get_data(gc);
@@ -534,6 +565,7 @@ int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 	gd->gc.owner            = THIS_MODULE;
 	gd->gc.get              = obmf_gpio_get;
 	gd->gc.set              = obmf_gpio_set;
+	gd->gc.set_multiple     = obmf_gpio_set_multiple;
 	gd->gc.get_direction    = obmf_gpio_get_direction;
 	gd->gc.direction_input  = obmf_gpio_direction_input;
 	gd->gc.direction_output = obmf_gpio_direction_output;
