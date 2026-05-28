@@ -184,20 +184,19 @@ static int obmf_gpio_direction_input(struct gpio_chip *gc, unsigned int offset)
 {
 	struct obmf_gpio_data *gd = gpiochip_get_data(gc);
 
-	return obmf_gpio_set_direction(gd, offset, OBMF_GPIO_DIR_INPUT);
+	return (!test_bit(offset, gd->dir_out)) ? 0 : -EINVAL;
 }
 
 static int obmf_gpio_direction_output(struct gpio_chip *gc,
 				      unsigned int offset, int value)
 {
 	struct obmf_gpio_data *gd = gpiochip_get_data(gc);
-	int rv;
 
-	rv = obmf_gpio_set_direction(gd, offset, OBMF_GPIO_DIR_OUTPUT);
-	if (rv)
-		return rv;
+	if (!test_bit(offset, gd->dir_out)) {
+		return -EINVAL;
+	}
 
-	obmf_gpio_set(gc, offset, value);
+	gc->set(gc, offset, value);
 	return 0;
 }
 
