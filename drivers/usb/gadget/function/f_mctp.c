@@ -421,7 +421,7 @@ static int mctp_usbg_enable(struct usb_composite_dev *cdev, struct f_mctp *mctp)
 	}
 
 	/* todo: just one out queued req for now */
-	out_req = alloc_ep_req(mctp->out_ep, MCTP_USB_XFER_SIZE);
+	out_req = usb_ep_alloc_request(mctp->out_ep, GFP_ATOMIC);
 	if (!out_req) {
 		ERROR(cdev, "%s: out req alloc failed\n", __func__);
 		goto err_disable_in;
@@ -439,6 +439,7 @@ static int mctp_usbg_enable(struct usb_composite_dev *cdev, struct f_mctp *mctp)
 
 	out_req->context = skb;
 	out_req->buf = skb->data;
+	out_req->length = MCTP_USB_XFER_SIZE;
 	out_req->complete = mctp_usbg_out_ep_complete;
 
 	rc = usb_ep_queue(mctp->out_ep, out_req, GFP_ATOMIC);
@@ -465,7 +466,7 @@ static int mctp_usbg_enable(struct usb_composite_dev *cdev, struct f_mctp *mctp)
 err_free_skb:
 	kfree_skb(skb);
 err_free_req:
-	free_ep_req(mctp->out_ep, out_req);
+	usb_ep_free_request(mctp->out_ep, out_req);
 err_disable_in:
 	usb_ep_disable(mctp->in_ep);
 err_disable_out:
