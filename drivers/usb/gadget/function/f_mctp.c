@@ -179,7 +179,7 @@ static int mctp_usbg_bind(struct usb_configuration *c, struct usb_function *f)
 static void mctp_usbg_prealloc(struct f_mctp *mctp)
 {
 	struct sk_buff_head skbs;
-	struct usb_request *req;
+	struct usb_request *req, *tmp;
 	struct list_head reqs;
 	struct sk_buff *skb;
 	unsigned long flags;
@@ -192,15 +192,21 @@ static void mctp_usbg_prealloc(struct f_mctp *mctp)
 	list_replace_init(&mctp->rx_reqs, &reqs);
 	spin_unlock_irqrestore(&mctp->lock, flags);
 
-	list_for_each_entry(req, &reqs, list) {
+	list_for_each_entry_safe(req, tmp, &reqs, list) {
 		skb = __netdev_alloc_skb(mctp->dev, MCTP_USB_XFER_SIZE,
 					 GFP_KERNEL);
 		if (!skb)
 			break;
 
+		list_del_init(&req->list);
 		req->buf = skb->data;
 		req->context = skb;
-		usb_ep_queue(mctp->out_ep, req, GFP_KERNEL);
+		if (usb_ep_queue(mctp->out_ep, req, GFP_KERNEL)) {
+			req->buf = NULL;
+			req->context = NULL;
+			kfree_skb(skb);
+			break;
+		}
 	}
 
 	/* next, allocate our pool of spare skbs */
