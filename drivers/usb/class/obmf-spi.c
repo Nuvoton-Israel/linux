@@ -93,10 +93,11 @@ static int obmf_spi_xfer(struct obmf_channel *ch, u8 cmd_byte,
 static u32 obmf_spi_extract_addr(const u8 *cmd_data, int cmd_len)
 {
 	/* SPI NOR commands: opcode(1) + address(3 or 4 bytes) */
-	if (cmd_len >= 4)
-		return ((u32)cmd_data[1] << 16) |
-		       ((u32)cmd_data[2] << 8) |
-		       (u32)cmd_data[3];
+	if (cmd_len >= 5)
+		return ((u32)cmd_data[1] << 24) |
+		       ((u32)cmd_data[2] << 16) |
+		       ((u32)cmd_data[3] << 8) |
+		       (u32)cmd_data[4];
 	return 0;
 }
 
@@ -109,7 +110,7 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 	u16 wr_size, rd_size;
 	const u8 *wr_data;
 	u8 *resp = NULL;
-	int resp_len;
+	int resp_len, rv;
 	u8 status = OBMF_STATUS_SUCCESS;
 
 	if (!sd || len < 5) {
@@ -137,7 +138,6 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 		/* Read from flash at current offset */
 		struct mtd_info *mtd;
 		size_t retlen;
-		int rv;
 
 		resp = kmalloc(3 + rd_size, GFP_KERNEL);
 		if (!resp) {
@@ -182,7 +182,6 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 				struct mtd_info *mtd;
 				struct erase_info ei = {};
 				u32 addr = obmf_spi_extract_addr(wr_data, wr_size);
-				int rv;
 
 				mtd = get_mtd_device_nm(OBMF_SPI_MTD_NAME);
 				if (IS_ERR(mtd)) {
@@ -202,7 +201,6 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 			} else if (opcode == SPI_NOR_CHIP_ERASE) {
 				struct mtd_info *mtd;
 				struct erase_info ei = {};
-				int rv;
 
 				mtd = get_mtd_device_nm(OBMF_SPI_MTD_NAME);
 				if (IS_ERR(mtd)) {
@@ -217,13 +215,12 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 
 				if (rv)
 					status = OBMF_SPI_STATUS_TRANSFER_ERROR;
-			} else if (opcode == SPI_NOR_PAGE_PROG && wr_size >= 4) {
-				/* Page program: opcode(1) + addr(3) + data(N) */
+			} else if (opcode == SPI_NOR_PAGE_PROG && wr_size >= 5) {
+				/* Page program: opcode(1) + addr(4) + data(N) */
 				struct mtd_info *mtd;
 				size_t retlen;
 				u32 addr = obmf_spi_extract_addr(wr_data, wr_size);
-				int data_len = wr_size - 4;
-				int rv;
+				int data_len = wr_size - 5;
 
 				if (data_len <= 0)
 					break;
@@ -235,7 +232,7 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 				}
 
 				rv = mtd_write(mtd, addr, data_len, &retlen,
-					       wr_data + 4);
+					       wr_data + 5);
 				put_mtd_device(mtd);
 
 				if (rv < 0)
@@ -248,13 +245,12 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 
 	case OBMF_SPI_CMD_WRITE_READ: {
 		/* Write then read — handle SPI NOR read command */
-		if (wr_size >= 4 && wr_data[0] == SPI_NOR_READ) {
+		if (wr_size >= 5 && wr_data[0] == SPI_NOR_READ) {
 			struct mtd_info *mtd;
 			size_t retlen;
 			u32 addr = obmf_spi_extract_addr(wr_data, wr_size);
-			int rv;
 
-			resp = kmalloc(3 + rd_size, GFP_KERNEL);
+			resp = kmalloc(4 + rd_size, GFP_KERNEL);
 			if (!resp) {
 				status = OBMF_STATUS_PERMANENT_ERROR;
 				break;
@@ -267,7 +263,7 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 			}
 
 			rv = mtd_read(mtd, addr, rd_size, &retlen,
-				      resp + 3);
+				      resp + 4);
 			put_mtd_device(mtd);
 
 			if (rv && rv != -EUCLEAN) {
@@ -276,8 +272,9 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 			}
 
 			resp[0] = cmd_byte;
-			put_unaligned_le16((u16)retlen, &resp[1]);
-			resp_len = 3 + retlen;
+			resp[1] = rv;
+			put_unaligned_le16((u16)retlen, &resp[2]);
+			resp_len = 4 + retlen;
 
 			obmf_send_response(odev, ch->channel_id,
 					   OBMF_TYPE_SPI, status,
@@ -302,10 +299,11 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 
 	/* Send response (for non-read commands) */
 	{
-		u8 simple_resp[3];
+		u8 simple_resp[4];
 
 		simple_resp[0] = cmd_byte;
-		put_unaligned_le16(0, &simple_resp[1]);
+		simple_resp[1] = rv;
+		put_unaligned_le16(0, &simple_resp[2]);
 		obmf_send_response(odev, ch->channel_id,
 				   OBMF_TYPE_SPI, status,
 				   simple_resp, sizeof(simple_resp));
