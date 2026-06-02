@@ -568,7 +568,7 @@ static void mctp_usbg_free_func(struct usb_function *f)
 {
 	struct f_mctp *mctp = func_to_mctp(f);
 
-	kfree(mctp);
+	unregister_netdev(mctp->dev);
 }
 
 static void mctp_usbg_netdev_setup(struct net_device *dev)
