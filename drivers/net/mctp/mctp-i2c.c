@@ -81,7 +81,6 @@ struct mctp_i2c_dev {
 	/* Indicates that the netif is ready to receive incoming packets */
 	bool allow_rx;
 
-	unsigned int max_mtu;
 };
 
 /* The i2c client structure. One per hardware i2c bus at the top of the
@@ -541,12 +540,11 @@ static int mctp_i2c_header_create(struct sk_buff *skb, struct net_device *dev,
 				  unsigned short type, const void *daddr,
 	   const void *saddr, unsigned int len)
 {
-	struct mctp_i2c_dev *midev = netdev_priv(dev);
 	struct mctp_i2c_hdr *hdr;
 	struct mctp_hdr *mhdr;
 	u8 lldst, llsrc;
 
-	if (len > midev->max_mtu)
+	if (len > dev->max_mtu)
 		return -EMSGSIZE;
 
 	lldst = *((u8 *)daddr);
@@ -669,13 +667,11 @@ static const struct mctp_netdev_ops mctp_i2c_mctp_ops = {
 
 static void mctp_i2c_net_setup(struct net_device *dev)
 {
-	struct mctp_i2c_dev *midev = netdev_priv(dev);
-
 	dev->type = ARPHRD_MCTP;
 
-	dev->mtu = midev->max_mtu;
+	dev->mtu = MCTP_I2C_MAXMTU;
 	dev->min_mtu = MCTP_I2C_MINMTU;
-	dev->max_mtu = midev->max_mtu;
+	dev->max_mtu = MCTP_I2C_MAXMTU;
 	dev->tx_queue_len = MCTP_I2C_TX_QUEUE_LEN;
 
 	dev->hard_header_len = sizeof(struct mctp_i2c_hdr);
@@ -696,12 +692,13 @@ static struct mctp_i2c_dev *mctp_i2c_midev_init(struct net_device *dev,
 	unsigned long flags;
 	unsigned int maxblock_size;
 
-	if (!device_property_read_u32(&mcli->client->dev, "mctp-i2c-maxblock", &maxblock_size))
+	if (!device_property_read_u32(&mcli->client->dev, "mctp-i2c-maxblock",
+				      &maxblock_size)) {
 		maxblock_size = min_t(unsigned int, maxblock_size, MCTP_I2C_MAXBLOCK);
-	else
-		maxblock_size = MCTP_I2C_MAXBLOCK;
-
-	midev->max_mtu  = maxblock_size - 1;
+		dev->mtu = maxblock_size - 1;
+		dev->max_mtu = maxblock_size - 1;
+		dev_info(&mcli->client->dev, "Set max_mtu to %u\n", dev->max_mtu);
+	}
 
 	midev->tx_thread = kthread_create(mctp_i2c_tx_thread, midev,
 					  "%s/tx", dev->name);
