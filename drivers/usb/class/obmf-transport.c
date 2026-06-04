@@ -31,6 +31,16 @@ static struct obmf_channel *obmf_find_channel(struct obmf_device *odev,
 	return NULL;
 }
 
+/* Allocate a work item with an inline variable-length payload buffer. */
+static struct obmf_dev_req *obmf_alloc_dev_req(int payload_len)
+{
+	if (payload_len < 0)
+		return NULL;
+
+	return kmalloc(struct_size((struct obmf_dev_req *)NULL, data,
+				   payload_len), GFP_ATOMIC);
+}
+
 /* ------------------------------------------------------------------ */
 /* obmf_send_response — send a Response message (Host as Responder)     */
 /*                                                                     */
@@ -125,9 +135,10 @@ static void obmf_dev_request_work(struct work_struct *work)
 	case OBMF_TYPE_GPIO:
 		obmf_gpio_handle_dev_request(ch, dreq->data, dreq->data_len);
 		break;
-	case OBMF_TYPE_SERIAL:
+	case OBMF_TYPE_SERIAL: {
 		obmf_serial_handle_dev_request(ch, dreq->data, dreq->data_len);
 		break;
+	}
 	case OBMF_TYPE_SPI:
 		obmf_spi_handle_dev_request(ch, dreq->data, dreq->data_len);
 		break;
@@ -153,60 +164,28 @@ out:
 }
 
 /* ------------------------------------------------------------------ */
-/* RX Bulk IN callback — demux incoming responses/notifications        */
+/* obmf_dispatch_message — process a fully reassembled OBMF message     */
+/*                                                                     */
+/* Called from URB callback context (obmf_rx_complete).  The payload    */
+/* pointer and payload_len refer to the data AFTER the Common Header.  */
 /* ------------------------------------------------------------------ */
 
-static void obmf_rx_complete(struct urb *urb)
+static void obmf_dispatch_message(struct obmf_device *odev,
+				  struct obmf_common_hdr *hdr,
+				  const u8 *payload, int payload_len)
 {
-	struct obmf_device *odev = urb->context;
-	struct obmf_common_hdr *hdr;
 	struct obmf_channel *ch;
-	u8 channel_id;
-	u16 payload_size;
-	int status = urb->status;
+	u8 channel_id = hdr->channel;
 
-	switch (status) {
-	case 0:
-		odev->bulk_in_stall_count = 0;
-		break;
-	case -ECONNRESET:
-	case -ENOENT:
-	case -ESHUTDOWN:
-		return;
-	case -EPIPE:
-		odev->bulk_in_stall_count++;
-		if (odev->bulk_in_stall_count >= OBMF_STALL_THRESHOLD)
-			set_bit(OBMF_STALL_RESET_PENDING, &odev->stall_flags);
-		else
-			set_bit(OBMF_STALL_BULK_IN, &odev->stall_flags);
-		schedule_work(&odev->stall_work);
-		goto resubmit;
-	default:
-		dev_err(&odev->intf->dev, "rx urb failed: %d\n", status);
-		goto resubmit;
-	}
-
-	if (urb->actual_length < OBMF_COMMON_HDR_SIZE) {
-		dev_dbg(&odev->intf->dev, "short rx: %d bytes\n",
-			urb->actual_length);
-		goto resubmit;
-	}
-
-	hdr = (struct obmf_common_hdr *)odev->rx_buf;
-	channel_id   = hdr->channel;
-	payload_size = le16_to_cpu(hdr->size);
-
-	/* Look up channel by channel_id (linear search) */
 	ch = obmf_find_channel(odev, channel_id);
 	if (!ch) {
 		dev_err(&odev->intf->dev, "rx: unknown channel %u\n",
 			channel_id);
-		goto resubmit;
+		return;
 	}
 
 	if (OBMF_HDR_IS_RESPONSE(hdr)) {
 		/* Response to our earlier request */
-		const u8 *payload = odev->rx_buf + OBMF_COMMON_HDR_SIZE;
 		int copy_len;
 		u8 hdr_status = OBMF_HDR_STATUS(hdr);
 
@@ -246,13 +225,13 @@ static void obmf_rx_complete(struct urb *urb)
 				break;
 			}
 			complete(&ch->done);
-			goto resubmit;
+			return;
 		}
 
 		/* For MMIO / CONFIG (Discovery), validate tag */
 		if ((hdr->channel_type == OBMF_TYPE_MMIO ||
 		     hdr->channel_type == OBMF_TYPE_CONFIG) &&
-		    payload_size >= OBMF_MMIO_SUBHDR_SIZE) {
+		    payload_len >= OBMF_MMIO_SUBHDR_SIZE) {
 			struct obmf_mmio_subhdr *mhdr =
 				(struct obmf_mmio_subhdr *)payload;
 			if (mhdr->tag != ch->tag) {
@@ -261,33 +240,33 @@ static void obmf_rx_complete(struct urb *urb)
 					channel_id, mhdr->tag, ch->tag);
 				ch->status = -EIO;
 				complete(&ch->done);
-				goto resubmit;
+				return;
 			}
 			ch->tag ^= 1;
 			/* Skip MMIO sub-header for payload copy */
-			payload      += OBMF_MMIO_SUBHDR_SIZE;
-			payload_size -= OBMF_MMIO_SUBHDR_SIZE;
+			payload     += OBMF_MMIO_SUBHDR_SIZE;
+			payload_len -= OBMF_MMIO_SUBHDR_SIZE;
 		}
 
-		copy_len = min_t(int, payload_size, ch->resp_len);
+		copy_len = min_t(int, payload_len, ch->resp_len);
 		if (ch->resp_buf && copy_len > 0)
 			memcpy(ch->resp_buf, payload, copy_len);
 		ch->resp_len = copy_len;
 		ch->status = 0;
 		complete(&ch->done);
 	} else {
-		printk(KERN_DEBUG "OBMF RX: channel=%u type=0x%02x rqresp_status=0x%02x size=%u\n",
-		       channel_id, hdr->channel_type, hdr->rqresp_status, payload_size);
+		dev_dbg(&odev->intf->dev,
+			"OBMF RX: channel=%u type=0x%02x rqresp_status=0x%02x size=%u\n",
+			channel_id, hdr->channel_type, hdr->rqresp_status,
+			payload_len);
 		/*
 		 * RqResp=0 on Bulk IN: device-initiated request.
 		 * Host must respond (Host = Responder).
 		 * All channel types are deferred to workqueue.
 		 */
-		const u8 *payload = odev->rx_buf + OBMF_COMMON_HDR_SIZE;
-
 		if ((hdr->channel_type == OBMF_TYPE_MMIO ||
 		     hdr->channel_type == OBMF_TYPE_CONFIG) &&
-		    payload_size >= OBMF_MMIO_SUBHDR_SIZE) {
+		    payload_len >= OBMF_MMIO_SUBHDR_SIZE) {
 			struct obmf_mmio_subhdr *mhdr =
 				(struct obmf_mmio_subhdr *)payload;
 			u8 trans = mhdr->transaction & 0x07;
@@ -297,18 +276,20 @@ static void obmf_rx_complete(struct urb *urb)
 				dev_err(&odev->intf->dev,
 					"ch%u: MMIO dev-req tag mismatch (got %u exp %u), dropping\n",
 					channel_id, mhdr->tag, ch->dev_tag);
-				goto resubmit;
+				return;
 			}
 			ch->dev_tag ^= 1;
 
 			{
 				struct obmf_dev_req *dreq;
+				int req_payload_len;
 
 				dev_dbg(&odev->intf->dev,
 					"ch%u: MMIO dev-req (trans=%u)\n",
 					channel_id, trans);
 
-				dreq = kmalloc(sizeof(*dreq), GFP_ATOMIC);
+				req_payload_len = payload_len - OBMF_MMIO_SUBHDR_SIZE;
+				dreq = obmf_alloc_dev_req(req_payload_len);
 				if (dreq) {
 					INIT_WORK(&dreq->work,
 						  obmf_dev_request_work);
@@ -317,14 +298,16 @@ static void obmf_rx_complete(struct urb *urb)
 					dreq->channel_type = OBMF_TYPE_MMIO;
 					dreq->transaction = trans;
 					dreq->tag = mhdr->tag;
-					dreq->data_len = min_t(int,
-						payload_size - OBMF_MMIO_SUBHDR_SIZE,
-						(int)sizeof(dreq->data));
+					dreq->data_len = req_payload_len;
 					if (dreq->data_len > 0)
 						memcpy(dreq->data,
 						       payload + OBMF_MMIO_SUBHDR_SIZE,
 						       dreq->data_len);
-					schedule_work(&dreq->work);
+					queue_work(odev->dev_req_wq, &dreq->work);
+				} else {
+					dev_err(&odev->intf->dev,
+						"ch%u: alloc dev-req failed (len=%d)\n",
+						channel_id, req_payload_len);
 				}
 			}
 		} else {
@@ -334,20 +317,137 @@ static void obmf_rx_complete(struct urb *urb)
 			 */
 			struct obmf_dev_req *dreq;
 
-			dreq = kmalloc(sizeof(*dreq), GFP_ATOMIC);
+			dreq = obmf_alloc_dev_req(payload_len);
 			if (dreq) {
 				INIT_WORK(&dreq->work, obmf_dev_request_work);
 				dreq->odev = odev;
 				dreq->channel_id = channel_id;
 				dreq->channel_type = hdr->channel_type;
-				dreq->data_len = min_t(int, payload_size,
-						       (int)sizeof(dreq->data));
+				dreq->transaction = 0;
+				dreq->tag = 0;
+				dreq->data_len = payload_len;
 				if (dreq->data_len > 0)
 					memcpy(dreq->data, payload,
 					       dreq->data_len);
-				schedule_work(&dreq->work);
+				queue_work(odev->dev_req_wq, &dreq->work);
+			} else {
+				dev_err(&odev->intf->dev,
+					"ch%u: alloc dev-req failed (len=%d)\n",
+					channel_id, payload_len);
 			}
 		}
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* RX Bulk IN callback — demux incoming responses/notifications        */
+/*                                                                     */
+/* Handles segment reassembly: if hdr->size > payload in this URB,     */
+/* accumulate segments in odev->reasm_buf until the full message is     */
+/* received, then dispatch via obmf_dispatch_message().                 */
+/* ------------------------------------------------------------------ */
+
+static void obmf_rx_complete(struct urb *urb)
+{
+	struct obmf_device *odev = urb->context;
+	struct obmf_common_hdr *hdr;
+	u16 total_payload;
+	int actual_payload, chunk;
+	int status = urb->status;
+
+	switch (status) {
+	case 0:
+		odev->bulk_in_stall_count = 0;
+		break;
+	case -ECONNRESET:
+	case -ENOENT:
+	case -ESHUTDOWN:
+		return;
+	case -EPIPE:
+		odev->bulk_in_stall_count++;
+		if (odev->bulk_in_stall_count >= OBMF_STALL_THRESHOLD)
+			set_bit(OBMF_STALL_RESET_PENDING, &odev->stall_flags);
+		else
+			set_bit(OBMF_STALL_BULK_IN, &odev->stall_flags);
+		schedule_work(&odev->stall_work);
+		goto resubmit;
+	default:
+		dev_err(&odev->intf->dev, "rx urb failed: %d\n", status);
+		goto resubmit;
+	}
+
+	if (urb->actual_length < OBMF_COMMON_HDR_SIZE) {
+		dev_dbg(&odev->intf->dev, "short rx: %d bytes\n",
+			urb->actual_length);
+		goto resubmit;
+	}
+
+	hdr = (struct obmf_common_hdr *)odev->rx_buf;
+
+	if (odev->reasm_active) {
+		/*
+		 * Continuation segment — validate that channel and type
+		 * match the first segment, then append payload data.
+		 */
+		if (hdr->channel != odev->reasm_hdr.channel ||
+		    hdr->channel_type != odev->reasm_hdr.channel_type) {
+			dev_err(&odev->intf->dev,
+				"rx reasm: channel mismatch (got ch%u/0x%02x, exp ch%u/0x%02x), reset\n",
+				hdr->channel, hdr->channel_type,
+				odev->reasm_hdr.channel,
+				odev->reasm_hdr.channel_type);
+			odev->reasm_active = false;
+			goto resubmit;
+		}
+
+		chunk = urb->actual_length - OBMF_COMMON_HDR_SIZE;
+		if (chunk <= 0)
+			goto resubmit;
+
+		if (odev->reasm_offset + chunk > odev->reasm_total)
+			chunk = odev->reasm_total - odev->reasm_offset;
+
+		memcpy(odev->reasm_buf + odev->reasm_offset,
+		       odev->rx_buf + OBMF_COMMON_HDR_SIZE, chunk);
+		odev->reasm_offset += chunk;
+
+		if (odev->reasm_offset >= odev->reasm_total) {
+			/* Reassembly complete — dispatch full message */
+			odev->reasm_active = false;
+			obmf_dispatch_message(odev, &odev->reasm_hdr,
+					      odev->reasm_buf,
+					      odev->reasm_total);
+		}
+		goto resubmit;
+	}
+
+	/* First (or only) segment */
+	total_payload  = le16_to_cpu(hdr->size);
+	actual_payload = urb->actual_length - OBMF_COMMON_HDR_SIZE;
+
+	if (actual_payload >= total_payload) {
+		/* Complete message in a single URB — fast path */
+		obmf_dispatch_message(odev, hdr,
+				      odev->rx_buf + OBMF_COMMON_HDR_SIZE,
+				      total_payload);
+	} else {
+		/* First segment of a multi-segment message */
+		if (total_payload > U16_MAX) {
+			dev_err(&odev->intf->dev,
+				"rx: payload size %u exceeds max, dropping\n",
+				total_payload);
+			goto resubmit;
+		}
+
+		odev->reasm_hdr    = *hdr;
+		odev->reasm_total  = total_payload;
+		odev->reasm_offset = actual_payload;
+		odev->reasm_active = true;
+
+		if (actual_payload > 0)
+			memcpy(odev->reasm_buf,
+			       odev->rx_buf + OBMF_COMMON_HDR_SIZE,
+			       actual_payload);
 	}
 
 resubmit:
@@ -367,12 +467,19 @@ int obmf_transport_init(struct obmf_device *odev)
 {
 	int rv;
 
+	/* Workqueue for device-initiated requests */
+	odev->dev_req_wq = alloc_workqueue("obmf_devreq", WQ_UNBOUND, 0);
+	if (!odev->dev_req_wq)
+		return -ENOMEM;
+
 	/* Allocate TX buffer — sized by host_tx_size (BMC's effective TX
 	 * capability, capped at device's max_wr_transfer_size during probe)
 	 */
 	odev->tx_buf = kmalloc(odev->host_tx_size, GFP_KERNEL);
-	if (!odev->tx_buf)
-		return -ENOMEM;
+	if (!odev->tx_buf) {
+		rv = -ENOMEM;
+		goto err_wq;
+	}
 
 	/* Allocate RX URB and buffer */
 	odev->rx_urb = usb_alloc_urb(0, GFP_KERNEL);
@@ -387,6 +494,14 @@ int obmf_transport_init(struct obmf_device *odev)
 		goto err_rx_urb;
 	}
 
+	/* Reassembly buffer for segmented RX messages (max payload = u16) */
+	odev->reasm_buf = kmalloc(U16_MAX, GFP_KERNEL);
+	if (!odev->reasm_buf) {
+		rv = -ENOMEM;
+		goto err_rx_buf;
+	}
+	odev->reasm_active = false;
+
 	/* Fill and submit continuous Bulk IN URB */
 	usb_fill_bulk_urb(odev->rx_urb, odev->udev,
 			  usb_rcvbulkpipe(odev->udev, odev->bulk_in_ep),
@@ -397,7 +512,7 @@ int obmf_transport_init(struct obmf_device *odev)
 	if (rv) {
 		dev_err(&odev->intf->dev,
 			"failed to submit rx URB: %d\n", rv);
-		goto err_rx_buf;
+		goto err_reasm;
 	}
 
 	/* Allocate interrupt IN resources if available */
@@ -423,6 +538,9 @@ int obmf_transport_init(struct obmf_device *odev)
 
 	return 0;
 
+err_reasm:
+	kfree(odev->reasm_buf);
+	odev->reasm_buf = NULL;
 err_rx_buf:
 	kfree(odev->rx_buf);
 	odev->rx_buf = NULL;
@@ -432,6 +550,9 @@ err_rx_urb:
 err_tx:
 	kfree(odev->tx_buf);
 	odev->tx_buf = NULL;
+err_wq:
+	destroy_workqueue(odev->dev_req_wq);
+	odev->dev_req_wq = NULL;
 	return rv;
 }
 
@@ -440,11 +561,18 @@ void obmf_transport_exit(struct obmf_device *odev)
 	usb_kill_urb(odev->rx_urb);
 	usb_kill_urb(odev->int_in_urb);
 
+	if (odev->dev_req_wq) {
+		drain_workqueue(odev->dev_req_wq);
+		destroy_workqueue(odev->dev_req_wq);
+		odev->dev_req_wq = NULL;
+	}
+
 	usb_free_urb(odev->rx_urb);
 	usb_free_urb(odev->int_in_urb);
 
 	kfree(odev->rx_buf);
 	kfree(odev->tx_buf);
+	kfree(odev->reasm_buf);
 	kfree(odev->int_in_buf);
 	kfree(odev->int_out_buf);
 
@@ -452,6 +580,7 @@ void obmf_transport_exit(struct obmf_device *odev)
 	odev->int_in_urb = NULL;
 	odev->rx_buf    = NULL;
 	odev->tx_buf    = NULL;
+	odev->reasm_buf = NULL;
 	odev->int_in_buf = NULL;
 	odev->int_out_buf = NULL;
 }

@@ -324,8 +324,8 @@ struct obmf_dev_req {
 	u8			channel_type;
 	u8			transaction;	/* MMIO only */
 	u8			tag;		/* MMIO only */
-	u8			data[512];
 	int			data_len;
+	u8			data[];
 };
 
 /* ---------- STALL recovery flags ------------------------------------------ */
@@ -391,6 +391,16 @@ struct obmf_device {
 
 	/* Transport: Interrupt OUT (optional) */
 	u8			*int_out_buf;
+
+	/* RX segment reassembly state */
+	u8			*reasm_buf;
+	int			reasm_total;	/* expected total payload bytes */
+	int			reasm_offset;	/* bytes accumulated so far */
+	struct obmf_common_hdr	reasm_hdr;	/* saved header from first segment */
+	bool			reasm_active;
+
+	/* Device-initiated request workqueue (high priority) */
+	struct workqueue_struct	*dev_req_wq;
 
 	/* STALL recovery */
 	unsigned int		bulk_in_stall_count;
