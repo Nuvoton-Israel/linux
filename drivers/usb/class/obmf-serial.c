@@ -13,6 +13,7 @@
 #include <linux/tty_flip.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
+#include <linux/unaligned.h>
 
 #include "obmf.h"
 
@@ -130,12 +131,21 @@ static int obmf_serial_install(struct tty_driver *driver,
 	return tty_standard_install(driver, tty);
 }
 
+static void obmf_serial_set_termios(struct tty_struct *tty,
+				    const struct ktermios *old)
+{
+	/* OBMF serial is a virtual channel — no hardware baud rate to
+	 * configure.  Accept any termios setting silently so that tools
+	 * like stty work without error. */
+}
+
 static const struct tty_operations obmf_serial_ops = {
-	.install    = obmf_serial_install,
-	.open       = obmf_serial_open,
-	.close      = obmf_serial_close,
-	.write      = obmf_serial_write,
-	.write_room = obmf_serial_write_room,
+	.install      = obmf_serial_install,
+	.open         = obmf_serial_open,
+	.close        = obmf_serial_close,
+	.write        = obmf_serial_write,
+	.write_room   = obmf_serial_write_room,
+	.set_termios  = obmf_serial_set_termios,
 };
 
 /* ------------------------------------------------------------------ */
@@ -151,6 +161,9 @@ void obmf_serial_rx(struct obmf_channel *ch, const u8 *data, int len)
 		return;
 
 	/* data[0] = operation/event, data[1..2] = char_count (u16 LE) */
+	if (data[0] & OBMF_SERIAL_EVT_BREAK_DETECT)
+		tty_insert_flip_char(&sp->port, 0, TTY_BREAK);
+
 	char_count = get_unaligned_le16(&data[1]);
 	if (char_count > 0 && len >= 3 + char_count) {
 		tty_insert_flip_string(&sp->port, &data[3], char_count);
@@ -241,7 +254,12 @@ int obmf_serial_init(struct obmf_device *odev)
 	drv->type         = TTY_DRIVER_TYPE_SERIAL;
 	drv->subtype      = SERIAL_TYPE_NORMAL;
 	drv->init_termios = tty_std_termios;
-	drv->init_termios.c_cflag = B9600 | CS8 | CREAD | HUPCL | CLOCAL;
+	drv->init_termios.c_cflag = B115200 | CS8 | CREAD | HUPCL | CLOCAL;
+	drv->init_termios.c_iflag = 0;
+	drv->init_termios.c_oflag = ONLCR;
+	drv->init_termios.c_lflag = ECHOE | ECHOK | ECHOCTL | ECHOKE;
+	drv->init_termios.c_cc[VMIN] = 1;
+	drv->init_termios.c_cc[VTIME] = 0;
 	drv->driver_state = odev;
 
 	tty_set_operations(drv, &obmf_serial_ops);
