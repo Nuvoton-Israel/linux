@@ -190,6 +190,7 @@ static void mctp_usbg_prealloc(struct f_mctp *mctp)
 	 */
 	spin_lock_irqsave(&mctp->lock, flags);
 	list_replace_init(&mctp->rx_reqs, &reqs);
+	spin_unlock_irqrestore(&mctp->lock, flags);
 
 	list_for_each_entry(req, &reqs, list) {
 		skb = __netdev_alloc_skb(mctp->dev, MCTP_USB_XFER_SIZE,
@@ -201,7 +202,6 @@ static void mctp_usbg_prealloc(struct f_mctp *mctp)
 		req->context = skb;
 		usb_ep_queue(mctp->out_ep, req, GFP_KERNEL);
 	}
-	spin_unlock_irqrestore(&mctp->lock, flags);
 
 	/* next, allocate our pool of spare skbs */
 	n_skb = skb_queue_len_lockless(&mctp->skb_free_list);
@@ -264,6 +264,7 @@ static void mctp_usbg_handle_rx_urb(struct f_mctp *mctp,
 {
 	struct device *dev = &mctp->function.config->cdev->gadget->dev;
 	struct sk_buff *skb = req->context;
+	struct mctp_usb_hdr *hdr;
 	struct mctp_skb_cb *cb;
 	unsigned int len;
 	u16 id;
@@ -271,60 +272,35 @@ static void mctp_usbg_handle_rx_urb(struct f_mctp *mctp,
 	len = req->actual;
 	__skb_put(skb, len);
 
-	while (skb) {
-		struct sk_buff *skb2 = NULL;
-		struct mctp_usb_hdr *hdr;
+	hdr = skb_pull_data(skb, sizeof(*hdr));
+	if (!hdr)
+		goto err;
 
-		hdr = skb_pull_data(skb, sizeof(*hdr));
-		if (!hdr)
-			goto err;
-
-		id = be16_to_cpu(hdr->id);
-		if (id != MCTP_USB_DMTF_ID) {
-			dev_info(dev, "%s: invalid id %04x\n", __func__, id);
-			goto err;
-		}
-
-		if (hdr->len < sizeof(struct mctp_hdr) + sizeof(struct mctp_usb_hdr)) {
-			dev_info(dev, "%s: short packet (hdr) %d\n",
-				__func__, hdr->len);
-			goto err;
-		}
-
-		if ((hdr->len - sizeof(*hdr)) > skb->len) {
-			dev_info(dev,
-				"%s: short packet (xfer) %d, actual %d\n",
-				__func__, hdr->len, skb->len);
-			break;
-		}
-
-		if ((hdr->len - sizeof(*hdr)) < skb->len) {
-			/* more packets may follow - clone to a new
-			 * skb to use on the next iteration
-			 */
-			skb2 = skb_clone(skb, GFP_ATOMIC);
-			if (skb2) {
-				if (!skb_pull(skb2, hdr->len)) {
-					kfree_skb(skb2);
-					skb2 = NULL;
-				}
-			}
-			skb_trim(skb, hdr->len);
-		}
-
-
-		skb->protocol = htons(ETH_P_MCTP);
-		skb_reset_network_header(skb);
-		cb = __mctp_cb(skb);
-		cb->halen = 0;
-		dev_dstats_rx_add(mctp->dev, skb->len);
-		netif_rx(skb);
-
-		skb = skb2;
+	id = be16_to_cpu(hdr->id);
+	if (id != MCTP_USB_DMTF_ID) {
+		dev_dbg(dev, "%s: invalid id %04x\n", __func__, id);
+		goto err;
 	}
 
-	if (skb)
-		kfree_skb(skb);
+	if (hdr->len < sizeof(struct mctp_hdr) + sizeof(struct mctp_usb_hdr)) {
+		dev_dbg(dev, "%s: short packet (hdr) %d\n",
+			__func__, hdr->len);
+		goto err;
+	}
+
+	/* todo: multi-packet transfers */
+	if (hdr->len - sizeof(struct mctp_usb_hdr) < skb->len) {
+		dev_dbg(dev, "%s: short packet (xfer) %d, actual %d\n",
+			__func__, hdr->len, skb->len);
+		goto err;
+	}
+
+	skb->protocol = htons(ETH_P_MCTP);
+	skb_reset_network_header(skb);
+	cb = __mctp_cb(skb);
+	cb->halen = 0;
+	dev_dstats_rx_add(mctp->dev, skb->len);
+	netif_rx(skb);
 
 	return;
 
@@ -385,7 +361,7 @@ static void mctp_usbg_in_ep_complete(struct usb_ep *ep,
 	case 0:
 		spin_lock_irqsave(&mctp->lock, flags);
 		if (list_empty(&mctp->tx_reqs))
-			netif_start_queue(mctp->dev);
+			netif_wake_queue(mctp->dev);
 		list_add(&req->list, &mctp->tx_reqs);
 		spin_unlock_irqrestore(&mctp->lock, flags);
 		break;
@@ -521,7 +497,6 @@ static netdev_tx_t mctp_usbg_start_xmit(struct sk_buff *skb,
 	}
 
 	plen = skb->len;
-
 	hdr = skb_push(skb, sizeof(*hdr));
 	hdr->id = cpu_to_be16(MCTP_USB_DMTF_ID);
 	hdr->rsvd = 0;
