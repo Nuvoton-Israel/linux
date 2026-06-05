@@ -23,6 +23,9 @@
 
 #include "obmf.h"
 
+/* Well-known MMIO addresses */
+#define OBMF_MMIO_ADDR_POSTCODE	0x1c000ULL
+
 struct obmf_mmio_data {
 	struct miscdevice	mdev;
 	struct obmf_channel	*ch;
@@ -123,7 +126,9 @@ static ssize_t obmf_mmio_read(struct file *file, char __user *buf,
 			      size_t count, loff_t *ppos)
 {
 	struct obmf_mmio_data *md = file->private_data;
-	int total_len;
+	struct obmf_channel *ch = md->ch;
+	struct obmf_device *odev = ch->odev;
+	u8 transaction;
 	int rv;
 
 	mutex_lock(&md->flock);
@@ -141,20 +146,70 @@ static ssize_t obmf_mmio_read(struct file *file, char __user *buf,
 		mutex_lock(&md->flock);
 	}
 
-	/* Format: [transaction(1B)][payload(NB)] */
-	total_len = 1 + md->dev_req_len;
-	if (count < total_len) {
+	/*
+	 * dev_req_buf layout (stored by handle_dev_request):
+	 *   [addr(4B LE for SHORT, 8B LE for LONG)] [size(1B/2B)] [data...]
+	 */
+	transaction = md->dev_req_transaction;
+
+	/* ---- Postcode: WRITE to 0x1c000, 1 or 4 byte data ---------------- */
+	{
+		u64 address = ~0ULL;
+		unsigned int data_size = 0;
+		const u8 *payload = NULL;
+
+		if (transaction == OBMF_TRANS_SHORT_WRITE &&
+		    md->dev_req_len >= (int)(4 + 1 + 1)) {
+			/* SHORT: addr32(4) + size_u8(1) + data */
+			address   = get_unaligned_le32(md->dev_req_buf);
+			data_size = md->dev_req_buf[4];
+			payload   = md->dev_req_buf + 5;
+		} else if (transaction == OBMF_TRANS_LONG_WRITE &&
+			   md->dev_req_len >= (int)(8 + 2 + 1)) {
+			/* LONG: addr64(8) + size_u16(2) + data */
+			address   = get_unaligned_le64(md->dev_req_buf);
+			data_size = get_unaligned_le16(md->dev_req_buf + 8);
+			payload   = md->dev_req_buf + 10;
+		}
+
+		if (address == OBMF_MMIO_ADDR_POSTCODE) {
+			u8 resp[OBMF_MMIO_SUBHDR_SIZE];
+			struct obmf_mmio_subhdr *mhdr =
+				(struct obmf_mmio_subhdr *)resp;
+			int min_len = (int)(payload - md->dev_req_buf) +
+				      (int)data_size;
+
+			if ((data_size != 1 && data_size != 4) ||
+			    md->dev_req_len < min_len) {
+				mutex_unlock(&md->flock);
+				return -EIO;
+			}
+			if (count < data_size) {
+				mutex_unlock(&md->flock);
+				return -EINVAL;
+			}
+			if (copy_to_user(buf, payload, data_size)) {
+				mutex_unlock(&md->flock);
+				return -EFAULT;
+			}
+			mhdr->transaction = transaction;
+			mhdr->tag         = md->dev_req_tag;
+			md->dev_req_ready = false;
+			mutex_unlock(&md->flock);
+			rv = obmf_send_response(odev, ch->channel_id,
+						OBMF_TYPE_MMIO, OBMF_STATUS_SUCCESS,
+						resp, sizeof(resp));
+			return rv ? rv : (ssize_t)data_size;
+		}
+	}
+
+	/* ---- Other MMIO types: pass full subhdr+payload to userspace ------- */
+	if (count < md->dev_req_len) {
 		mutex_unlock(&md->flock);
 		return -EINVAL;
 	}
 
-	if (put_user(md->dev_req_transaction, buf)) {
-		mutex_unlock(&md->flock);
-		return -EFAULT;
-	}
-
-	if (md->dev_req_len > 0 &&
-	    copy_to_user(buf + 1, md->dev_req_buf, md->dev_req_len)) {
+	if (copy_to_user(buf, md->dev_req_buf, md->dev_req_len)) {
 		mutex_unlock(&md->flock);
 		return -EFAULT;
 	}
@@ -163,7 +218,7 @@ static ssize_t obmf_mmio_read(struct file *file, char __user *buf,
 	md->dev_resp_pending = true;
 	mutex_unlock(&md->flock);
 
-	return total_len;
+	return md->dev_req_len;
 }
 
 /* ------------------------------------------------------------------ */
@@ -338,9 +393,12 @@ void obmf_mmio_handle_dev_request(struct obmf_channel *ch,
 	md->dev_req_len = min_t(int, len, (int)sizeof(md->dev_req_buf));
 	if (md->dev_req_len > 0)
 		memcpy(md->dev_req_buf, data, md->dev_req_len);
+
 	md->dev_req_ready = true;
+
 	wake_up_interruptible(&md->read_wait);
 	mutex_unlock(&md->flock);
 
-	/* Do NOT send response — userspace will respond via write() */
+	/* Do NOT send response here — read() will respond for known types;
+	 * for others, userspace responds via write(). */
 }
