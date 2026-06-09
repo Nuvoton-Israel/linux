@@ -174,7 +174,7 @@ static irqreturn_t npcm7xx_bpc_irq(int irq, void *arg)
 		}
 
 		if (fifo_st & FIFO_OVERFLOW)
-			dev_warn(lpc_bpc->dev, "BIOS Post Codes FIFO Overflow\n");
+			dev_warn_ratelimited(lpc_bpc->dev, "BIOS Post Codes FIFO Overflow\n");
 
 		fifo_st = ioread8(lpc_bpc->base + NPCM7XX_BPCFSTAT_REG);
 	}
