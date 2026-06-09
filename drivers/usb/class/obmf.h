@@ -314,6 +314,13 @@ struct obmf_channel {
 	struct kobject		*kobj;		/* sysfs: /obmf/channel/<N> */
 	struct device		*sysfs_dev;	/* device for sysfs "device" symlink */
 	struct obmf_device	*odev;		/* Back-pointer */
+
+	/* RX segment reassembly state (per channel) */
+	u8			*reasm_buf;
+	int			reasm_total;	/* expected total payload bytes */
+	int			reasm_offset;	/* bytes accumulated so far */
+	struct obmf_common_hdr	reasm_hdr;	/* saved header from first segment */
+	bool			reasm_active;
 };
 
 /* ---------- Device-initiated request work item ---------------------------- */
@@ -391,13 +398,6 @@ struct obmf_device {
 
 	/* Transport: Interrupt OUT (optional) */
 	u8			*int_out_buf;
-
-	/* RX segment reassembly state */
-	u8			*reasm_buf;
-	int			reasm_total;	/* expected total payload bytes */
-	int			reasm_offset;	/* bytes accumulated so far */
-	struct obmf_common_hdr	reasm_hdr;	/* saved header from first segment */
-	bool			reasm_active;
 
 	/* Device-initiated request workqueue (high priority) */
 	struct workqueue_struct	*dev_req_wq;
