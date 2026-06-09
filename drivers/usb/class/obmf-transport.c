@@ -343,14 +343,24 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 /* RX Bulk IN callback — demux incoming responses/notifications        */
 /*                                                                     */
 /* Handles segment reassembly: if hdr->size > payload in this URB,     */
-/* accumulate segments in odev->reasm_buf until the full message is     */
+/* accumulate segments in the channel's reasm_buf until complete, then  */
 /* received, then dispatch via obmf_dispatch_message().                 */
 /* ------------------------------------------------------------------ */
+
+static void obmf_reasm_reset(struct obmf_channel *ch)
+{
+	kfree(ch->reasm_buf);
+	ch->reasm_buf = NULL;
+	ch->reasm_total = 0;
+	ch->reasm_offset = 0;
+	ch->reasm_active = false;
+}
 
 static void obmf_rx_complete(struct urb *urb)
 {
 	struct obmf_device *odev = urb->context;
 	struct obmf_common_hdr *hdr;
+	struct obmf_channel *ch;
 	u16 total_payload;
 	int actual_payload, chunk;
 	int status = urb->status;
@@ -383,20 +393,27 @@ static void obmf_rx_complete(struct urb *urb)
 	}
 
 	hdr = (struct obmf_common_hdr *)odev->rx_buf;
+	ch = obmf_find_channel(odev, hdr->channel);
+	if (!ch) {
+		dev_err(&odev->intf->dev, "rx: unknown channel %u\n",
+			hdr->channel);
+		goto resubmit;
+	}
 
-	if (odev->reasm_active) {
+	if (ch->reasm_active) {
 		/*
 		 * Continuation segment — validate that channel and type
 		 * match the first segment, then append payload data.
 		 */
-		if (hdr->channel != odev->reasm_hdr.channel ||
-		    hdr->channel_type != odev->reasm_hdr.channel_type) {
+		if (hdr->channel_type != ch->reasm_hdr.channel_type ||
+		    hdr->rqresp_status != ch->reasm_hdr.rqresp_status) {
 			dev_err(&odev->intf->dev,
-				"rx reasm: channel mismatch (got ch%u/0x%02x, exp ch%u/0x%02x), reset\n",
-				hdr->channel, hdr->channel_type,
-				odev->reasm_hdr.channel,
-				odev->reasm_hdr.channel_type);
-			odev->reasm_active = false;
+				"rx reasm: header mismatch on ch%u (type/status got 0x%02x/0x%02x exp 0x%02x/0x%02x), reset\n",
+				hdr->channel,
+				hdr->channel_type, hdr->rqresp_status,
+				ch->reasm_hdr.channel_type,
+				ch->reasm_hdr.rqresp_status);
+			obmf_reasm_reset(ch);
 			goto resubmit;
 		}
 
@@ -404,19 +421,19 @@ static void obmf_rx_complete(struct urb *urb)
 		if (chunk <= 0)
 			goto resubmit;
 
-		if (odev->reasm_offset + chunk > odev->reasm_total)
-			chunk = odev->reasm_total - odev->reasm_offset;
+		if (ch->reasm_offset + chunk > ch->reasm_total)
+			chunk = ch->reasm_total - ch->reasm_offset;
 
-		memcpy(odev->reasm_buf + odev->reasm_offset,
+		memcpy(ch->reasm_buf + ch->reasm_offset,
 		       odev->rx_buf + OBMF_COMMON_HDR_SIZE, chunk);
-		odev->reasm_offset += chunk;
+		ch->reasm_offset += chunk;
 
-		if (odev->reasm_offset >= odev->reasm_total) {
+		if (ch->reasm_offset >= ch->reasm_total) {
 			/* Reassembly complete — dispatch full message */
-			odev->reasm_active = false;
-			obmf_dispatch_message(odev, &odev->reasm_hdr,
-					      odev->reasm_buf,
-					      odev->reasm_total);
+			obmf_dispatch_message(odev, &ch->reasm_hdr,
+					      ch->reasm_buf,
+					      ch->reasm_total);
+			obmf_reasm_reset(ch);
 		}
 		goto resubmit;
 	}
@@ -432,20 +449,21 @@ static void obmf_rx_complete(struct urb *urb)
 				      total_payload);
 	} else {
 		/* First segment of a multi-segment message */
-		if (total_payload > U16_MAX) {
+		ch->reasm_buf = kmalloc(total_payload, GFP_ATOMIC);
+		if (!ch->reasm_buf) {
 			dev_err(&odev->intf->dev,
-				"rx: payload size %u exceeds max, dropping\n",
-				total_payload);
+				"rx: alloc reasm buffer failed on ch%u (len=%u)\n",
+				hdr->channel, total_payload);
 			goto resubmit;
 		}
 
-		odev->reasm_hdr    = *hdr;
-		odev->reasm_total  = total_payload;
-		odev->reasm_offset = actual_payload;
-		odev->reasm_active = true;
+		ch->reasm_hdr    = *hdr;
+		ch->reasm_total  = total_payload;
+		ch->reasm_offset = actual_payload;
+		ch->reasm_active = true;
 
 		if (actual_payload > 0)
-			memcpy(odev->reasm_buf,
+			memcpy(ch->reasm_buf,
 			       odev->rx_buf + OBMF_COMMON_HDR_SIZE,
 			       actual_payload);
 	}
@@ -494,14 +512,6 @@ int obmf_transport_init(struct obmf_device *odev)
 		goto err_rx_urb;
 	}
 
-	/* Reassembly buffer for segmented RX messages (max payload = u16) */
-	odev->reasm_buf = kmalloc(U16_MAX, GFP_KERNEL);
-	if (!odev->reasm_buf) {
-		rv = -ENOMEM;
-		goto err_rx_buf;
-	}
-	odev->reasm_active = false;
-
 	/* Fill and submit continuous Bulk IN URB */
 	usb_fill_bulk_urb(odev->rx_urb, odev->udev,
 			  usb_rcvbulkpipe(odev->udev, odev->bulk_in_ep),
@@ -512,7 +522,7 @@ int obmf_transport_init(struct obmf_device *odev)
 	if (rv) {
 		dev_err(&odev->intf->dev,
 			"failed to submit rx URB: %d\n", rv);
-		goto err_reasm;
+		goto err_rx_buf;
 	}
 
 	/* Allocate interrupt IN resources if available */
@@ -538,9 +548,6 @@ int obmf_transport_init(struct obmf_device *odev)
 
 	return 0;
 
-err_reasm:
-	kfree(odev->reasm_buf);
-	odev->reasm_buf = NULL;
 err_rx_buf:
 	kfree(odev->rx_buf);
 	odev->rx_buf = NULL;
@@ -572,7 +579,6 @@ void obmf_transport_exit(struct obmf_device *odev)
 
 	kfree(odev->rx_buf);
 	kfree(odev->tx_buf);
-	kfree(odev->reasm_buf);
 	kfree(odev->int_in_buf);
 	kfree(odev->int_out_buf);
 
@@ -580,7 +586,6 @@ void obmf_transport_exit(struct obmf_device *odev)
 	odev->int_in_urb = NULL;
 	odev->rx_buf    = NULL;
 	odev->tx_buf    = NULL;
-	odev->reasm_buf = NULL;
 	odev->int_in_buf = NULL;
 	odev->int_out_buf = NULL;
 }
