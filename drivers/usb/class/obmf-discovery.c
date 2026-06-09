@@ -262,6 +262,10 @@ int obmf_discover_channels(struct obmf_device *odev)
 	return 0;
 
 err:
+	for (i = 0; i < odev->num_channels; i++) {
+		kfree(odev->channels[i].reasm_buf);
+		odev->channels[i].reasm_buf = NULL;
+	}
 	kfree(odev->channels);
 	odev->channels = NULL;
 	odev->num_channels = 0;
@@ -270,6 +274,12 @@ err:
 
 void obmf_free_channels(struct obmf_device *odev)
 {
+	int i;
+
+	for (i = 0; i < odev->num_channels; i++) {
+		kfree(odev->channels[i].reasm_buf);
+		odev->channels[i].reasm_buf = NULL;
+	}
 	kfree(odev->channels);
 	odev->channels = NULL;
 	odev->num_channels = 0;
