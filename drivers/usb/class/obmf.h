@@ -109,6 +109,7 @@ struct obmf_mmio_subhdr {
 #define OBMF_TYPE_I3C		0x06	/* I3C Controller (reserved) */
 #define OBMF_TYPE_IPMI		0x07
 #define OBMF_TYPE_SPI		0x08	/* SPI Controller */
+#define OBMF_TYPE_IO		0x09	/* I/O Port Channel (v0.9.2) */
 #define OBMF_TYPE_OEM_MIN	0xF8
 #define OBMF_TYPE_OEM_MAX	0xFF
 
@@ -204,6 +205,96 @@ struct obmf_mmio_subhdr {
 /* SPI channel-specific status codes */
 #define OBMF_SPI_STATUS_MODE_UNSUPPORTED		0x40
 #define OBMF_SPI_STATUS_TRANSFER_ERROR		0x41
+
+/* ---------- I/O Port Channel (v0.9.2, Channel Type 09h) ------------------- */
+
+/*
+ * I/O Sub-Header: same wire format as MMIO Sub-Header.
+ *   Byte 0 [3:0]: Transaction type (4-bit; spec says [2:0] but values go to 11)
+ *   Byte 0 [7:4]: Reserved
+ *   Byte 1 [7:0]: Tag (alternates 0 <-> 1)
+ */
+struct obmf_io_subhdr {
+	u8	transaction;
+	u8	tag;
+} __packed;
+
+#define OBMF_IO_SUBHDR_SIZE	sizeof(struct obmf_io_subhdr)
+
+/* I/O Transaction types (spec §4.31) */
+#define OBMF_IO_TRANS_SEQ_READ_8	0x00	/* Sequential Port I/O Read  8-bit  */
+#define OBMF_IO_TRANS_SEQ_WRITE_8	0x01	/* Sequential Port I/O Write 8-bit  */
+#define OBMF_IO_TRANS_SEQ_READ_16	0x02	/* Sequential Port I/O Read  16-bit */
+#define OBMF_IO_TRANS_SEQ_WRITE_16	0x03	/* Sequential Port I/O Write 16-bit */
+#define OBMF_IO_TRANS_SEQ_READ_32	0x04	/* Sequential Port I/O Read  32-bit */
+#define OBMF_IO_TRANS_SEQ_WRITE_32	0x05	/* Sequential Port I/O Write 32-bit */
+#define OBMF_IO_TRANS_FIXED_READ_8	0x06	/* Fixed Port I/O Read  8-bit  */
+#define OBMF_IO_TRANS_FIXED_WRITE_8	0x07	/* Fixed Port I/O Write 8-bit  */
+#define OBMF_IO_TRANS_FIXED_READ_16	0x08	/* Fixed Port I/O Read  16-bit */
+#define OBMF_IO_TRANS_FIXED_WRITE_16	0x09	/* Fixed Port I/O Write 16-bit */
+#define OBMF_IO_TRANS_FIXED_READ_32	0x0A	/* Fixed Port I/O Read  32-bit */
+#define OBMF_IO_TRANS_FIXED_WRITE_32	0x0B	/* Fixed Port I/O Write 32-bit */
+
+/* IO channel-specific status codes */
+#define OBMF_IO_STATUS_ADDR_OUT_OF_RANGE	0x40
+#define OBMF_IO_STATUS_ACCESS_DENIED		0x41
+
+/* ---------- IO Channel Configuration Data offsets (spec §Channel Cfg Data) */
+#define OBMF_IO_CFG_TX_TYPES_SUPPORTED	0x00	/* u16 LE: transaction types bitmask */
+#define OBMF_IO_CFG_RANGE_COUNT		0x02	/* u16 LE: number of IO_RANGE_CFG entries */
+#define OBMF_IO_CFG_RANGE_ARRAY		0x04	/* 10B * count: IO_RANGE_CFG entries */
+
+/* TRANSACTION_TYPES_SUPPORTED bitmask (bits [11:0]) */
+#define OBMF_IO_TX_SEQ_READ_8		BIT(0)
+#define OBMF_IO_TX_SEQ_WRITE_8		BIT(1)
+#define OBMF_IO_TX_SEQ_READ_16		BIT(2)
+#define OBMF_IO_TX_SEQ_WRITE_16		BIT(3)
+#define OBMF_IO_TX_SEQ_READ_32		BIT(4)
+#define OBMF_IO_TX_SEQ_WRITE_32		BIT(5)
+#define OBMF_IO_TX_FIXED_READ_8		BIT(6)
+#define OBMF_IO_TX_FIXED_WRITE_8	BIT(7)
+#define OBMF_IO_TX_FIXED_READ_16	BIT(8)
+#define OBMF_IO_TX_FIXED_WRITE_16	BIT(9)
+#define OBMF_IO_TX_FIXED_READ_32	BIT(10)
+#define OBMF_IO_TX_FIXED_WRITE_32	BIT(11)
+
+/* IO_RANGE_CFG offsets (10 bytes per entry, spec §IO RANGE_CFG) */
+#define OBMF_IO_RANGE_FLAGS		0x00	/* u8:  RANGE_ENABLE = BIT(0) */
+#define OBMF_IO_RANGE_FLAGS_ENABLE	BIT(0)
+/* byte 0x01 reserved for alignment */
+#define OBMF_IO_RANGE_START		0x02	/* u16 LE: first port number in range */
+#define OBMF_IO_RANGE_END		0x04	/* u16 LE: last port number in range  */
+#define OBMF_IO_RANGE_MASK		0x06	/* u16 LE: address mask               */
+#define OBMF_IO_RANGE_SERVICE_TYPE	0x08	/* u16 LE: service type               */
+#define OBMF_IO_RANGE_CFG_SIZE		10	/* bytes per IO_RANGE_CFG entry       */
+
+/* IO_RANGE_SERVICE_TYPE values (spec §IO RANGE_CFG) */
+#define OBMF_IO_SVC_RESERVED		0x0000
+#define OBMF_IO_SVC_KCS			0x0001	/* KCS IPMI interface */
+#define OBMF_IO_SVC_BT			0x0002	/* BT IPMI interface */
+#define OBMF_IO_SVC_RTC			0x0003	/* Real-Time Clock */
+#define OBMF_IO_SVC_POSTCODES		0x0004	/* BIOS POST codes (port 0x80) */
+#define OBMF_IO_SVC_SUPER_IO		0x0005	/* Super I/O controller */
+#define OBMF_IO_SVC_COMA		0x0006	/* COM-A serial port */
+#define OBMF_IO_SVC_COMB		0x0007	/* COM-B serial port */
+#define OBMF_IO_SVC_I8042		0x0008	/* 8042 keyboard/mouse controller */
+#define OBMF_IO_SVC_MICROCTRL1		0x0009	/* Microcontroller 1 */
+#define OBMF_IO_SVC_MICROCTRL2		0x000A	/* Microcontroller 2 */
+
+/* ---------- IO misc device ioctl ------------------------------------------ */
+struct obmf_io_xfer {
+	__u8	transaction;	/* in:  OBMF_IO_TRANS_SEQ_WRITE_8 etc. */
+	__u8	status;		/* out: IO response status byte */
+	__u16	port_addr;	/* in:  I/O port address (16-bit) */
+	__u16	wr_len;		/* in:  write data length (0 for reads) */
+	__u16	rd_len;		/* in/out: read buffer length / bytes returned */
+	__u64	wr_data_ptr;	/* in:  userspace pointer to write data */
+	__u64	rd_data_ptr;	/* out: userspace pointer to read buffer */
+};
+
+/* Uses same magic 'O' as OBMF_MMIO_IOC_MAGIC; number 2 avoids collision */
+#define OBMF_IO_IOC_MAGIC	'O'
+#define OBMF_IO_IOC_XFER	_IOWR(OBMF_IO_IOC_MAGIC, 2, struct obmf_io_xfer)
 
 /* ---------- Serial Optimised Channel (v0.9) ------------------------------- */
 /* Operation/Event bitfield (request byte 0) */
@@ -536,6 +627,19 @@ void obmf_mmio_unregister(struct obmf_channel *ch);
 void obmf_mmio_handle_dev_request(struct obmf_channel *ch,
 				 u8 transaction, u8 tag,
 				 const u8 *data, int len);
+
+/* ---------- IO misc device (obmf-io-misc.c) -------------------------------- */
+int  obmf_io_register(struct obmf_device *odev, struct obmf_channel *ch);
+void obmf_io_unregister(struct obmf_channel *ch);
+void obmf_io_handle_dev_request(struct obmf_channel *ch,
+				u8 transaction, u8 tag,
+				const u8 *data, int len);
+
+/* ---------- Transport: IO port request (obmf-transport.c) ----------------- */
+int  obmf_send_io_request(struct obmf_device *odev, struct obmf_channel *ch,
+			  u8 transaction, u16 port_addr,
+			  const void *wr_data, int wr_len,
+			  void *rd_data, int rd_len);
 
 /* ---------- OEM (obmf-oem.c) ---------------------------------------------- */
 int  obmf_oem_register(struct obmf_device *odev, struct obmf_channel *ch);
