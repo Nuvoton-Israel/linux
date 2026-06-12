@@ -175,6 +175,14 @@ static void obmf_register_channel(struct obmf_device *odev,
 		 */
 		rv = obmf_mmio_register(odev, ch);
 		break;
+	case OBMF_TYPE_IO:
+		/*
+		 * I/O Port Channel (v0.9.2) — register misc device.
+		 * Dedicated channel for x86 I/O port transactions including
+		 * BIOS POST code reporting via port 0x0080.
+		 */
+		rv = obmf_io_register(odev, ch);
+		break;
 	default:
 		if (ch->channel_type >= OBMF_TYPE_OEM_MIN &&
 		    ch->channel_type <= OBMF_TYPE_OEM_MAX) {
@@ -194,16 +202,19 @@ static void obmf_register_channel(struct obmf_device *odev,
 	else
 		obmf_channel_set_enabled(odev, ch);
 
-	/* Create sysfs "device" symlink for non-MMIO channels */
+	/* Create sysfs "device" symlink for non-MMIO/non-IO channels */
 	if (!rv && ch->sysfs_dev && ch->kobj &&
-	    ch->channel_type != OBMF_TYPE_MMIO)
+	    ch->channel_type != OBMF_TYPE_MMIO &&
+	    ch->channel_type != OBMF_TYPE_IO)
 		sysfs_create_link(ch->kobj, &ch->sysfs_dev->kobj, "device");
 }
 
 static void obmf_unregister_channel(struct obmf_channel *ch)
 {
-	/* Remove sysfs "device" symlink for non-MMIO channels */
-	if (ch->sysfs_dev && ch->kobj && ch->channel_type != OBMF_TYPE_MMIO)
+	/* Remove sysfs "device" symlink for non-MMIO/non-IO channels */
+	if (ch->sysfs_dev && ch->kobj &&
+	    ch->channel_type != OBMF_TYPE_MMIO &&
+	    ch->channel_type != OBMF_TYPE_IO)
 		sysfs_remove_link(ch->kobj, "device");
 
 	switch (ch->channel_type) {
@@ -224,6 +235,9 @@ static void obmf_unregister_channel(struct obmf_channel *ch)
 		break;
 	case OBMF_TYPE_MMIO:
 		obmf_mmio_unregister(ch);
+		break;
+	case OBMF_TYPE_IO:
+		obmf_io_unregister(ch);
 		break;
 	default:
 		if (ch->channel_type >= OBMF_TYPE_OEM_MIN &&
