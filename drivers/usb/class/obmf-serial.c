@@ -45,9 +45,25 @@ static void obmf_serial_port_shutdown(struct tty_port *port)
 {
 }
 
+/*
+ * Called by the tty layer when the port's last reference is dropped (i.e.
+ * after both the driver has released its reference and any open fd has been
+ * closed).  Freeing the container here — instead of with a bare kfree() at
+ * unregister time — guarantees the tty_port (and its buffer work) stays
+ * valid as long as userspace still has the device open.
+ */
+static void obmf_serial_port_destruct(struct tty_port *port)
+{
+	struct obmf_serial_port *sp =
+		container_of(port, struct obmf_serial_port, port);
+
+	kfree(sp);
+}
+
 static const struct tty_port_operations obmf_serial_port_ops = {
 	.activate = obmf_serial_port_activate,
 	.shutdown = obmf_serial_port_shutdown,
+	.destruct = obmf_serial_port_destruct,
 };
 
 /* ------------------------------------------------------------------ */
@@ -120,15 +136,41 @@ static int obmf_serial_install(struct tty_driver *driver,
 	struct obmf_device *odev = driver->driver_state;
 	struct obmf_serial_port *sp;
 	int idx = tty->index;
+	int rv;
 
 	if (!odev || idx >= odev->num_serial)
 		return -ENODEV;
 
-	sp = &((struct obmf_serial_port *)odev->tty_ports)[idx];
+	sp = ((struct obmf_serial_port **)odev->tty_ports)[idx];
+	if (!sp)
+		return -ENODEV;
+
+	/*
+	 * Hold a port reference for the lifetime of this open.  It is
+	 * released in obmf_serial_cleanup() when the tty is finally
+	 * released.  This keeps the port (and its buffer work) alive even
+	 * if the device is unplugged while obmc-console still has it open.
+	 */
+	tty_port_get(&sp->port);
+
 	tty->driver_data = sp;
 	tty->port = &sp->port;
 
-	return tty_standard_install(driver, tty);
+	rv = tty_standard_install(driver, tty);
+	if (rv) {
+		tty_port_put(&sp->port);
+		return rv;
+	}
+
+	return 0;
+}
+
+static void obmf_serial_cleanup(struct tty_struct *tty)
+{
+	struct obmf_serial_port *sp = tty->driver_data;
+
+	/* Drop the reference taken in obmf_serial_install(). */
+	tty_port_put(&sp->port);
 }
 
 static void obmf_serial_set_termios(struct tty_struct *tty,
@@ -141,6 +183,7 @@ static void obmf_serial_set_termios(struct tty_struct *tty,
 
 static const struct tty_operations obmf_serial_ops = {
 	.install      = obmf_serial_install,
+	.cleanup      = obmf_serial_cleanup,
 	.open         = obmf_serial_open,
 	.close        = obmf_serial_close,
 	.write        = obmf_serial_write,
@@ -219,7 +262,7 @@ void obmf_serial_handle_dev_request(struct obmf_channel *ch,
 
 int obmf_serial_init(struct obmf_device *odev)
 {
-	struct obmf_serial_port *ports;
+	struct obmf_serial_port **ports;
 	struct tty_driver *drv;
 	int rv, i;
 
@@ -233,7 +276,9 @@ int obmf_serial_init(struct obmf_device *odev)
 	if (odev->num_serial == 0)
 		return 0;
 
-	/* Pre-allocate ports array for all serial channels */
+	/* Pre-allocate the array of port pointers for all serial channels.
+	 * Each port is allocated individually in obmf_serial_register() so its
+	 * lifetime can be managed by the tty layer's reference count. */
 	ports = kcalloc(odev->num_serial, sizeof(*ports), GFP_KERNEL);
 	if (!ports)
 		return -ENOMEM;
@@ -292,7 +337,7 @@ void obmf_serial_exit(struct obmf_device *odev)
 
 int obmf_serial_register(struct obmf_device *odev, struct obmf_channel *ch)
 {
-	struct obmf_serial_port *ports = odev->tty_ports;
+	struct obmf_serial_port **ports = odev->tty_ports;
 	struct obmf_serial_port *sp;
 	int idx;
 	struct device *dev;
@@ -302,25 +347,31 @@ int obmf_serial_register(struct obmf_device *odev, struct obmf_channel *ch)
 
 	/* Find next free slot by scanning ports array */
 	for (idx = 0; idx < odev->num_serial; idx++) {
-		if (!ports[idx].ch)
+		if (!ports[idx])
 			break;
 	}
 	if (idx >= odev->num_serial)
 		return -ENOSPC;
 
-	sp = &ports[idx];
+	sp = kzalloc(sizeof(*sp), GFP_KERNEL);
+	if (!sp)
+		return -ENOMEM;
+
 	sp->ch    = ch;
 	sp->index = idx;
 	tty_port_init(&sp->port);
 	sp->port.ops = &obmf_serial_port_ops;
 
-	ch->priv = sp;
+	ch->priv   = sp;
+	ports[idx] = sp;
 
 	dev = tty_port_register_device(&sp->port, odev->tty_drv, idx,
 				       &odev->intf->dev);
 	if (IS_ERR(dev)) {
-		sp->ch = NULL;
-		ch->priv = NULL;
+		ports[idx] = NULL;
+		ch->priv   = NULL;
+		/* Drops the initial reference; .destruct frees sp. */
+		tty_port_put(&sp->port);
 		return PTR_ERR(dev);
 	}
 
@@ -334,10 +385,27 @@ int obmf_serial_register(struct obmf_device *odev, struct obmf_channel *ch)
 void obmf_serial_unregister(struct obmf_channel *ch)
 {
 	struct obmf_serial_port *sp = ch->priv;
+	struct obmf_device *odev;
 
-	if (sp && sp->ch->odev->tty_drv) {
-		tty_unregister_device(sp->ch->odev->tty_drv, sp->index);
-		tty_port_destroy(&sp->port);
-		ch->priv = NULL;
-	}
+	if (!sp)
+		return;
+
+	odev = sp->ch->odev;
+	if (!odev->tty_drv)
+		return;
+
+	/*
+	 * Hang up any process that still holds the tty open (e.g.
+	 * obmc-console) so it observes EOF/HUP, then remove the device node.
+	 * The port is freed via .destruct only after the last fd is closed,
+	 * so a concurrent poll()/flush on a still-open fd can never touch
+	 * freed memory.
+	 */
+	tty_port_tty_hangup(&sp->port, false);
+	tty_port_unregister_device(&sp->port, odev->tty_drv, sp->index);
+
+	((struct obmf_serial_port **)odev->tty_ports)[sp->index] = NULL;
+	ch->priv = NULL;
+	/* Drops the driver's reference; .destruct frees sp once unused. */
+	tty_port_put(&sp->port);
 }

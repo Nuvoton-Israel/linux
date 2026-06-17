@@ -424,7 +424,7 @@ struct obmf_device {
 #endif
 #if IS_ENABLED(CONFIG_USB_OBMF_SERIAL)
 	struct tty_driver	*tty_drv;
-	void			*tty_ports;	/* struct obmf_serial_port[] */
+	void			*tty_ports;	/* struct obmf_serial_port *[] */
 	int			num_serial;
 	char			tty_drv_name[16];
 #endif
