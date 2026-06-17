@@ -519,6 +519,69 @@ void obmf_stall_recovery_work(struct work_struct *work)
 }
 
 /* ------------------------------------------------------------------ */
+/* USB reset handlers                                                  */
+/*                                                                     */
+/* Implementing pre_reset/post_reset keeps the interface bound across  */
+/* usb_reset_device() (used by STALL recovery).  Without them the USB  */
+/* core would unbind+rebind the interface, tearing down the tty ports  */
+/* while obmc-console still has ttyOBMF open — leading to flushes of a  */
+/* freed tty_port work item (workqueue.c WARN in __flush_work).        */
+/* ------------------------------------------------------------------ */
+
+static int obmf_pre_reset(struct usb_interface *intf)
+{
+	struct obmf_device *odev = usb_get_intfdata(intf);
+
+	if (!odev)
+		return 0;
+
+	/*
+	 * Quiesce I/O before the reset: stop the continuous Bulk IN URB and
+	 * take tx_lock so no request is in flight while the device resets.
+	 * tx_lock is released again in obmf_post_reset().
+	 */
+	usb_kill_urb(odev->rx_urb);
+	mutex_lock(&odev->tx_lock);
+	return 0;
+}
+
+static int obmf_post_reset(struct usb_interface *intf)
+{
+	struct obmf_device *odev = usb_get_intfdata(intf);
+	int i, rv;
+
+	if (!odev)
+		return 0;
+
+	mutex_unlock(&odev->tx_lock);
+
+	if (odev->disconnected)
+		return 0;
+
+	/* Resubmit the continuous Bulk IN URB so RX resumes. */
+	rv = usb_submit_urb(odev->rx_urb, GFP_KERNEL);
+	if (rv)
+		dev_err(&intf->dev,
+			"post_reset: failed to resubmit rx URB: %d\n", rv);
+
+	/*
+	 * A device reset clears CHANNEL_CONTROL.ENABLE, so re-enable every
+	 * channel that was registered to resume data flow (e.g. the serial
+	 * channel backing ttyOBMF).
+	 */
+	for (i = 1; i < odev->num_channels; i++) {
+		struct obmf_channel *ch = &odev->channels[i];
+
+		if (ch->channel_type != 0xFF)
+			obmf_channel_set_enabled(odev, ch);
+	}
+
+	odev->bulk_in_stall_count  = 0;
+	odev->bulk_out_stall_count = 0;
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* USB driver registration                                             */
 /* ------------------------------------------------------------------ */
 
@@ -533,6 +596,8 @@ static struct usb_driver obmf_driver = {
 	.name			= "obmf",
 	.probe			= obmf_probe,
 	.disconnect		= obmf_disconnect,
+	.pre_reset		= obmf_pre_reset,
+	.post_reset		= obmf_post_reset,
 	.id_table		= obmf_ids,
 	.supports_autosuspend	= 1,
 	.disable_hub_initiated_lpm = 1,
