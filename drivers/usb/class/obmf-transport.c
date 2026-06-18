@@ -61,8 +61,10 @@ int obmf_send_response(struct obmf_device *odev, u8 channel_id,
 	/*
 	 * Segment the response into USB-packet-sized chunks so the device
 	 * always sees a complete OBMF Common Header at the start of each
-	 * USB packet.  hdr->size carries the *total* payload length across
-	 * all segments; the device accumulates until it has that many bytes.
+	 * USB packet.  The *first* packet's hdr->size carries the total
+	 * payload length so the device knows how many bytes to accumulate;
+	 * each subsequent segment's hdr->size carries the length of that
+	 * segment's chunk only.
 	 */
 	seg_data_max = odev->max_wr_transfer_size - OBMF_COMMON_HDR_SIZE;
 	if (seg_data_max <= 0)
@@ -74,10 +76,12 @@ int obmf_send_response(struct obmf_device *odev, u8 channel_id,
 	hdr->channel      = channel_id;
 	hdr->channel_type = channel_type;
 	OBMF_HDR_SET_RESPONSE(hdr, status);
-	hdr->size         = cpu_to_le16(payload_len);
 
 	do {
 		int chunk = min(payload_len - offset, seg_data_max);
+
+		/* First packet advertises the total; later packets the chunk */
+		hdr->size = cpu_to_le16(offset == 0 ? payload_len : chunk);
 
 		if (chunk > 0)
 			memcpy(odev->tx_buf + OBMF_COMMON_HDR_SIZE,
