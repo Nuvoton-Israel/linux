@@ -29,6 +29,7 @@
 #define NPCM8XX_GCR_DSCNT	0x078
 #define NPCM8XX_GCR_INTCR4	0x0C0
 #define NPCM8XX_GCR_I2CSEGSEL	0x0e0
+#define NPCM8XX_GCR_VSRCR	0x0E8
 #define NPCM8XX_GCR_MFSEL1	0x260
 #define NPCM8XX_GCR_MFSEL2	0x264
 #define NPCM8XX_GCR_MFSEL3	0x268
@@ -2514,6 +2515,7 @@ static int npcm8xx_pinctrl_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct npcm8xx_pinctrl *pctrl;
+	u32 voltage_pin_set;
 	int ret;
 
 	pctrl = devm_kzalloc(dev, sizeof(*pctrl), GFP_KERNEL);
@@ -2528,6 +2530,10 @@ static int npcm8xx_pinctrl_probe(struct platform_device *pdev)
 	if (IS_ERR(pctrl->gcr_regmap))
 		return dev_err_probe(dev, PTR_ERR(pctrl->gcr_regmap),
 				      "Failed to find nuvoton,sysgcr property\n");
+
+	if (!of_property_read_u32(pdev->dev.of_node, "nuvoton,vs-pinconfig",
+				  &voltage_pin_set))
+		regmap_write(pctrl->gcr_regmap, NPCM8XX_GCR_VSRCR, voltage_pin_set);
 
 	ret = npcm8xx_gpio_fw(pctrl);
 	if (ret < 0)
