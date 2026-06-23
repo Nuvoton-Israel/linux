@@ -225,6 +225,7 @@ struct svc_i3c_drvdata {
  * @drvdata: Driver data
  * @enabled_events: Bit masks for enable events (IBI, HotJoin).
  * @mctrl_config: Configuration value in SVC_I3C_MCTRL for setting speed back.
+ * @hj_work: Hot-join work
  */
 struct svc_i3c_master {
 	struct i3c_master_controller base;
@@ -261,6 +262,7 @@ struct svc_i3c_master {
 	const struct svc_i3c_drvdata *drvdata;
 	u64 enabled_events;
 	u32 mctrl_config;
+	struct work_struct hj_work;
 };
 
 /**
@@ -368,6 +370,22 @@ static inline struct svc_i3c_master *
 to_svc_i3c_master(struct i3c_master_controller *master)
 {
 	return container_of(master, struct svc_i3c_master, base);
+}
+
+static void svc_i3c_master_hj_work(struct work_struct *work)
+{
+	struct svc_i3c_master *master;
+
+	master = container_of(work, struct svc_i3c_master, hj_work);
+
+	if (is_events_enabled(master, SVC_I3C_EVENT_HOTJOIN)) {
+		i3c_master_do_daa(&master->base);
+	} else {
+		down_write(&master->base.bus.lock);
+		i3c_master_disec_locked(&master->base, I3C_BROADCAST_ADDR,
+					I3C_CCC_EVENT_HJ);
+		up_write(&master->base.bus.lock);
+	}
 }
 
 static struct i3c_dev_desc *
@@ -630,9 +648,10 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 		}
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_HOT_JOIN:
-		svc_i3c_master_emit_stop(master);
 		if (is_events_enabled(master, SVC_I3C_EVENT_HOTJOIN))
-			i3c_master_queue_hotjoin(&master->base);
+			svc_i3c_master_emit_stop(master);
+
+		queue_work(master->base.wq, &master->hj_work);
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
 		svc_i3c_master_emit_stop(master);
@@ -2031,6 +2050,7 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 		reset_control_deassert(reset);
 	}
 
+	INIT_WORK(&master->hj_work, svc_i3c_master_hj_work);
 	mutex_init(&master->lock);
 
 	ret = devm_request_irq(dev, master->irq, svc_i3c_master_irq_handler,
@@ -2101,6 +2121,7 @@ static void svc_i3c_master_remove(struct platform_device *pdev)
 {
 	struct svc_i3c_master *master = platform_get_drvdata(pdev);
 
+	cancel_work_sync(&master->hj_work);
 	i3c_master_unregister(&master->base);
 
 	pm_runtime_dont_use_autosuspend(&pdev->dev);
