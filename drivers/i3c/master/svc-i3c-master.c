@@ -449,7 +449,14 @@ static void svc_i3c_master_hj_work(struct work_struct *work)
 
 	master = container_of(work, struct svc_i3c_master, hj_work);
 
-	i3c_master_do_daa(&master->base);
+	if (master->en_hj) {
+		i3c_master_do_daa(&master->base);
+	} else {
+		down_write(&master->base.bus.lock);
+		i3c_master_disec_locked(&master->base, I3C_BROADCAST_ADDR,
+					I3C_CCC_EVENT_HJ);
+		up_write(&master->base.bus.lock);
+	}
 }
 
 static struct i3c_dev_desc *
@@ -666,7 +673,10 @@ static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, bool auto
 		svc_i3c_master_handle_ibi(master, dev);
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_HOT_JOIN:
-		svc_i3c_master_ack_ibi(master, false);
+		if (master->en_hj)
+			svc_i3c_master_ack_ibi(master, false);
+		else
+			svc_i3c_master_nack_ibi(master);
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
 		svc_i3c_master_nack_ibi(master);
@@ -719,7 +729,9 @@ static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master, bool auto
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_HOT_JOIN:
 		/* Emit stop to avoid the INVREQ error after DAA process */
-		svc_i3c_master_emit_stop(master);
+		if (master->en_hj)
+			svc_i3c_master_emit_stop(master);
+
 		queue_work(master->base.wq, &master->hj_work);
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
