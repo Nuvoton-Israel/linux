@@ -377,7 +377,15 @@ static void svc_i3c_master_hj_work(struct work_struct *work)
 	struct svc_i3c_master *master;
 
 	master = container_of(work, struct svc_i3c_master, hj_work);
-	i3c_master_do_daa(&master->base);
+
+	if (is_events_enabled(master, SVC_I3C_EVENT_HOTJOIN)) {
+		i3c_master_do_daa(&master->base);
+	} else {
+		down_write(&master->base.bus.lock);
+		i3c_master_disec_locked(&master->base, I3C_BROADCAST_ADDR,
+					I3C_CCC_EVENT_HJ);
+		up_write(&master->base.bus.lock);
+	}
 }
 
 static struct i3c_dev_desc *
@@ -639,9 +647,10 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 		}
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_HOT_JOIN:
-		svc_i3c_master_emit_stop(master);
 		if (is_events_enabled(master, SVC_I3C_EVENT_HOTJOIN))
-			queue_work(master->base.wq, &master->hj_work);
+			svc_i3c_master_emit_stop(master);
+
+		queue_work(master->base.wq, &master->hj_work);
 		break;
 	case SVC_I3C_MSTATUS_IBITYPE_MASTER_REQUEST:
 		svc_i3c_master_emit_stop(master);
