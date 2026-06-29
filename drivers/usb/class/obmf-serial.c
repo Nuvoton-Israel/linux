@@ -13,7 +13,12 @@
 #include <linux/tty_flip.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
+#include <linux/version.h>
+#if __has_include(<linux/unaligned.h>)
 #include <linux/unaligned.h>
+#else
+#include <asm/unaligned.h>
+#endif
 
 #include "obmf.h"
 
@@ -80,28 +85,36 @@ static void obmf_serial_close(struct tty_struct *tty, struct file *filp)
 	tty_port_close(tty->port, tty, filp);
 }
 
-static ssize_t obmf_serial_write(struct tty_struct *tty, const u8 *buf,
-				 size_t count)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+static ssize_t obmf_serial_write(struct tty_struct *tty,
+				 const u8 *buf, size_t count)
+#else
+static int obmf_serial_write(struct tty_struct *tty,
+			    const unsigned char *buf, int count)
+#endif
 {
 	struct obmf_serial_port *sp = tty->driver_data;
 	struct obmf_channel *ch = sp->ch;
 	struct obmf_device *odev = ch->odev;
 	u8 req[3 + 512]; /* op/event + charcount(2) + data */
 	u8 resp[3];      /* ack/nack(1) + accepted_count(2) */
+	int tx_count;
 	int send_len;
 	int rv;
 	u16 accepted;
 
-	if (count == 0)
+	if (count <= 0)
 		return 0;
 
 	if (count > 512)
 		count = 512;
 
+	tx_count = (int)count;
+
 	req[0] = 0; /* Operation/Event = 0 (normal TX) */
-	put_unaligned_le16((u16)count, &req[1]);
-	memcpy(&req[3], buf, count);
-	send_len = 3 + count;
+	put_unaligned_le16((u16)tx_count, &req[1]);
+	memcpy(&req[3], buf, tx_count);
+	send_len = 3 + tx_count;
 
 	mutex_lock(&ch->lock);
 	rv = obmf_send_request(odev, ch, OBMF_TYPE_SERIAL,
@@ -119,10 +132,10 @@ static ssize_t obmf_serial_write(struct tty_struct *tty, const u8 *buf,
 			/* NACK: return accepted count (may be partial) */
 			return accepted > 0 ? accepted : -EAGAIN;
 		}
-		return accepted > 0 ? accepted : count;
+		return accepted > 0 ? accepted : tx_count;
 	}
 
-	return count;
+	return tx_count;
 }
 
 static unsigned int obmf_serial_write_room(struct tty_struct *tty)

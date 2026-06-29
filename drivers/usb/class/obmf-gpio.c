@@ -12,7 +12,12 @@
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
+#include <linux/version.h>
+#if __has_include(<linux/unaligned.h>)
 #include <linux/unaligned.h>
+#else
+#include <asm/unaligned.h>
+#endif
 
 #include "obmf.h"
 
@@ -646,6 +651,9 @@ int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 		return rv;
 	}
 
+	ch->priv = gd;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+	/* 6.12+: use public helper APIs and point to gpiochipX device */
 	{
 		struct gpio_device *gdev;
 
@@ -655,8 +663,10 @@ int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 			gpio_device_put(gdev);
 		}
 	}
-
-	ch->priv = gd;
+#else
+	/* fallback: avoid touching gpiodev internals */
+	ch->sysfs_dev = NULL;
+#endif
 	dev_info(&odev->intf->dev, "ch%u: registered GPIO chip (%d lines)\n",
 		 ch->channel_id, ngpio);
 	return 0;
