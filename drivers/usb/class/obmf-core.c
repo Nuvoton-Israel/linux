@@ -12,7 +12,11 @@
 #include <linux/slab.h>
 #include <linux/usb.h>
 #include <linux/idr.h>
+#if __has_include(<linux/unaligned.h>)
 #include <linux/unaligned.h>
+#else
+#include <asm/unaligned.h>
+#endif
 
 #include "obmf.h"
 
