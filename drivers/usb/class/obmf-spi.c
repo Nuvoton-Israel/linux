@@ -20,7 +20,11 @@
 #include <linux/slab.h>
 #include <linux/mtd/mtd.h>
 #include <linux/usb.h>
+#if __has_include(<linux/unaligned.h>)
 #include <linux/unaligned.h>
+#else
+#include <asm/unaligned.h>
+#endif
 
 #include "obmf.h"
 
