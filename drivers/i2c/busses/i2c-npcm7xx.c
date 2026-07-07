@@ -2596,6 +2596,7 @@ static void npcm_i2c_init_debugfs(struct platform_device *pdev,
 	debugfs_create_file("i2c_speed", 0644, bus->adap.debugfs, bus, &i2c_clock_ops);
 }
 
+#if IS_ENABLED(CONFIG_I2C_SLAVE)
 void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable)
 {
 	struct npcm_i2c *bus = i2c_get_adapdata(client->adapter);
@@ -2608,6 +2609,7 @@ void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable)
 	spin_unlock_irqrestore(&bus->lock, flags);
 }
 EXPORT_SYMBOL(npcm_i2c_client_slave_enable);
+#endif
 
 static int npcm_i2c_probe_bus(struct platform_device *pdev)
 {
