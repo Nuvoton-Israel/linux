@@ -45,6 +45,7 @@ config CX_ECAT
 	  To compile this driver as a module, choose M here. The module
 	  will be called ec_bhf.
 
+source "drivers/net/ethernet/nuvoton/Kconfig"
 source "drivers/net/ethernet/broadcom/Kconfig"
 source "drivers/net/ethernet/cadence/Kconfig"
 source "drivers/net/ethernet/calxeda/Kconfig"
