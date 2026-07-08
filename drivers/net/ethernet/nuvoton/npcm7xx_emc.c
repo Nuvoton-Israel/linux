@@ -692,7 +692,7 @@ static void adjust_link(struct net_device *netdev)
 }
 
 static void npcm7xx_write_cam(struct net_device *netdev,
-			      unsigned int x, unsigned char *pval)
+          unsigned int x, const unsigned char *pval)
 {
 	struct npcm7xx_ether *ether = netdev_priv(netdev);
 	u32 msw, lsw;
@@ -1760,10 +1760,10 @@ static int npcm7xx_ether_ioctl(struct net_device *netdev,
 static void npcm7xx_get_drvinfo(struct net_device *netdev,
 				struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
-	strlcpy(info->fw_version, "N/A", sizeof(info->fw_version));
-	strlcpy(info->bus_info, "N/A", sizeof(info->bus_info));
+	strscpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
+	strscpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
+	strscpy(info->fw_version, "N/A", sizeof(info->fw_version));
+	strscpy(info->bus_info, "N/A", sizeof(info->bus_info));
 }
 
 static int npcm7xx_get_settings(struct net_device *netdev,
@@ -2115,7 +2115,7 @@ failed_free:
 	return error;
 }
 
-static int npcm7xx_ether_remove(struct platform_device *pdev)
+static void npcm7xx_ether_remove(struct platform_device *pdev)
 {
 	struct net_device *netdev = platform_get_drvdata(pdev);
 	struct npcm7xx_ether *ether = netdev_priv(netdev);
@@ -2143,7 +2143,7 @@ static int npcm7xx_ether_remove(struct platform_device *pdev)
 	iounmap(ether->reg);
 	release_mem_region(ether->res->start, resource_size(ether->res));
 	free_netdev(netdev);
-	return 0;
+	return;
 }
 
 static struct platform_driver npcm7xx_ether_driver = {
