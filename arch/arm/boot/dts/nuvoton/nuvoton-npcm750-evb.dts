@@ -12,6 +12,8 @@
 	compatible = "nuvoton,npcm750-evb", "nuvoton,npcm750";
 
 	aliases {
+		ethernet0 = &emc0;
+		ethernet1 = &emc1;
 		ethernet2 = &gmac0;
 		ethernet3 = &gmac1;
 		serial0 = &serial0;
@@ -59,6 +61,18 @@
 
 &gmac1 {
 	phy-mode = "rgmii-id";
+	status = "okay";
+};
+
+&emc0 {
+	phy-mode = "rmii";
+	#use-ncsi; /* add this to support ncsi */
+	status = "okay";
+};
+
+&emc1 {
+	phy-mode = "rmii";
+	#use-ncsi; /* add this to support ncsi */
 	status = "okay";
 };
 
