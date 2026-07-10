@@ -11,7 +11,6 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/mfd/syscon.h>
-#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/mtd/mtd.h>
 #include <linux/of_address.h>
@@ -27,6 +26,7 @@
 #include <trace/events/npcm_espi_flash.h>
 
 #define DEVICE_NAME "npcm-espi-flash"
+#define ESPI_FLASH_MAX_REGIONS	4
 #define ESPIIE 0x0C
 #define  ESPIIE_CFGUPDIE BIT(1)
 #define  ESPIIE_FLASHRXIE BIT(4)
@@ -122,6 +122,21 @@ enum ESPI_FLASH_ERASE {
 	ESPI_FLASH_ERASE_64K = 2,
 };
 
+struct npcm_espi_flash;			/* forward declaration */
+
+/*
+ * Per memory-region state: one instance per DTS "memory-region" phandle.
+ * Each region gets its own MTD RAM device exposed to userspace.
+ */
+struct npcm_espi_region {
+	struct npcm_espi_flash	*parent;
+	struct mtd_info		mtd;
+	dma_addr_t		phys_addr;
+	resource_size_t		flash_size;
+	u8 __iomem		*vaddr;
+	char			name[32];
+};
+
 struct npcm_espi_flash {
 	struct device		*dev;
 	struct regmap		*espi_regmap;
@@ -129,16 +144,13 @@ struct npcm_espi_flash {
 	unsigned short		page_offset;	/* offset in flash address */
 	unsigned int		page_size;	/* of bytes per page */
 	struct mutex		lock;
-	struct mtd_info		mtd;
 	u8			erase_mask;
 	u32		tx_sts;
 	u32		rx_sts;
 	wait_queue_head_t	wq;
-	dma_addr_t		phys_addr;
-	resource_size_t		flash_size;
-	u8 __iomem		*vaddr;
 	int			irq;
-	struct miscdevice	miscdev;
+	struct npcm_espi_region	*regions[ESPI_FLASH_MAX_REGIONS];
+	int			nregions;
 };
 
 static bool npcm_espi_check_tag_ovr(struct npcm_espi_flash *priv,
@@ -218,7 +230,7 @@ static bool npcm_espi_check_addr(struct npcm_espi_flash *priv, uint8_t command,
 static long npcm_espi_flash_read(struct npcm_espi_flash *priv, int tag,
 				 loff_t from, size_t len, bool tovr)
 {
-	u32 *buffer = (uint32_t *)(priv->vaddr + from);
+	u32 *buffer = (uint32_t *)(priv->regions[0]->vaddr + from);
 	int cyc = CYC_SCS_CMP_WITH_DATA;
 	int ret = 0, tx_cnt, i;
 	u32 reg;
@@ -261,7 +273,7 @@ static long npcm_espi_flash_read(struct npcm_espi_flash *priv, int tag,
 static long npcm_espi_flash_write(struct npcm_espi_flash *priv, int tag,
 				  loff_t from, size_t len, bool tovr)
 {
-	u32 *buffer = (uint32_t *)(priv->vaddr + from);
+	u32 *buffer = (uint32_t *)(priv->regions[0]->vaddr + from);
 	int cyc = CYC_SCS_CMP_WITHOUT_DATA;
 	int ret = 0, tx_cnt, i;
 	size_t last_len;
@@ -289,7 +301,7 @@ static long npcm_espi_flash_write(struct npcm_espi_flash *priv, int tag,
 		/* be aware of less than 4 bytes */
 		if (last_len) {
 			regmap_read(priv->espi_regmap, FLASHRXRDHEAD, &reg);
-			memcpy((char *)priv->vaddr + from + len - last_len,
+			memcpy((char *)priv->regions[0]->vaddr + from + len - last_len,
 			       &reg, last_len);
 		}
 	}
@@ -312,7 +324,7 @@ static long npcm_espi_flash_write(struct npcm_espi_flash *priv, int tag,
 static long npcm_espi_flash_erase(struct npcm_espi_flash *priv, int tag,
 				  loff_t from, size_t len, bool tovr)
 {
-	u32 *buffer = (uint32_t *)(priv->vaddr + from);
+	u32 *buffer = (uint32_t *)(priv->regions[0]->vaddr + from);
 	int cyc = CYC_SCS_CMP_WITHOUT_DATA;
 	int erase_size = 0;
 	int ret = 0, i;
@@ -449,12 +461,13 @@ static int npcm_espi_flash_mtd_read(struct mtd_info *mtd,
 				    loff_t from, size_t len,
 				    size_t *retlen, u_char *buf)
 {
-	struct npcm_espi_flash *priv = mtd->priv;
+	struct npcm_espi_region *rgn = mtd->priv;
+	struct npcm_espi_flash *priv = rgn->parent;
 	int ret = 0;
 
 	mutex_lock(&priv->lock);
 
-	memcpy(buf, priv->vaddr + from, len);
+	memcpy(buf, rgn->vaddr + from, len);
 	*retlen = len;
 
 	mutex_unlock(&priv->lock);
@@ -464,12 +477,13 @@ static int npcm_espi_flash_mtd_read(struct mtd_info *mtd,
 static int npcm_espi_flash_mtd_erase(struct mtd_info *mtd,
 				     struct erase_info *instr)
 {
-	struct npcm_espi_flash *priv = mtd->priv;
+	struct npcm_espi_region *rgn = mtd->priv;
+	struct npcm_espi_flash *priv = rgn->parent;
 	int ret = 0;
 
 	mutex_lock(&priv->lock);
 
-	memset((char *)priv->vaddr + instr->addr, 0xff, instr->len);
+	memset((char *)rgn->vaddr + instr->addr, 0xff, instr->len);
 
 	mutex_unlock(&priv->lock);
 	return ret;
@@ -479,12 +493,13 @@ static int npcm_espi_flash_mtd_write(struct mtd_info *mtd,
 				     loff_t to, size_t len,
 				     size_t *retlen, const u_char *buf)
 {
-	struct npcm_espi_flash *priv = mtd->priv;
+	struct npcm_espi_region *rgn = mtd->priv;
+	struct npcm_espi_flash *priv = rgn->parent;
 	int ret = 0;
 
 	mutex_lock(&priv->lock);
 
-	memcpy((char *)priv->vaddr + to, buf, len);
+	memcpy((char *)rgn->vaddr + to, buf, len);
 	*retlen = len;
 
 	mutex_unlock(&priv->lock);
@@ -508,10 +523,9 @@ static void npcm_espi_flash_enable(struct npcm_espi_flash *priv)
 
 static int npcm_espi_flash_probe(struct platform_device *pdev)
 {
-	int ret;
+	int ret, i;
 	struct device_node *node;
 	struct resource resm;
-	struct mtd_info *mtd;
 	struct npcm_espi_flash *priv;
 	struct device *dev = &pdev->dev;
 
@@ -533,48 +547,75 @@ static int npcm_espi_flash_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	/* If memory-region is described in device tree then store */
-	node = of_parse_phandle(dev->of_node, "memory-region", 0);
-	if (node) {
+	/* Parse up to ESPI_FLASH_MAX_REGIONS memory-region phandles from DTS.
+	 * Region 0 is mandatory; regions 1-3 are optional.
+	 * Each region gets its own MTD RAM device named:
+	 *   npcm-espi-flash, npcm-espi-flash1, npcm-espi-flash2, npcm-espi-flash3
+	 */
+	for (i = 0; i < ESPI_FLASH_MAX_REGIONS; i++) {
+		struct npcm_espi_region *rgn;
+		struct mtd_info *mtd;
+
+		node = of_parse_phandle(dev->of_node, "memory-region", i);
+		if (!node) {
+			if (i == 0) {
+				dev_err(dev, "No DTS config, assign default flash mem Address\n");
+				return -EINVAL;
+			}
+			break;
+		}
+
 		ret = of_address_to_resource(node, 0, &resm);
 		of_node_put(node);
-		if (!ret) {
-			priv->flash_size = resource_size(&resm);
-			priv->phys_addr = resm.start;
-			priv->vaddr = devm_ioremap_resource_wc(dev, &resm);
-			if (IS_ERR(priv->vaddr)) {
-				dev_err(dev, "device mem io remap failed\n");
-				return PTR_ERR(priv->vaddr);
-			}
-		} else {
-			dev_err(dev, "No memory region\n");
+		if (ret) {
+			dev_err(dev, "memory-region[%d]: failed to get resource\n", i);
 			return -EINVAL;
 		}
-	} else {
-		dev_err(dev,
-			"No DTS config, assign default flash mem Address\n");
-		return -EINVAL;
-	}
 
-	mtd = &priv->mtd;
-	mtd->dev.parent = dev;
-	mtd->size = priv->flash_size;
-	mtd->flags = MTD_CAP_RAM;
-	mtd->_erase = npcm_espi_flash_mtd_erase;
-	mtd->_read = npcm_espi_flash_mtd_read;
-	mtd->_write = npcm_espi_flash_mtd_write;
-	mtd->type = MTD_RAM;
-	mtd->name = DEVICE_NAME;
-	mtd->erasesize = 4 * 1024;
-	mtd->writesize = 1;
-	mtd->owner = THIS_MODULE;
-	mtd->priv = priv;
+		rgn = devm_kzalloc(dev, sizeof(*rgn), GFP_KERNEL);
+		if (!rgn)
+			return -ENOMEM;
 
-	ret = mtd_device_register(mtd, NULL, 0);
-	if (ret) {
-		dev_notice(dev,
-			   "npcm-espi-flash: Failed to register mtd device\n");
-		return ret;
+		rgn->parent = priv;
+		rgn->flash_size = resource_size(&resm);
+		rgn->phys_addr = resm.start;
+		rgn->vaddr = devm_ioremap_resource_wc(dev, &resm);
+		if (IS_ERR(rgn->vaddr)) {
+			dev_err(dev, "memory-region[%d]: ioremap failed\n", i);
+			return PTR_ERR(rgn->vaddr);
+		}
+
+		if (i == 0)
+			snprintf(rgn->name, sizeof(rgn->name), "%s", DEVICE_NAME);
+		else
+			snprintf(rgn->name, sizeof(rgn->name), "%s%d",
+				 DEVICE_NAME, i);
+
+		mtd = &rgn->mtd;
+		mtd->dev.parent = dev;
+		mtd->size = rgn->flash_size;
+		mtd->flags = MTD_CAP_RAM;
+		mtd->_erase = npcm_espi_flash_mtd_erase;
+		mtd->_read = npcm_espi_flash_mtd_read;
+		mtd->_write = npcm_espi_flash_mtd_write;
+		mtd->type = MTD_RAM;
+		mtd->name = rgn->name;
+		mtd->erasesize = 4 * 1024;
+		mtd->writesize = 1;
+		mtd->owner = THIS_MODULE;
+		mtd->priv = rgn;
+
+		ret = mtd_device_register(mtd, NULL, 0);
+		if (ret) {
+			dev_err(dev, "memory-region[%d]: failed to register MTD device\n", i);
+			return ret;
+		}
+
+		priv->regions[i] = rgn;
+		priv->nregions++;
+		dev_info(dev, "memory-region[%d]: registered MTD \"%s\" (%llu MiB)\n",
+			 i, rgn->name,
+			 (unsigned long long)rgn->flash_size >> 20);
 	}
 
 	priv->irq = platform_get_irq(pdev, 0);
@@ -604,9 +645,10 @@ static int npcm_espi_flash_probe(struct platform_device *pdev)
 static void npcm_espi_flash_remove(struct platform_device *pdev)
 {
 	struct npcm_espi_flash *priv = platform_get_drvdata(pdev);
+	int i;
 
-	mtd_device_unregister(&priv->mtd);
-	kfree(priv->miscdev.name);
+	for (i = 0; i < priv->nregions; i++)
+		mtd_device_unregister(&priv->regions[i]->mtd);
 	mutex_destroy(&priv->lock);
 	kfree(priv);
 }
