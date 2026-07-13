@@ -10,8 +10,10 @@
 
 #include <linux/gpio/driver.h>
 #include <linux/interrupt.h>
+#include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
+#include <linux/usb/of.h>
 #include <linux/version.h>
 #if __has_include(<linux/unaligned.h>)
 #include <linux/unaligned.h>
@@ -530,6 +532,173 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 /* Registration                                                        */
 /* ------------------------------------------------------------------ */
 
+/**
+ * obmf_find_udev_of_node - locate the OF node for a USB device by walking
+ *                           the port-chain against the DT tree.
+ * @udev: the USB device to locate
+ *
+ * Builds a port-number chain from @udev back to the root hub, then descends
+ * the DT starting from the host-controller's OF node, following each "reg"
+ * cell to the next level.  This handles arbitrary USB topologies without any
+ * special DT properties; the DT author simply mirrors the physical wiring:
+ *
+ *   // Flat topology:  ehci1 --> smc@1
+ *   &ehci1 {
+ *       #address-cells = <1>;
+ *       #size-cells    = <0>;
+ *       smc@1 { reg = <1>; ... };
+ *   };
+ *
+ *   // Hub topology:  ehci1 --> hub@1 --> port1: smc@1, port2: smc@2
+ *   &ehci1 {
+ *       #address-cells = <1>;
+ *       #size-cells    = <0>;
+ *       hub@1 {
+ *           reg = <1>;
+ *           #address-cells = <1>;
+ *           #size-cells    = <0>;
+ *           smc@1 { reg = <1>; ... };
+ *           smc@2 { reg = <2>; ... };
+ *       };
+ *   };
+ *
+ * Returns a device_node with an elevated refcount (caller must call
+ * of_node_put()), or NULL if the DT does not describe this device.
+ */
+static struct device_node *obmf_find_udev_of_node(struct usb_device *udev)
+{
+	/* USB spec allows at most 7 tiers; 8 entries is more than sufficient */
+	u8 ports[8];
+	int depth = 0;
+	struct usb_device *dev = udev;
+	struct device_node *np, *child, *tmp;
+	int i;
+
+	/* Walk up to the root hub, recording port numbers along the way */
+	while (dev->parent) {
+		if (depth >= (int)ARRAY_SIZE(ports))
+			return NULL;
+		ports[depth++] = (u8)dev->portnum;
+		dev = dev->parent;
+	}
+
+	/*
+	 * dev is now the virtual root hub.  Its logical parent in the Linux
+	 * device hierarchy is the HCD platform device, whose of_node points
+	 * to the host-controller DT node (e.g. &ehci1).
+	 */
+	if (!dev->dev.parent)
+		return NULL;
+	np = of_node_get(dev->dev.parent->of_node);
+	if (!np)
+		return NULL;
+
+	/*
+	 * Descend the DT following ports[] in reverse order:
+	 * ports[depth-1] is closest to the host, ports[0] is the device.
+	 */
+	for (i = depth - 1; i >= 0; i--) {
+		child = NULL;
+		for_each_child_of_node(np, tmp) {
+			u32 reg;
+
+			if (!of_property_read_u32(tmp, "reg", &reg) &&
+			    reg == ports[i]) {
+				child = tmp; /* inherits ref from loop on break */
+				break;
+			}
+		}
+		of_node_put(np);
+		if (!child)
+			return NULL;
+		np = child;
+	}
+
+	return np; /* refcount elevated; caller must of_node_put() */
+}
+
+/**
+ * obmf_gpio_populate_names_from_of - read gpio-line-names for a channel from DTS
+ * @gd:    gpio data struct to populate
+ * @ch:    OBMF channel
+ * @ngpio: number of GPIO lines
+ *
+ * Locates the USB device's OF node via obmf_find_udev_of_node(), which walks
+ * the physical port-chain against the DT tree and therefore works for both
+ * flat topologies (host directly to device) and multi-level hub topologies
+ * (host -- hub -- device) without any special DT properties.
+ *
+ * Once the device node is found, locates a child node whose "reg" cell equals
+ * @ch->channel_id and reads its "gpio-line-names" property into
+ * @gd->gpio_names.
+ *
+ * Returns true if names were populated from DTS; the caller should fall back
+ * to reading names from SMC config data when this returns false.
+ */
+static bool obmf_gpio_populate_names_from_of(struct obmf_gpio_data *gd,
+					     struct obmf_channel *ch,
+					     int ngpio)
+{
+	struct usb_device *udev = ch->odev->udev;
+	struct device_node *udev_np, *ch_np = NULL, *tmp;
+	int i, count;
+	bool found = false;
+
+	/*
+	 * Obtain the USB device's OF node.  Prefer udev->dev.of_node when the
+	 * USB core has already matched it; otherwise walk the port-chain down
+	 * the DT to support both flat and hub topologies transparently.
+	 */
+	udev_np = of_node_get(udev->dev.of_node);
+	if (!udev_np)
+		udev_np = obmf_find_udev_of_node(udev);
+	if (!udev_np)
+		return false;
+
+	/* Find the child node whose "reg" cell matches this channel's ID */
+	for_each_child_of_node(udev_np, tmp) {
+		u32 reg;
+
+		if (!of_property_read_u32(tmp, "reg", &reg) &&
+		    reg == ch->channel_id) {
+			ch_np = tmp;
+			break;
+		}
+	}
+	of_node_put(udev_np);
+
+	if (!ch_np)
+		return false;
+
+	count = of_property_count_strings(ch_np, "gpio-line-names");
+	if (count > 0) {
+		gd->gpio_names = kcalloc(ngpio, sizeof(char *), GFP_KERNEL);
+		if (gd->gpio_names) {
+			int copy = min(count, ngpio);
+
+			if (copy != ngpio)
+				pr_warn("count (%d) does not match ngpio (%d) for channel %u\n",
+						count, ngpio, ch->channel_id);
+
+			for (i = 0; i < copy; i++) {
+				const char *name;
+
+				if (!of_property_read_string_index(ch_np,
+								   "gpio-line-names",
+								   i, &name) &&
+				    name[0])
+					gd->gpio_names[i] = kstrdup(name,
+								    GFP_KERNEL);
+			}
+			gd->gc.names = (const char *const *)gd->gpio_names;
+			found = true;
+		}
+	}
+
+	of_node_put(ch_np);
+	return found;
+}
+
 int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 {
 	struct obmf_gpio_data *gd;
@@ -582,25 +751,35 @@ int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 		struct obmf_channel *ch0 = &odev->channels[0];
 		int j;
 
-		gd->gpio_names = kcalloc(ngpio, sizeof(char *), GFP_KERNEL);
-		if (gd->gpio_names) {
-			for (j = 0; j < ngpio; j++) {
-				u32 entry_addr = ch->config_offset +
-						 OBMF_CHCFG_CONFIG_DATA + 2 +
-						 (u32)j * OBMF_GPIO_CONFIG_ENTRY_SIZE;
-				char namebuf[32];
+		/*
+		 * GPIO names: prefer DTS (gpio-line-names in channel child node)
+		 * so that two SMC devices connected simultaneously don't collide
+		 * on the names provided by each SMC's config data.  Fall back to
+		 * reading the names from the SMC config data only when the DTS
+		 * does not declare them.
+		 */
+		if (!obmf_gpio_populate_names_from_of(gd, ch, ngpio)) {
+			gd->gpio_names = kcalloc(ngpio, sizeof(char *), GFP_KERNEL);
+			if (gd->gpio_names) {
+				for (j = 0; j < ngpio; j++) {
+					u32 entry_addr = ch->config_offset +
+							 OBMF_CHCFG_CONFIG_DATA + 2 +
+							 (u32)j * OBMF_GPIO_CONFIG_ENTRY_SIZE;
+					char namebuf[32];
 
-				rv = obmf_send_mmio_request(odev, ch0,
-							    OBMF_TRANS_SHORT_READ,
-							    entry_addr + OBMF_GPIO_CFG_NAME,
-							    NULL, 0, namebuf, 32);
-				if (rv >= 0) {
-					namebuf[31] = '\0';
-					if (namebuf[0])
-						gd->gpio_names[j] = kstrdup(namebuf, GFP_KERNEL);
+					rv = obmf_send_mmio_request(odev, ch0,
+								    OBMF_TRANS_SHORT_READ,
+								    entry_addr + OBMF_GPIO_CFG_NAME,
+								    NULL, 0, namebuf, 32);
+					if (rv >= 0) {
+						namebuf[31] = '\0';
+						if (namebuf[0])
+							gd->gpio_names[j] = kstrdup(namebuf,
+										GFP_KERNEL);
+					}
 				}
+				gd->gc.names = (const char *const *)gd->gpio_names;
 			}
-			gd->gc.names = (const char *const *)gd->gpio_names;
 		}
 
 		for (j = 0; j < ngpio; j++) {
