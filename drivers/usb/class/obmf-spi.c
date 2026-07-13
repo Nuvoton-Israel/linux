@@ -17,6 +17,7 @@
  *   Status in Common Header byte 2[7:1]
  */
 
+#include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/mtd/mtd.h>
 #include <linux/usb.h>
@@ -29,12 +30,56 @@
 #include "obmf.h"
 
 #define OBMF_SPI_MTD_NAME	"npcm-espi-flash"
+#define OBMF_SPI_MTD_NAME_PROP	"nuvoton,mtd-name"
 
 struct obmf_spi_data {
 	struct obmf_channel	*ch;
 	struct mtd_info		*mtd;
 	u32			flash_offset;	/* current flash R/W offset */
 };
+
+/**
+ * obmf_spi_get_mtd_name - resolve the MTD name for a SPI channel from DTS.
+ * @ch:    OBMF channel
+ * @buf:   output buffer for the MTD name
+ * @bufsz: size of @buf
+ *
+ * Walks the USB port-chain to locate the device's DT node, then looks for
+ * a child node whose "reg" cell equals @ch->channel_id and reads the
+ * "nuvoton,mtd-name" string property.  Falls back to OBMF_SPI_MTD_NAME
+ * when no matching DT node or property is found.
+ */
+static void obmf_spi_get_mtd_name(struct obmf_channel *ch,
+				  char *buf, size_t bufsz)
+{
+	struct usb_device *udev = ch->odev->udev;
+	struct device_node *udev_np, *ch_np = NULL, *tmp;
+	const char *name = OBMF_SPI_MTD_NAME;
+
+	udev_np = of_node_get(udev->dev.of_node);
+	if (!udev_np)
+		udev_np = obmf_find_udev_of_node(udev);
+
+	if (udev_np) {
+		for_each_child_of_node(udev_np, tmp) {
+			u32 reg;
+
+			if (!of_property_read_u32(tmp, "reg", &reg) &&
+			    reg == ch->channel_id) {
+				ch_np = tmp;
+				break;
+			}
+		}
+		of_node_put(udev_np);
+	}
+
+	if (ch_np) {
+		of_property_read_string(ch_np, OBMF_SPI_MTD_NAME_PROP, &name);
+		of_node_put(ch_np);
+	}
+
+	strscpy(buf, name, bufsz);
+}
 
 /* SPI NOR opcodes */
 #define SPI_NOR_READ		0x03
@@ -140,7 +185,7 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 	switch (spi_cmd) {
 	case OBMF_SPI_CMD_READ: {
 		/* Read from flash at current offset */
-		struct mtd_info *mtd;
+		struct mtd_info *mtd = sd->mtd;
 		size_t retlen;
 
 		resp = kmalloc(3 + rd_size, GFP_KERNEL);
@@ -149,15 +194,8 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 			break;
 		}
 
-		mtd = get_mtd_device_nm(OBMF_SPI_MTD_NAME);
-		if (IS_ERR(mtd)) {
-			status = OBMF_STATUS_PERMANENT_ERROR;
-			break;
-		}
-
 		rv = mtd_read(mtd, sd->flash_offset, rd_size, &retlen,
 			      resp + 3);
-		put_mtd_device(mtd);
 
 		if (rv && rv != -EUCLEAN) {
 			status = OBMF_SPI_STATUS_TRANSFER_ERROR;
@@ -183,45 +221,29 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 			if (opcode == SPI_NOR_SECTOR_ERASE ||
 			    opcode == SPI_NOR_BLOCK_ERASE) {
 				/* Erase command */
-				struct mtd_info *mtd;
+				struct mtd_info *mtd = sd->mtd;
 				struct erase_info ei = {};
 				u32 addr = obmf_spi_extract_addr(wr_data, wr_size);
-
-				mtd = get_mtd_device_nm(OBMF_SPI_MTD_NAME);
-				if (IS_ERR(mtd)) {
-					status = OBMF_STATUS_PERMANENT_ERROR;
-					break;
-				}
 
 				ei.addr = addr;
 				ei.len = (opcode == SPI_NOR_SECTOR_ERASE) ?
 					 4096 : 65536;
 
 				rv = mtd_erase(mtd, &ei);
-				put_mtd_device(mtd);
-
 				if (rv)
 					status = OBMF_SPI_STATUS_TRANSFER_ERROR;
 			} else if (opcode == SPI_NOR_CHIP_ERASE) {
-				struct mtd_info *mtd;
+				struct mtd_info *mtd = sd->mtd;
 				struct erase_info ei = {};
-
-				mtd = get_mtd_device_nm(OBMF_SPI_MTD_NAME);
-				if (IS_ERR(mtd)) {
-					status = OBMF_STATUS_PERMANENT_ERROR;
-					break;
-				}
 
 				ei.addr = 0;
 				ei.len = mtd->size;
 				rv = mtd_erase(mtd, &ei);
-				put_mtd_device(mtd);
-
 				if (rv)
 					status = OBMF_SPI_STATUS_TRANSFER_ERROR;
 			} else if (opcode == SPI_NOR_PAGE_PROG && wr_size >= 5) {
 				/* Page program: opcode(1) + addr(4) + data(N) */
-				struct mtd_info *mtd;
+				struct mtd_info *mtd = sd->mtd;
 				size_t retlen;
 				u32 addr = obmf_spi_extract_addr(wr_data, wr_size);
 				int data_len = wr_size - 5;
@@ -229,16 +251,8 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 				if (data_len <= 0)
 					break;
 
-				mtd = get_mtd_device_nm(OBMF_SPI_MTD_NAME);
-				if (IS_ERR(mtd)) {
-					status = OBMF_STATUS_PERMANENT_ERROR;
-					break;
-				}
-
 				rv = mtd_write(mtd, addr, data_len, &retlen,
 					       wr_data + 5);
-				put_mtd_device(mtd);
-
 				if (rv < 0)
 					status = OBMF_SPI_STATUS_TRANSFER_ERROR;
 			}
@@ -250,7 +264,7 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 	case OBMF_SPI_CMD_WRITE_READ: {
 		/* Write then read — handle SPI NOR read command */
 		if (wr_size >= 5 && wr_data[0] == SPI_NOR_READ) {
-			struct mtd_info *mtd;
+			struct mtd_info *mtd = sd->mtd;
 			size_t retlen;
 			u32 addr = obmf_spi_extract_addr(wr_data, wr_size);
 
@@ -260,15 +274,8 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 				break;
 			}
 
-			mtd = get_mtd_device_nm(OBMF_SPI_MTD_NAME);
-			if (IS_ERR(mtd)) {
-				status = OBMF_STATUS_PERMANENT_ERROR;
-				break;
-			}
-
 			rv = mtd_read(mtd, addr, rd_size, &retlen,
 				      resp + 4);
-			put_mtd_device(mtd);
 
 			if (rv && rv != -EUCLEAN) {
 				status = OBMF_SPI_STATUS_TRANSFER_ERROR;
@@ -323,12 +330,15 @@ int obmf_spi_register(struct obmf_device *odev, struct obmf_channel *ch)
 {
 	struct obmf_spi_data *sd;
 	struct mtd_info *mtd;
+	char mtd_name[32];
 
-	mtd = get_mtd_device_nm(OBMF_SPI_MTD_NAME);
+	obmf_spi_get_mtd_name(ch, mtd_name, sizeof(mtd_name));
+
+	mtd = get_mtd_device_nm(mtd_name);
 	if (IS_ERR(mtd)) {
 		dev_err(&odev->intf->dev,
 			"ch%u: MTD '%s' not found: %ld\n",
-			ch->channel_id, OBMF_SPI_MTD_NAME, PTR_ERR(mtd));
+			ch->channel_id, mtd_name, PTR_ERR(mtd));
 		return PTR_ERR(mtd);
 	}
 
@@ -347,7 +357,7 @@ int obmf_spi_register(struct obmf_device *odev, struct obmf_channel *ch)
 
 	dev_info(&odev->intf->dev,
 		 "ch%u: registered SPI Controller (MTD: %s)\n",
-		 ch->channel_id, OBMF_SPI_MTD_NAME);
+		 ch->channel_id, mtd_name);
 	return 0;
 }
 
