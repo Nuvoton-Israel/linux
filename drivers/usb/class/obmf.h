@@ -522,6 +522,10 @@ struct obmf_device {
 	int			num_misc;	/* IPMI + OEM misc devices */
 };
 
+/* ---------- OF / DTS helpers (obmf-core.c) -------------------------------- */
+struct device_node;
+struct device_node *obmf_find_udev_of_node(struct usb_device *udev);
+
 /* ---------- STALL recovery work (obmf-core.c) ----------------------------- */
 void obmf_stall_recovery_work(struct work_struct *work);
 
