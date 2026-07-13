@@ -9,6 +9,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
 #include <linux/idr.h>
@@ -24,6 +25,95 @@
 #define DRIVER_DESC	"OBMF-ICP over USB class driver"
 
 static DEFINE_IDA(obmf_ida);
+
+/* ------------------------------------------------------------------ */
+/* OF / DTS helpers                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * obmf_find_udev_of_node - locate the OF node for a USB device by walking
+ *                           the port-chain against the DT tree.
+ * @udev: the USB device to locate
+ *
+ * Builds a port-number chain from @udev back to the root hub, then descends
+ * the DT starting from the host-controller's OF node, following each "reg"
+ * cell to the next level.  This handles arbitrary USB topologies without any
+ * special DT properties; the DT author simply mirrors the physical wiring:
+ *
+ *   // Flat topology:  ehci1 --> smc@1
+ *   &ehci1 {
+ *       #address-cells = <1>;
+ *       #size-cells    = <0>;
+ *       smc@1 { reg = <1>; ... };
+ *   };
+ *
+ *   // Hub topology:  ehci1 --> hub@1 --> port1: smc@1, port2: smc@2
+ *   &ehci1 {
+ *       #address-cells = <1>;
+ *       #size-cells    = <0>;
+ *       hub@1 {
+ *           reg = <1>;
+ *           #address-cells = <1>;
+ *           #size-cells    = <0>;
+ *           smc@1 { reg = <1>; ... };
+ *           smc@2 { reg = <2>; ... };
+ *       };
+ *   };
+ *
+ * Returns a device_node with an elevated refcount (caller must call
+ * of_node_put()), or NULL if the DT does not describe this device.
+ */
+struct device_node *obmf_find_udev_of_node(struct usb_device *udev)
+{
+	/* USB spec allows at most 7 tiers; 8 entries is more than sufficient */
+	u8 ports[8];
+	int depth = 0;
+	struct usb_device *dev = udev;
+	struct device_node *np, *child, *tmp;
+	int i;
+
+	/* Walk up to the root hub, recording port numbers along the way */
+	while (dev->parent) {
+		if (depth >= (int)ARRAY_SIZE(ports))
+			return NULL;
+		ports[depth++] = (u8)dev->portnum;
+		dev = dev->parent;
+	}
+
+	/*
+	 * dev is now the virtual root hub.  Its logical parent in the Linux
+	 * device hierarchy is the HCD platform device, whose of_node points
+	 * to the host-controller DT node (e.g. &ehci1).
+	 */
+	if (!dev->dev.parent)
+		return NULL;
+	np = of_node_get(dev->dev.parent->of_node);
+	if (!np)
+		return NULL;
+
+	/*
+	 * Descend the DT following ports[] in reverse order:
+	 * ports[depth-1] is closest to the host, ports[0] is the device.
+	 */
+	for (i = depth - 1; i >= 0; i--) {
+		child = NULL;
+		for_each_child_of_node(np, tmp) {
+			u32 reg;
+
+			if (!of_property_read_u32(tmp, "reg", &reg) &&
+			    reg == ports[i]) {
+				child = tmp; /* inherits ref from loop on break */
+				break;
+			}
+		}
+		of_node_put(np);
+		if (!child)
+			return NULL;
+		np = child;
+	}
+
+	return np; /* refcount elevated; caller must of_node_put() */
+}
 
 /* ------------------------------------------------------------------ */
 /* kref destructor                                                     */
