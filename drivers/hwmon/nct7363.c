@@ -78,7 +78,7 @@ static int nct7363_read_fan(struct device *dev, u32 attr, int channel,
 {
 	struct nct7363_data *data = dev_get_drvdata(dev);
 	unsigned int hi, lo, rpm;
-	int ret = 0;
+	int ret;
 	u16 cnt;
 
 	switch (attr) {
@@ -91,18 +91,21 @@ static int nct7363_read_fan(struct device *dev, u32 attr, int channel,
 		ret = regmap_read(data->regmap,
 				  NCT7363_REG_FANINX_HVAL(channel), &hi);
 		if (ret)
-			return ret;
+			goto out_unlock;
 
 		ret = regmap_read(data->regmap,
 			NCT7363_REG_FANINX_LVAL(channel), &lo);
 		if (ret)
-			return ret;
-		mutex_unlock(&data->lock);
+			goto out_unlock;
 
 		cnt = (hi << 5) | (lo & NCT7363_FANINX_LVAL_MASK);
 		rpm = FAN_FROM_REG(cnt);
 		*val = (long)rpm;
-		return 0;
+		ret = 0;
+
+out_unlock:
+		mutex_unlock(&data->lock);
+		return ret;
 	default:
 		return -EOPNOTSUPP;
 	}
