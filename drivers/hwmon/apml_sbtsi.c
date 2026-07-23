@@ -25,6 +25,7 @@
 #include <linux/version.h>
 
 #include "amd-apml.h"
+#include "apml_common.h"
 
 /*
  * SB-TSI registers only support SMBus byte data access. "_INT" registers are
@@ -60,16 +61,6 @@
 #define SBTSI_DEC_OFFSET	5
 #define SBTSI_DEC_MASK		0x7
 
-struct apml_sbtsi_device {
-	struct miscdevice sbtsi_misc_dev;
-	struct regmap *regmap;
-	struct mutex lock;
-	u8 dev_static_addr;
-	atomic_t in_progress;
-	atomic_t no_new_trans;
-	struct completion misc_fops_done;
-} __packed;
-
 /*
  * From SB-TSI spec: CPU temperature readings and limit registers encode the
  * temperature in increments of 0.125 from 0 to 255.875. The "high byte"
@@ -87,6 +78,7 @@ static inline int sbtsi_reg_to_mc(s32 integer, s32 decimal)
 	       (decimal >> SBTSI_DEC_OFFSET)) * SBTSI_STEP_INC;
 }
 
+#define PID_TSI_GENOA_TURIN	0x22400000001ULL
 /*
  * Inversely, given temperature in millidegree Celsius
  *   INT = (TEMP / 125) / 8
@@ -365,9 +357,10 @@ static int sbtsi_i3c_probe(struct i3c_device *i3cdev)
 	};
 	struct regmap *regmap;
 	const char *name;
+	int ret;
 
 	if (!(I3C_PID_INSTANCE_ID(i3cdev->desc->info.pid) == 0 ||
-	    i3cdev->desc->info.pid == 0x22400000001))
+	    i3cdev->desc->info.pid == PID_TSI_GENOA_TURIN))
 		return -ENXIO;
 
 	regmap = devm_regmap_init_i3c(i3cdev, &sbtsi_i3c_regmap_config);
@@ -383,6 +376,7 @@ static int sbtsi_i3c_probe(struct i3c_device *i3cdev)
 
 	atomic_set(&tsi_dev->in_progress, 0);
 	atomic_set(&tsi_dev->no_new_trans, 0);
+	tsi_dev->i3cdev = i3cdev;
 	tsi_dev->regmap = regmap;
 	mutex_init(&tsi_dev->lock);
 
@@ -405,18 +399,31 @@ static int sbtsi_i3c_probe(struct i3c_device *i3cdev)
 		name = devm_kasprintf(dev, GFP_KERNEL, "sbtsi_%s", "1.0");
 		break;
 	default:
-		name = devm_kasprintf(dev, GFP_KERNEL, "sbtsi_");
+		name = devm_kasprintf(dev, GFP_KERNEL, "sbtsi_%x",
+				      tsi_dev->dev_static_addr);
 		break;
 	}
 
 	hwmon_dev = devm_hwmon_device_register_with_info(dev, name, tsi_dev,
 							 &sbtsi_chip_info, NULL);
-
-	if (!hwmon_dev)
-		return PTR_ERR_OR_ZERO(hwmon_dev);
+	if (IS_ERR(hwmon_dev))
+		return PTR_ERR(hwmon_dev);
 
 	init_completion(&tsi_dev->misc_fops_done);
-	return create_misc_tsi_device(tsi_dev, dev);
+	ret = create_misc_tsi_device(tsi_dev, dev);
+	if (ret)
+		return ret;
+
+	/*
+	 * Best-effort APML common registry hookup. Probe still succeeds if this
+	 * fails (-EINVAL, -ENOMEM); hwmon and misc stay up but Alert_L will
+	 * not dispatch alerts for this device until registration succeeds.
+	 */
+	ret = apml_register_device(tsi_dev, APML_TSI_DEVICE);
+	if (ret != 0)
+		dev_warn(dev, "Failed to register with ALERT_L common system: %d\n", ret);
+
+	return 0;
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
@@ -434,6 +441,7 @@ static int sbtsi_i2c_probe(struct i2c_client *client)
 		.val_bits = 8,
 	};
 	const char *name;
+	int ret;
 
 	tsi_dev = devm_kzalloc(dev, sizeof(struct apml_sbtsi_device), GFP_KERNEL);
 	if (!tsi_dev)
@@ -442,6 +450,7 @@ static int sbtsi_i2c_probe(struct i2c_client *client)
 	atomic_set(&tsi_dev->in_progress, 0);
 	atomic_set(&tsi_dev->no_new_trans, 0);
 	mutex_init(&tsi_dev->lock);
+	tsi_dev->client = client;
 	tsi_dev->regmap = devm_regmap_init_i2c(client, &sbtsi_i2c_regmap_config);
 	if (IS_ERR(tsi_dev->regmap))
 		return PTR_ERR(tsi_dev->regmap);
@@ -458,7 +467,8 @@ static int sbtsi_i2c_probe(struct i2c_client *client)
 		name = devm_kasprintf(dev, GFP_KERNEL, "sbtsi_%s", "1.0");
 		break;
 	default:
-		name = devm_kasprintf(dev, GFP_KERNEL, "sbtsi_");
+		name = devm_kasprintf(dev, GFP_KERNEL, "sbtsi_%x",
+				      tsi_dev->dev_static_addr);
 		break;
 	}
 
@@ -466,12 +476,24 @@ static int sbtsi_i2c_probe(struct i2c_client *client)
 							 tsi_dev,
 							 &sbtsi_chip_info,
 							 NULL);
-
-	if (!hwmon_dev)
-		return PTR_ERR_OR_ZERO(hwmon_dev);
+	if (IS_ERR(hwmon_dev))
+		return PTR_ERR(hwmon_dev);
 
 	init_completion(&tsi_dev->misc_fops_done);
-	return create_misc_tsi_device(tsi_dev, dev);
+	ret = create_misc_tsi_device(tsi_dev, dev);
+	if (ret)
+		return ret;
+
+	/*
+	 * Best-effort APML common registry hookup. Probe still succeeds if this
+	 * fails (-EINVAL, -ENOMEM); hwmon and misc stay up but Alert_L will
+	 * not dispatch alerts for this device until registration succeeds.
+	 */
+	ret = apml_register_device(tsi_dev, APML_TSI_DEVICE);
+	if (ret != 0)
+		dev_warn(dev, "Failed to register with ALERT_L common system: %d\n", ret);
+
+	return 0;
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 12, 0)
@@ -503,6 +525,7 @@ static void sbtsi_i3c_remove(struct i3c_device *i3cdev)
 	if (atomic_read(&tsi_dev->in_progress))
 		wait_for_completion_timeout(&tsi_dev->misc_fops_done,
 					    3 * HZ);
+	apml_unregister_device(tsi_dev, APML_TSI_DEVICE);
 	misc_deregister(&tsi_dev->sbtsi_misc_dev);
 	/* Assign fops and parent of misc dev to NULL */
 	tsi_dev->sbtsi_misc_dev.fops = NULL;
@@ -543,6 +566,7 @@ static void sbtsi_i2c_remove(struct i2c_client *client)
 	if (atomic_read(&tsi_dev->in_progress))
 		wait_for_completion_timeout(&tsi_dev->misc_fops_done,
 					    3 * HZ);
+	apml_unregister_device(tsi_dev, APML_TSI_DEVICE);
 	misc_deregister(&tsi_dev->sbtsi_misc_dev);
 	/* Assign fops and parent of misc dev to NULL */
 	tsi_dev->sbtsi_misc_dev.fops = NULL;
@@ -555,7 +579,9 @@ static void sbtsi_i2c_remove(struct i2c_client *client)
 }
 
 static const struct i3c_device_id sbtsi_i3c_id[] = {
-	I3C_DEVICE_EXTRA_INFO(0x112, 0, 0x1, NULL),
+	I3C_DEVICE_EXTRA_INFO(0x112, 0, 0x1, NULL), /* Genoa/Turin */
+	I3C_DEVICE_EXTRA_INFO(0x112, 0x0, 0x118, NULL), /* Socket:0, IOD:0 Venice */
+	I3C_DEVICE_EXTRA_INFO(0x112, 0x100, 0x118, NULL), /* Socket:1 IOD:0 Venice */
 	{}
 };
 MODULE_DEVICE_TABLE(i3c, sbtsi_i3c_id);

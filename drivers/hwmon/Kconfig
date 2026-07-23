@@ -1685,10 +1685,23 @@ config SENSORS_SL28CPLD
 	  This driver can also be built as a module.  If so, the module
 	  will be called sl28cpld-hwmon.
 
+config SENSORS_APML_COMMON
+	tristate "APML modules common"
+	depends on I2C && I3C
+	help
+	  Common library for AMD Advanced Platform Management Link (APML)
+	  sensor drivers. It provides shared functionality used by the
+	  SB-TSI and SB-RMI drivers to communicate with AMD SoCs over
+	  I2C or I3C interfaces.
+
+	  This is selected automatically by SENSORS_SBTSI and SENSORS_SBRMI.
+
 config SENSORS_SBTSI
 	tristate "Emulated SB-TSI temperature sensor"
 	depends on I2C && I3C
+	select SENSORS_APML_COMMON
 	select REGMAP_I3C
+	select REGMAP_I2C
 	help
 	  If you say yes here you get support for emulated temperature
 	  sensors on AMD SoCs with SB-TSI interface connected to a BMC device.
@@ -1699,7 +1712,9 @@ config SENSORS_SBTSI
 config SENSORS_SBRMI
 	tristate "Emulated SB-RMI sensor"
 	depends on I2C && I3C
+	select SENSORS_APML_COMMON
 	select REGMAP_I3C
+	select REGMAP_I2C
 	help
 	  If you say yes here you get support for emulated RMI
 	  sensors on AMD SoCs with APML interface connected to a BMC device.

@@ -176,6 +176,7 @@ obj-$(CONFIG_SENSORS_POWR1220)  += powr1220.o
 obj-$(CONFIG_SENSORS_PWM_FAN)	+= pwm-fan.o
 obj-$(CONFIG_SENSORS_RASPBERRYPI_HWMON)	+= raspberrypi-hwmon.o
 obj-$(CONFIG_SENSORS_S3C)	+= s3c-hwmon.o
+obj-$(CONFIG_SENSORS_APML_COMMON)	+= apml_common.o
 obj-$(CONFIG_SENSORS_SBTSI)	+= apml_sbtsi.o
 obj-$(CONFIG_SENSORS_SBRMI)	+= sbrmi.o sbrmi-common.o
 obj-$(CONFIG_SENSORS_SCH56XX_COMMON)+= sch56xx-common.o
