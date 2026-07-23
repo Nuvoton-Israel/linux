@@ -141,6 +141,8 @@ static const struct flash_info winbond_nor_parts[] = {
 			      SPI_NOR_QUAD_READ) },
 	{ "w25q01jvq", INFO(0xef4021, 0, 64 * 1024, 2048)
 		PARSE_SFDP },
+	{ "w25q01jv", INFO(0xef7021, 0, 64 * 1024, 2048)
+		PARSE_SFDP },
 };
 
 /**
