@@ -1087,6 +1087,12 @@ static int svc_i3c_master_do_daa_locked(struct svc_i3c_master *master,
 		if (ret)
 			break;
 
+		if (dev_nb == SVC_I3C_MAX_DEVS) {
+			dev_info(master->dev, "Reach max devs\n");
+			ret = -ENOSPC;
+			break;
+		}
+
 		if (SVC_I3C_MSTATUS_RXPEND(reg)) {
 			u8 data[6];
 
