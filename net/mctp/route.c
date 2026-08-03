@@ -529,6 +529,7 @@ static int mctp_route_output(struct mctp_route *route, struct sk_buff *skb)
 			daddr = daddr_buf;
 	}
 
+	skb->dev = route->dev->dev;
 	rc = dev_hard_header(skb, skb->dev, ntohs(skb->protocol),
 			     daddr, skb->dev->dev_addr, skb->len);
 	if (rc < 0) {
