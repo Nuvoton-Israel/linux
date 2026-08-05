@@ -91,7 +91,7 @@
 #define NPCM8XX_DEBOUNCE_VAL_MASK	GENMASK(23, 4)
 #define NPCM8XX_DEBOUNCE_MAX_VAL	0xFFFFF7
 
-#define NPCM8XX_GCR_VSRCR_MASK		GENMASK(14, 0)
+#define NPCM8XX_GCR_VSRCR_MASK		(GENMASK(14, 0) | BIT(30))
 
 /* Structure for register banks */
 struct debounce_time {
@@ -2534,9 +2534,10 @@ static int npcm8xx_pinctrl_probe(struct platform_device *pdev)
 				      "Failed to find nuvoton,sysgcr property\n");
 
 	if (!of_property_read_u32(pdev->dev.of_node, "nuvoton,vs-pinconfig",
-				  &voltage_pin_set))
-		regmap_update_bits(pctrl->gcr_regmap, NPCM8XX_GCR_VSRCR,
-				   NPCM8XX_GCR_VSRCR_MASK, voltage_pin_set);
+				  &voltage_pin_set)) {
+		voltage_pin_set &= NPCM8XX_GCR_VSRCR_MASK;
+		regmap_write(pctrl->gcr_regmap, NPCM8XX_GCR_VSRCR, voltage_pin_set);
+	}
 
 	ret = npcm8xx_gpio_fw(pctrl);
 	if (ret < 0)
