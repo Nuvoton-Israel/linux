@@ -163,6 +163,10 @@ static void obmf_dev_request_work(struct work_struct *work)
 	case OBMF_TYPE_SPI:
 		obmf_spi_handle_dev_request(ch, dreq->data, dreq->data_len);
 		break;
+	case OBMF_TYPE_I2C_TARGET:
+		obmf_i2c_target_handle_dev_request(ch, dreq->data,
+						   dreq->data_len);
+		break;
 	case OBMF_TYPE_IPMI:
 		obmf_ipmi_handle_dev_request(ch, dreq->data, dreq->data_len);
 		break;
