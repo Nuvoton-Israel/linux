@@ -246,6 +246,9 @@ static void obmf_register_channel(struct obmf_device *odev,
 	case OBMF_TYPE_I2C:
 		rv = obmf_i2c_register(odev, ch);
 		break;
+	case OBMF_TYPE_I2C_TARGET:
+		rv = obmf_i2c_target_register(odev, ch);
+		break;
 	case OBMF_TYPE_GPIO:
 		rv = obmf_gpio_register(odev, ch);
 		break;
@@ -314,6 +317,9 @@ static void obmf_unregister_channel(struct obmf_channel *ch)
 	switch (ch->channel_type) {
 	case OBMF_TYPE_I2C:
 		obmf_i2c_unregister(ch);
+		break;
+	case OBMF_TYPE_I2C_TARGET:
+		obmf_i2c_target_unregister(ch);
 		break;
 	case OBMF_TYPE_GPIO:
 		obmf_gpio_unregister(ch);
@@ -504,6 +510,13 @@ static int obmf_probe(struct usb_interface *intf,
 		}
 		obmf_register_channel(odev, ch);
 	}
+
+	/*
+	 * Second pass: wire up any I2C target channels whose paired controller
+	 * had a higher channel_id and was not yet registered when the target
+	 * channel was first registered above.
+	 */
+	obmf_i2c_target_finalize_pairing(odev);
 
 	usb_set_intfdata(intf, odev);
 
