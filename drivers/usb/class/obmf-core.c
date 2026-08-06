@@ -431,7 +431,42 @@ static int obmf_probe(struct usb_interface *intf,
 	mutex_init(&odev->tx_lock);
 	INIT_WORK(&odev->stall_work, obmf_stall_recovery_work);
 
-	odev->device_index = ida_alloc(&obmf_ida, GFP_KERNEL);
+	/*
+	 * Assign device_index from the DT "reg" property of the OF node that
+	 * describes this USB device (reg is 1-based port number, so index =
+	 * reg - 1).  This guarantees stable naming regardless of probe order:
+	 *   DTS smc@1 { reg = <1>; }  →  obmf0
+	 *   DTS smc@2 { reg = <2>; }  →  obmf1
+	 *
+	 * ida_alloc_range() with min==max pins the exact slot and returns
+	 * -ENOSPC if another device already claimed it, which surfaces as a
+	 * clear error rather than silently assigning the wrong index.
+	 *
+	 * Fall back to ida_alloc() for non-DT platforms.
+	 */
+	{
+		struct device_node *of_node = obmf_find_udev_of_node(udev);
+
+		if (of_node) {
+			u32 reg;
+
+			if (!of_property_read_u32(of_node, "reg", &reg) &&
+			    reg >= 1) {
+				odev->device_index =
+					ida_alloc_range(&obmf_ida, reg - 1,
+							reg - 1, GFP_KERNEL);
+			} else {
+				dev_warn(&intf->dev,
+					 "DT node has no valid 'reg'; "
+					 "falling back to dynamic index\n");
+				odev->device_index =
+					ida_alloc(&obmf_ida, GFP_KERNEL);
+			}
+			of_node_put(of_node);
+		} else {
+			odev->device_index = ida_alloc(&obmf_ida, GFP_KERNEL);
+		}
+	}
 	if (odev->device_index < 0) {
 		rv = odev->device_index;
 		goto err_put;
