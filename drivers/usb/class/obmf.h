@@ -172,7 +172,7 @@ struct obmf_mmio_subhdr {
 #define OBMF_GPIO_STATUS_INT_NOT_SUPPORTED	0x41
 #define OBMF_GPIO_STATUS_INVALID_OPERATION	0x42
 
-/* ---------- I2C Controller Optimised Channel (v0.9) ----------------------- */
+/* ---------- I2C Controller Optimised Channel (OBMF-ICP v1.0.0 RC1) -------- */
 #define OBMF_I2C_CMD_READ		0x00
 #define OBMF_I2C_CMD_WRITE		0x01
 #define OBMF_I2C_CMD_SMBUS_BLOCK_READ	0x02
@@ -182,7 +182,12 @@ struct obmf_mmio_subhdr {
 /* I2C request byte 0[7]: 0=send STOP, 1=do NOT send STOP */
 #define OBMF_I2C_NO_STOP		BIT(7)
 
-/* I2C response header size: Command(1) + Address(1) + ReadLen(2) */
+/*
+ * I2C response header size: Command(1) + ReadLen(2) + Reserved(1) = 4 bytes
+ * v1.0.0 RC1 change: ReadLen is now at bytes 1-2 (was 2-3 in v0.9.2; Byte 1
+ * was Address echo in v0.9.2).  Byte 0[7] is Reserved (was STOP flag).
+ * Read Data still starts at byte 4.
+ */
 #define OBMF_I2C_RESP_HDR_SIZE		4
 
 /* I2C channel-specific status codes */
@@ -190,6 +195,47 @@ struct obmf_mmio_subhdr {
 #define OBMF_I2C_STATUS_ARB_LOST	0x41
 #define OBMF_I2C_STATUS_BUS_BUSY	0x42
 #define OBMF_I2C_STATUS_NACK		0x43
+
+/* I2C Controller channel config data offsets (v1.0.0 RC1 §Config Data) */
+#define OBMF_I2C_CTRL_CFG_SPEED                0x00    /* 1B: 0=100kHz,1=400kHz,2=1MHz,3=3.4MHz */
+#define OBMF_I2C_CTRL_CFG_OPTIONS              0x01    /* 1B: option bits */
+#define OBMF_I2C_CTRL_OPT_BUS_RECOVERY         BIT(0)  /* Bus Recovery supported */
+#define OBMF_I2C_CTRL_OPT_AUTO_RECOVERY        BIT(1)  /* Auto Bus Recovery supported */
+#define OBMF_I2C_CTRL_OPT_BUS_OVERRIDE         BIT(2)  /* Bus Override supported */
+
+/* ---------- I2C Target Optimised Channel (v1.0.0 RC1, Channel Type 05h) ---
+ *
+ * Device-initiated channel: a physical I2C master writes to the SMC's
+ * physical I2C slave; the SMC forwards the write to the BMC as an OBMF
+ * I2C Target request, and the BMC (Responder) returns a status response.
+ *
+ * In MCTP over SMBus scenarios this channel is paired with the I2C Controller
+ * channel on the same SMBus.  The Linux driver delivers incoming writes as
+ * i2c_slave_event() calls so mctp-i2c can receive MCTP frames directly.
+ *
+ *   Request:  Command(1) + Address(1) + Reserved(2) + WriteData(N)
+ *     Byte 0 [6:0] Command (0=Reserved, 1=I2C Write, 2-127=Reserved)
+ *     Byte 0 [7]   Reserved (write 0)
+ *     Byte 1       I2C/SMBus target address (7-bit)
+ *     Byte 2-3     Reserved
+ *     Byte 4..N    Write Data (raw bytes from the wire after the address)
+ *
+ *   Response: Command(1)   (status carried in Common Header byte 2[7:1])
+ */
+
+/* I2C Target channel config data offsets (v1.0.0 RC1 §Config Data) */
+#define OBMF_I2C_TGT_CFG_SPEED         0x00    /* 1B: target bus speed */
+#define OBMF_I2C_TGT_CFG_BUFFER_SIZE   0x01    /* 1B: max I2C write transaction length */
+#define OBMF_I2C_TGT_CFG_ADDR_COUNT    0x02    /* 1B: number of configurable addresses */
+#define OBMF_I2C_TGT_CFG_ADDR_LIST     0x03    /* 1B * count: target address entries */
+#define OBMF_I2C_TGT_CMD_WRITE         0x01    /* Only I2C Write is defined */
+#define OBMF_I2C_TGT_CMD_MASK          0x7F    /* byte0[6:0] = Command */
+
+/* I2C Target request header: Command(1) + Address(1) + Reserved(2) */
+#define OBMF_I2C_TGT_REQ_HDR_SIZE      4
+
+/* I2C Target channel-specific status code */
+#define OBMF_I2C_TGT_STATUS_TRANSACTION        0x40    /* Error Transaction */
 
 /* ---------- SPI Controller Optimised Channel (v0.9) ----------------------- */
 #define OBMF_SPI_CMD_READ		0x01
@@ -555,10 +601,23 @@ void obmf_free_channels(struct obmf_device *odev);
 #if IS_ENABLED(CONFIG_USB_OBMF_I2C)
 int  obmf_i2c_register(struct obmf_device *odev, struct obmf_channel *ch);
 void obmf_i2c_unregister(struct obmf_channel *ch);
+int  obmf_i2c_target_register(struct obmf_device *odev,
+			      struct obmf_channel *ch);
+void obmf_i2c_target_unregister(struct obmf_channel *ch);
+void obmf_i2c_target_handle_dev_request(struct obmf_channel *ch,
+					const u8 *data, int len);
+void obmf_i2c_target_finalize_pairing(struct obmf_device *odev);
 #else
 static inline int obmf_i2c_register(struct obmf_device *odev,
 				    struct obmf_channel *ch) { return 0; }
 static inline void obmf_i2c_unregister(struct obmf_channel *ch) {}
+static inline int obmf_i2c_target_register(struct obmf_device *odev,
+					   struct obmf_channel *ch) { return 0; }
+static inline void obmf_i2c_target_unregister(struct obmf_channel *ch) {}
+static inline void obmf_i2c_target_handle_dev_request(struct obmf_channel *ch,
+						      const u8 *data,
+						      int len) {}
+static inline void obmf_i2c_target_finalize_pairing(struct obmf_device *odev) {}
 #endif
 
 /* ---------- GPIO (obmf-gpio.c) -------------------------------------------- */
