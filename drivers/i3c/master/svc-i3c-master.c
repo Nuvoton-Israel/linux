@@ -1415,6 +1415,10 @@ static int svc_i3c_master_do_daa(struct i3c_master_controller *m)
 	if (ret)
 		dev_err(master->dev, "Cannot handle such a list of devices");
 
+	/* Enable Hot-Join request */
+	if (master->en_hj)
+		i3c_master_enec_locked(m, I3C_BROADCAST_ADDR, I3C_CCC_EVENT_HJ);
+
 rpm_out:
 	pm_runtime_mark_last_busy(master->dev);
 	pm_runtime_put_autosuspend(master->dev);
