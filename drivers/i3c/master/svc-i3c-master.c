@@ -1953,6 +1953,7 @@ static int svc_i3c_master_enable_hotjoin(struct i3c_master_controller *m)
 
 	master->enabled_events |= SVC_I3C_EVENT_HOTJOIN;
 
+	i3c_master_enec_locked(m, I3C_BROADCAST_ADDR, I3C_CCC_EVENT_HJ);
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
 
 	return 0;
