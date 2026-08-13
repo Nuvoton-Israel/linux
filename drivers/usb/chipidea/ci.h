@@ -29,7 +29,8 @@
 #define CI_MAX_REQ_SIZE	(4 * CI_HDRC_PAGE_SIZE)
 #define CI_MAX_BUF_SIZE	(TD_PAGE_COUNT * CI_HDRC_PAGE_SIZE)
 
-#define NPCM_CHIPIDEA_SRAM_ALLOC /* enable SRAM allocation use for qh and td */
+/*remove SRAM allocation*/
+//#define NPCM_CHIPIDEA_SRAM_ALLOC enable SRAM allocation use for qh and td
 /******************************************************************************
  * REGISTERS
  *****************************************************************************/
