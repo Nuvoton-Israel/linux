@@ -623,6 +623,12 @@ config NPCM8XX_JTAG_MASTER
 	help
 	  NPCM8xx JTAG Master Interfaces.
 
+config NPCM7XX_JTAG_MASTER
+        tristate "NPCM7xx JTAG Master driver"
+        depends on (ARCH_NPCM || COMPILE_TEST)
+        help
+          NPCM7xx JTAG Master Interfaces.
+
 config NPCM750_VCD
 	tristate "Nuvoton VCD support"
         help
