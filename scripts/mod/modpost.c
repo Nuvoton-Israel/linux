@@ -27,17 +27,6 @@
 #include "modpost.h"
 #include "../../include/linux/license.h"
 
-#ifndef R_ARM_MOVW_ABS_NC
-#define R_ARM_MOVW_ABS_NC      43
-#define R_ARM_MOVT_ABS         44
-#define R_ARM_CALL             28
-#define R_ARM_JUMP24           29
-#define R_ARM_THM_MOVW_ABS_NC  47
-#define R_ARM_THM_MOVT_ABS     48
-#define R_ARM_THM_JUMP19       51
-#define R_ARM_THM_JUMP24       30
-#endif
-
 static bool module_enabled;
 /* Are we using CONFIG_MODVERSIONS? */
 static bool modversions;
