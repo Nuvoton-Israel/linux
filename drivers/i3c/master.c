@@ -494,6 +494,102 @@ static void i3c_bus_notify(struct i3c_bus *bus, unsigned int action)
 	blocking_notifier_call_chain(&i3c_bus_notifier, action, bus);
 }
 
+/*
+ * i3c_master_do_detach() - perform the full detach sequence for an I3C device
+ * @master: I3C master controller
+ * @i3cdev: device descriptor to detach
+ *
+ * Releases IBI resources, resets the dynamic address, unregisters the device
+ * object, removes it from the bus list, and frees the descriptor.
+ * Must be called with @master->daa_lock held.
+ */
+static void i3c_master_do_detach(struct i3c_master_controller *master,
+				 struct i3c_dev_desc *i3cdev)
+{
+	i3c_bus_maintenance_lock(&master->bus);
+	/* Release IBI resource */
+	if (i3cdev->ibi && i3cdev->ibi->enabled) {
+		i3c_dev_disable_ibi_locked(i3cdev);
+		i3cdev->ibi->enabled = false;
+		i3c_dev_free_ibi_locked(i3cdev);
+	}
+
+	/* Reset the dynamic address */
+	i3c_master_rstdaa_locked(master, i3cdev->info.dyn_addr);
+	i3c_bus_maintenance_unlock(&master->bus);
+
+	/* Unregister i3c_device */
+	i3cdev->dev->desc = NULL;
+	if (device_is_registered(&i3cdev->dev->dev))
+		device_unregister(&i3cdev->dev->dev);
+	else
+		put_device(&i3cdev->dev->dev);
+
+	/* Delete from bus device list, release the addr slot */
+	i3c_bus_maintenance_lock(&master->bus);
+	i3c_master_detach_i3c_dev(i3cdev);
+	i3c_bus_maintenance_unlock(&master->bus);
+
+	/* Free i3c_dev_desc */
+	i3c_master_free_i3c_dev(i3cdev);
+}
+
+/*
+ * i3c_master_is_dev_disconnected() - check whether a device is disconnected
+ * @master: I3C master controller
+ * @i3cdev: device descriptor to probe
+ *
+ * Retry GETSTATUS a few times. If the device keeps returning no response
+ * (I3C_ERROR_M2), treat it as disconnected.
+ */
+static bool i3c_master_is_dev_disconnected(struct i3c_master_controller *master,
+					   struct i3c_dev_desc *i3cdev)
+{
+	int retries = master->detach_retries, ret;
+
+	if (i3cdev == master->this || !i3cdev->dev)
+		return false;
+
+	i3c_bus_maintenance_lock(&master->bus);
+	do {
+		ret = i3c_dev_getstatus_locked(i3cdev, &i3cdev->info);
+		if (!ret)
+			break;
+	} while (--retries > 0 && ret == I3C_ERROR_M2);
+	i3c_bus_maintenance_unlock(&master->bus);
+
+	return ret == I3C_ERROR_M2;
+}
+
+static void i3c_master_detect_work(struct work_struct *work)
+{
+	struct i3c_master_controller *master =
+		container_of(to_delayed_work(work), struct i3c_master_controller,
+			     detect_work);
+	struct i3c_dev_desc *i3cdev, *tmp;
+
+	mutex_lock(&master->daa_lock);
+	list_for_each_entry_safe(i3cdev, tmp, &master->bus.devs.i3c,
+				 common.node) {
+		if (i3cdev->last_activity &&
+		    time_before(jiffies, i3cdev->last_activity + HZ))
+			continue;
+		if (!i3c_master_is_dev_disconnected(master, i3cdev))
+			continue;
+
+		dev_warn(&master->dev,
+			 "dev %llx no response to GETSTATUS, detaching\n",
+			 i3cdev->info.pid);
+		i3c_master_do_detach(master, i3cdev);
+	}
+	mutex_unlock(&master->daa_lock);
+
+	if (master->init_done)
+		queue_delayed_work(master->detect_wq, &master->detect_work,
+				   msecs_to_jiffies(master->detach_poll_ms));
+}
+
+
 static const char * const i3c_bus_mode_strings[] = {
 	[I3C_BUS_MODE_PURE] = "pure",
 	[I3C_BUS_MODE_MIXED_FAST] = "mixed-fast",
@@ -607,32 +703,7 @@ static ssize_t detach_store(struct device *dev, struct device_attribute *da,
 		return -ENXIO;
 	}
 
-	i3c_bus_maintenance_lock(&master->bus);
-	/* Release IBI resource */
-	if (i3cdev->ibi && i3cdev->ibi->enabled) {
-		i3c_dev_disable_ibi_locked(i3cdev);
-		i3cdev->ibi->enabled = false;
-		i3c_dev_free_ibi_locked(i3cdev);
-	}
-
-	/* Reset the dynamic address */
-	i3c_master_rstdaa_locked(master, i3cdev->info.dyn_addr);
-	i3c_bus_maintenance_unlock(&master->bus);
-
-	/* Unregister i3c_device */
-	i3cdev->dev->desc = NULL;
-	if (device_is_registered(&i3cdev->dev->dev))
-		device_unregister(&i3cdev->dev->dev);
-	else
-		put_device(&i3cdev->dev->dev);
-
-	/* Delete from bus device list, release the addr slot */
-	i3c_bus_maintenance_lock(&master->bus);
-	i3c_master_detach_i3c_dev(i3cdev);
-	i3c_bus_maintenance_unlock(&master->bus);
-
-	/* Free i3c_dev_desc */
-	i3c_master_free_i3c_dev(i3cdev);
+	i3c_master_do_detach(master, i3cdev);
 	mutex_unlock(&master->daa_lock);
 
 	return count;
@@ -659,6 +730,9 @@ static void i3c_masterdev_release(struct device *dev)
 {
 	struct i3c_master_controller *master = dev_to_i3cmaster(dev);
 	struct i3c_bus *bus = dev_to_i3cbus(dev);
+
+	if (master->detect_wq)
+		destroy_workqueue(master->detect_wq);
 
 	if (master->wq)
 		destroy_workqueue(master->wq);
@@ -2482,6 +2556,15 @@ static int of_populate_i3c_bus(struct i3c_master_controller *master)
 	if (of_property_read_bool(i3cbus_np, "jedec,jesd403"))
 		master->bus.jesd403 = true;
 
+	if (of_property_read_bool(i3cbus_np, "i3c-dev-detach-polling"))
+		master->detach_polling = 1;
+
+	if (!of_property_read_u32(i3cbus_np, "i3c-dev-detach-poll-ms", &val))
+		master->detach_poll_ms = val;
+
+	if (!of_property_read_u32(i3cbus_np, "i3c-dev-detach-retries", &val))
+		master->detach_retries = val;
+
 	return 0;
 }
 
@@ -3006,6 +3089,21 @@ int i3c_master_register(struct i3c_master_controller *master,
 		goto err_put_dev;
 	}
 
+	if (master->detach_polling) {
+		master->detect_wq = alloc_workqueue("%s-detect", 0, 0,
+						    dev_name(parent));
+		if (!master->detect_wq) {
+			ret = -ENOMEM;
+			goto err_put_dev;
+		}
+
+		if (!master->detach_poll_ms)
+			master->detach_poll_ms = I3C_DETACH_POLL_INTERVAL_MS;
+		if (!master->detach_retries)
+			master->detach_retries = I3C_GETSTATUS_RETRIES;
+		INIT_DELAYED_WORK(&master->detect_work, i3c_master_detect_work);
+	}
+
 	ret = i3c_master_bus_init(master);
 	if (ret)
 		goto err_put_dev;
@@ -3032,6 +3130,11 @@ int i3c_master_register(struct i3c_master_controller *master,
 	mutex_lock(&master->daa_lock);
 	i3c_master_register_new_i3c_devs(master);
 	mutex_unlock(&master->daa_lock);
+	if (master->detach_polling) {
+		dev_info(&master->dev, "Start a poll work to detect disconnection\n");
+		queue_delayed_work(master->detect_wq, &master->detect_work,
+				   msecs_to_jiffies(master->detach_poll_ms));
+	}
 
 	return 0;
 
@@ -3059,6 +3162,9 @@ EXPORT_SYMBOL_GPL(i3c_master_register);
 int i3c_master_unregister(struct i3c_master_controller *master)
 {
 	i3c_bus_notify(&master->bus, I3C_NOTIFY_BUS_REMOVE);
+	master->init_done = false;
+	if (master->detect_wq)
+		cancel_delayed_work_sync(&master->detect_work);
 
 	i3c_master_i2c_adapter_cleanup(master);
 	i3c_master_unregister_i3c_devs(master);
@@ -3293,10 +3399,15 @@ int i3c_dev_do_priv_xfers_locked(struct i3c_dev_desc *dev,
 		return -EINVAL;
 
 	if (!master->target) {
+		int ret;
+
 		if (!master->ops->priv_xfers)
 			return -EOPNOTSUPP;
 
-		return master->ops->priv_xfers(dev, xfers, nxfers);
+		ret = master->ops->priv_xfers(dev, xfers, nxfers);
+		if (!ret)
+			dev->last_activity = jiffies;
+		return ret;
 	}
 
 	if (!master->target_ops->priv_xfers)

@@ -55,6 +55,26 @@ properties:
 
       May not be supported by all controllers.
 
+  i3c-dev-detach-polling:
+    type: boolean
+    description: |
+      If present, the I3C master periodically issues GETSTATUS CCC to each
+      active I3C device to detect whether it has left the bus (e.g. powered
+      down or physically removed).
+
+  i3c-dev-detach-poll-ms:
+    default: 1000
+    description: |
+      Polling interval in milliseconds used by the device-detach detection
+      mechanism.  Only meaningful when i3c-dev-detach-polling is set.
+
+  i3c-dev-detach-retries:
+    default: 3
+    description: |
+      Number of GETSTATUS CCC retries before a non-responsive I3C device is
+      considered detached from the bus. Only meaningful when
+      i3c-dev-detach-polling is set.
+
 required:
   - "#address-cells"
   - "#size-cells"

@@ -21,6 +21,8 @@
 #define I3C_HOT_JOIN_ADDR		0x2
 #define I3C_BROADCAST_ADDR		0x7e
 #define I3C_MAX_ADDR			GENMASK(6, 0)
+#define I3C_DETACH_POLL_INTERVAL_MS	1000
+#define I3C_GETSTATUS_RETRIES		3
 
 struct i3c_target_ops;
 
@@ -217,6 +219,7 @@ struct i3c_target_info {
  *	 code should manipulate it in when updating the dev <-> desc link or
  *	 when propagating IBI events to the driver
  * @boardinfo: pointer to the boardinfo attached to this I3C device
+ * @last_activity: jiffies of last device activity
  *
  * Internal representation of an I3C device. This object is only used by the
  * core and passed to I3C master controller drivers when they're requested to
@@ -232,6 +235,7 @@ struct i3c_dev_desc {
 	struct i3c_device_ibi_info *ibi;
 	struct i3c_device *dev;
 	const struct i3c_dev_boardinfo *boardinfo;
+	unsigned long last_activity;
 };
 
 /**
@@ -514,12 +518,17 @@ struct i3c_master_controller {
 	unsigned int target : 1;
 	unsigned int secondary : 1;
 	unsigned int init_done : 1;
+	unsigned int detach_polling : 1;
+	u32 detach_poll_ms;
+	u32 detach_retries;
 	struct {
 		struct list_head i3c;
 		struct list_head i2c;
 	} boardinfo;
 	struct i3c_bus bus;
 	struct workqueue_struct *wq;
+	struct workqueue_struct *detect_wq;
+	struct delayed_work detect_work;
 	struct mutex daa_lock;
 };
 
