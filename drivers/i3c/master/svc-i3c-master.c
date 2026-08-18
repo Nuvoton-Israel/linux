@@ -19,6 +19,7 @@
 #include <linux/i3c/target.h>
 #include <linux/interrupt.h>
 #include <linux/iopoll.h>
+#include <linux/kobject.h>
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -452,10 +453,14 @@ static void svc_i3c_master_hj_work(struct work_struct *work)
 	if (master->en_hj) {
 		i3c_master_do_daa(&master->base);
 	} else {
+		char *envp[] = { "I3C_EVENT=HOTJOIN_NACKED", NULL };
+
 		down_write(&master->base.bus.lock);
 		i3c_master_disec_locked(&master->base, I3C_BROADCAST_ADDR,
 					I3C_CCC_EVENT_HJ);
 		up_write(&master->base.bus.lock);
+
+		kobject_uevent_env(&master->base.dev.kobj, KOBJ_CHANGE, envp);
 	}
 }
 
