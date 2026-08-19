@@ -60,6 +60,16 @@ config USB_OBMF
 	  To compile this driver as a module, choose M here: the
 	  module will be called obmf.
 
+config USB_OBMF_I3C
+	bool "OBMF I3C Controller channel support"
+	depends on USB_OBMF && I3C
+	default y
+	help
+	  Enable OBMF-ICP I3C Controller channel (Type 06h, v1.0.0 RC1).
+	  Registers a virtual i3c_master_controller over USB, forwarding
+	  all I3C bus operations to the SMC via OBMF EXECUTE_SEQUENCE /
+	  DO_DAA requests.  I3C devices appear under /dev/i3c-* via i3cdev.
+
 config USB_OBMF_I2C
 	bool "OBMF I2C channel support"
 	depends on USB_OBMF && I2C

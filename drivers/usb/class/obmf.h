@@ -21,6 +21,7 @@
 
 /* Forward declarations for optional subsystem headers */
 struct i2c_adapter;
+struct i3c_master_controller;
 struct gpio_chip;
 struct spi_controller;
 struct tty_driver;
@@ -171,6 +172,52 @@ struct obmf_mmio_subhdr {
 #define OBMF_GPIO_STATUS_INDEX_NOT_SUPPORTED	0x40
 #define OBMF_GPIO_STATUS_INT_NOT_SUPPORTED	0x41
 #define OBMF_GPIO_STATUS_INVALID_OPERATION	0x42
+
+/* ---------- I3C Controller Channel (v1.0.0 RC1 §4.8) --------------------- */
+
+/* Commands (request byte 0) */
+#define OBMF_I3C_CMD_EXECUTE_SEQ	0x00	/* Chained SDR/CCC ops */
+#define OBMF_I3C_CMD_DO_DAA		0x01	/* ENTDAA sequence */
+#define OBMF_I3C_CMD_BUS_RECOVERY	0x02	/* Reset / recovery */
+#define OBMF_I3C_CMD_SET_ASSOC_I2C	0x03	/* Associate I2C channel */
+#define OBMF_I3C_CMD_GET_STATS		0x04	/* Retrieve error counters */
+#define OBMF_I3C_EVT_IBI		0x05	/* IBI Notification (producer) */
+#define OBMF_I3C_EVT_HOTJOIN		0x06	/* Hot-Join Notification (producer) */
+#define OBMF_I3C_EVT_BUS_ERROR		0x07	/* Bus Error Notification (producer) */
+
+/* EXECUTE_SEQUENCE op_type values */
+#define OBMF_I3C_OP_CCC			0x00	/* I3C_TRANSFER_CCC */
+#define OBMF_I3C_OP_CCC_W_DEFBYTE	0x01	/* I3C_TRANSFER_CCC_W_DEFINING_BYTE */
+#define OBMF_I3C_OP_PRIVATE_SDR		0x02	/* I3C_TRANSFER_PRIVATE_SDR */
+
+/* Per-operation result status (EXECUTE_SEQUENCE response) */
+#define OBMF_I3C_OP_SUCCESS		0x00
+#define OBMF_I3C_OP_NACK		0x01
+#define OBMF_I3C_OP_ARB_LOST		0x02
+#define OBMF_I3C_OP_TIMEOUT		0x03
+#define OBMF_I3C_OP_BUS_ERR		0x04
+
+/* I3C channel-specific status codes (common header status field) */
+#define OBMF_I3C_STATUS_BUS_TIMEOUT	0x40
+#define OBMF_I3C_STATUS_ARB_LOST	0x41
+#define OBMF_I3C_STATUS_BUS_BUSY	0x42
+#define OBMF_I3C_STATUS_NACK		0x43
+#define OBMF_I3C_STATUS_BUS_FAULT	0x44
+#define OBMF_I3C_STATUS_PARITY		0x45
+#define OBMF_I3C_STATUS_ILLEGAL_CCC	0x46
+
+/* I3C Controller Channel Configuration Data offsets (spec §4.13.2) */
+#define OBMF_I3C_CFG_NACK_RETRY		0x00	/* u16 LE: DEV_NACK_RETRY_COUNT (configured) */
+#define OBMF_I3C_CFG_FEATURE_FLAGS	0x02	/* u8:  I3C_FEATURE_FLAGS */
+#define   OBMF_I3C_CFG_F_IBI_PRIVRD	BIT(0)	/*  Bit 0: IBI private read support */
+#define OBMF_I3C_CFG_MAX_CHAINED_OPS	0x03	/* u8:  MAX_CHAINED_OPS */
+#define OBMF_I3C_CFG_MAX_SCL_PP_KHZ	0x04	/* u16 LE: MAX_SCL_PP_KHZ */
+#define OBMF_I3C_CFG_MAX_SCL_OD_KHZ	0x06	/* u16 LE: MAX_SCL_OD_KHZ */
+#define OBMF_I3C_CFG_MAX_READ_TA	0x08	/* u16 LE: MAX_READ_TURNAROUND (µs) */
+#define OBMF_I3C_CFG_MAX_DEV_NACK	0x0A	/* u16 LE: MAX_DEV_NACK_RETRY (hw cap) */
+#define OBMF_I3C_CFG_MAX_PAYLOAD	0x0C	/* u16 LE: MAX_PAYLOAD_SIZE */
+#define OBMF_I3C_CFG_MAX_IBI_PAYLOAD	0x0E	/* u16 LE: MAX_IBI_PAYLOAD_SIZE */
+#define OBMF_I3C_CFG_DATA_SIZE		0x10	/* Total config data bytes */
 
 /* ---------- I2C Controller Optimised Channel (OBMF-ICP v1.0.0 RC1) -------- */
 #define OBMF_I2C_CMD_READ		0x00
@@ -596,6 +643,20 @@ int  obmf_send_response(struct obmf_device *odev, u8 channel_id,
 /* ---------- Discovery (obmf-discovery.c) ---------------------------------- */
 int  obmf_discover_channels(struct obmf_device *odev);
 void obmf_free_channels(struct obmf_device *odev);
+
+/* ---------- I3C (obmf-i3c.c) ---------------------------------------------- */
+#if IS_ENABLED(CONFIG_USB_OBMF_I3C)
+int  obmf_i3c_register(struct obmf_device *odev, struct obmf_channel *ch);
+void obmf_i3c_unregister(struct obmf_channel *ch);
+void obmf_i3c_handle_dev_request(struct obmf_channel *ch,
+				  const u8 *data, int len);
+#else
+static inline int obmf_i3c_register(struct obmf_device *odev,
+				     struct obmf_channel *ch) { return 0; }
+static inline void obmf_i3c_unregister(struct obmf_channel *ch) {}
+static inline void obmf_i3c_handle_dev_request(struct obmf_channel *ch,
+					       const u8 *data, int len) {}
+#endif
 
 /* ---------- I2C (obmf-i2c.c) ---------------------------------------------- */
 #if IS_ENABLED(CONFIG_USB_OBMF_I2C)

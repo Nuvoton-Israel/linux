@@ -243,6 +243,9 @@ static void obmf_register_channel(struct obmf_device *odev,
 	int rv = 0;
 
 	switch (ch->channel_type) {
+	case OBMF_TYPE_I3C:
+		rv = obmf_i3c_register(odev, ch);
+		break;
 	case OBMF_TYPE_I2C:
 		rv = obmf_i2c_register(odev, ch);
 		break;
@@ -315,6 +318,9 @@ static void obmf_unregister_channel(struct obmf_channel *ch)
 		sysfs_remove_link(ch->kobj, "device");
 
 	switch (ch->channel_type) {
+	case OBMF_TYPE_I3C:
+		obmf_i3c_unregister(ch);
+		break;
 	case OBMF_TYPE_I2C:
 		obmf_i2c_unregister(ch);
 		break;

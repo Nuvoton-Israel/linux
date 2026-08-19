@@ -170,6 +170,13 @@ static void obmf_dev_request_work(struct work_struct *work)
 	case OBMF_TYPE_IPMI:
 		obmf_ipmi_handle_dev_request(ch, dreq->data, dreq->data_len);
 		break;
+	case OBMF_TYPE_I3C:
+		/*
+		 * I3C Controller Channel device-initiated request (§4.8):
+		 * IBI / Hot-Join / Bus-Error notifications from the SMC.
+		 */
+		obmf_i3c_handle_dev_request(ch, dreq->data, dreq->data_len);
+		break;
 	default:
 		if (dreq->channel_type >= OBMF_TYPE_OEM_MIN &&
 		    dreq->channel_type <= OBMF_TYPE_OEM_MAX) {
@@ -217,7 +224,7 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 		ch->status = hdr_status;
 		/* Check response status from header byte 2[7:1] */
 		if (hdr_status != OBMF_STATUS_SUCCESS) {
-			dev_err(&odev->intf->dev,
+			dev_dbg(&odev->intf->dev,
 				"ch%u: response status 0x%02x\n",
 				channel_id, hdr_status);
 			switch (hdr_status) {
@@ -651,8 +658,12 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 		return -ENODEV;
 
 	total_len = OBMF_COMMON_HDR_SIZE + payload_len;
-	if (total_len > odev->max_wr_transfer_size)
+	if (total_len > odev->max_wr_transfer_size) {
+		dev_err(&odev->intf->dev,
+			"ch: %d request size %d exceeds max_wr_transfer_size %d\n",
+			ch->channel_id, total_len, odev->max_wr_transfer_size);
 		return -EMSGSIZE;
+	}
 
 	mutex_lock(&odev->tx_lock);
 
