@@ -2757,6 +2757,7 @@ F:	drivers/*/*npcm*
 F:	drivers/rtc/rtc-nct3018y.c
 F:	include/dt-bindings/clock/nuvoton,npcm7xx-clock.h
 F:	include/dt-bindings/clock/nuvoton,npcm845-clk.h
+F:	include/uapi/linux/npcm-composite-eat.h
 
 ARM/NUVOTON NPCM VIDEO ENGINE DRIVER
 M:	Joseph Liu <kwliu@nuvoton.com>
