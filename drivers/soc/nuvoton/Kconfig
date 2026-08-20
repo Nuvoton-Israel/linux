@@ -21,6 +21,19 @@ config NPCM_MBOX_CERBERUS
 	  processors on the BMC such as TIP and CP. 
 	  Select Y here if you want to use NPCM mailbox controller.
 
+config NPCM_COMPOSITE_EAT
+	tristate "NPCM Composite EAT mailbox client"
+	depends on ARCH_NPCM || COMPILE_TEST
+	depends on MAILBOX
+	select NPCM_MBOX
+	help
+	  Provides an ioctl-only mailbox client for BMC_DIRECT Composite EAT
+	  generation requests to TIP firmware. The driver copies a userspace
+	  request into reserved shared memory and returns the signed EAT response.
+
+	  Select Y here to expose /dev/npcm-composite-eat for a platform
+	  attestation daemon.
+
 config WPCM450_SOC
 	tristate "Nuvoton WPCM450 SoC driver"
 	default y if ARCH_WPCM450
