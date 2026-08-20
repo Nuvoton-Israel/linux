@@ -84,4 +84,12 @@ config NPCM_TIP_RNG
 	help
 	  This enables access to HW RNG device thourgh TIP in NPCM BMC's.
 
+config NPCM_COMPOSITE_EAT_KUNIT_TEST
+	tristate "KUnit tests for NPCM Composite EAT" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  Tests the NPCM Composite EAT userspace ABI, physical resource bounds,
+	  request IDs, timeout quarantine, stale responses, and reset handling.
+
 endmenu
