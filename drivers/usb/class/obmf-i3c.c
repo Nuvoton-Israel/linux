@@ -606,9 +606,9 @@ static int obmf_i3c_send_ccc_cmd(struct i3c_master_controller *master,
 		}
 	}
 
-	dev_warn(&odev->intf->dev,
-		 "ch%u: CCC cmd=0x%02x ndests=%u rnw=%d\n",
-		 ch->channel_id, cmd->id, num_ops, !!cmd->rnw);
+	dev_dbg(&odev->intf->dev,
+		"ch%u: CCC cmd=0x%02x ndests=%u rnw=%d\n",
+		ch->channel_id, cmd->id, num_ops, !!cmd->rnw);
 
 	mutex_lock(&ch->lock);
 	rv = obmf_send_request(odev, ch, OBMF_TYPE_I3C,
