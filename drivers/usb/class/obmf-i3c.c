@@ -1097,10 +1097,15 @@ int obmf_i3c_register(struct obmf_device *odev, struct obmf_channel *ch)
 
 	INIT_WORK(&priv->hotjoin_work, obmf_i3c_hotjoin_work_fn);
 
+	/*
+	 * i3c_master_register() takes ownership of master.dev.of_node on
+	 * both success and failure: i3c_masterdev_release() (dev->release)
+	 * puts it when the device's refcount drops to zero, so we must not
+	 * put it again here.
+	 */
 	rv = i3c_master_register(&priv->master, &odev->intf->dev,
 				  &obmf_i3c_ops, false /* primary master */);
 	if (rv) {
-		of_node_put(priv->master.dev.of_node);
 		kfree(priv);
 		return rv;
 	}
@@ -1129,8 +1134,8 @@ void obmf_i3c_unregister(struct obmf_channel *ch)
 	 */
 	cancel_work_sync(&priv->hotjoin_work);
 
+	/* i3c_masterdev_release() puts master.dev.of_node; don't double-put. */
 	i3c_master_unregister(&priv->master);
-	of_node_put(priv->master.dev.of_node);
 
 	kfree(priv);
 	ch->priv      = NULL;
