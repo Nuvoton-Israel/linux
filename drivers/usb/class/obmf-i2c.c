@@ -155,7 +155,7 @@ static int obmf_i2c_do_request(struct obmf_channel *ch,
 	int rv;
 
 	mutex_lock(&ch->lock);
-	rv = obmf_send_request(odev, ch, OBMF_TYPE_I2C,
+	rv = obmf_send_request(odev, ch,
 			       req, req_len, resp, sizeof(resp),
 			       OBMF_DEFAULT_TIMEOUT_MS);
 	mutex_unlock(&ch->lock);
@@ -485,14 +485,14 @@ void obmf_i2c_target_handle_dev_request(struct obmf_channel *ch,
 	u8 cmd;
 
 	if (!td || len < OBMF_I2C_TGT_REQ_HDR_SIZE) {
-		obmf_send_response(odev, ch->channel_id, OBMF_TYPE_I2C_TARGET,
+		obmf_send_response(odev, ch->channel_id,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}
 
 	cmd = data[0] & OBMF_I2C_TGT_CMD_MASK;
 	if (cmd != OBMF_I2C_TGT_CMD_WRITE) {
-		obmf_send_response(odev, ch->channel_id, OBMF_TYPE_I2C_TARGET,
+		obmf_send_response(odev, ch->channel_id,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}
@@ -528,7 +528,6 @@ void obmf_i2c_target_handle_dev_request(struct obmf_channel *ch,
 			if (data[1] != slave->addr) {
 				/* Address mismatch — NACK */
 				obmf_send_response(odev, ch->channel_id,
-						   OBMF_TYPE_I2C_TARGET,
 						   OBMF_I2C_TGT_STATUS_TRANSACTION,
 						   &cmd_echo, 1);
 				return;
@@ -549,7 +548,6 @@ void obmf_i2c_target_handle_dev_request(struct obmf_channel *ch,
 
 			/* ACK: spec §4.7 requires acknowledging all written bytes */
 			obmf_send_response(odev, ch->channel_id,
-					   OBMF_TYPE_I2C_TARGET,
 					   OBMF_STATUS_SUCCESS, &cmd_echo, 1);
 			return;
 		}
@@ -557,7 +555,7 @@ void obmf_i2c_target_handle_dev_request(struct obmf_channel *ch,
 #endif /* CONFIG_I2C_SLAVE */
 
 	/* No slave registered — NACK the write */
-	obmf_send_response(odev, ch->channel_id, OBMF_TYPE_I2C_TARGET,
+	obmf_send_response(odev, ch->channel_id,
 			   OBMF_I2C_TGT_STATUS_TRANSACTION, &cmd_echo, 1);
 }
 

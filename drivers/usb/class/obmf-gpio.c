@@ -61,7 +61,7 @@ static int obmf_gpio_xfer(struct obmf_channel *ch, u8 cmd,
 	}
 
 	mutex_lock(&ch->lock);
-	rv = obmf_send_request(odev, ch, OBMF_TYPE_GPIO,
+	rv = obmf_send_request(odev, ch,
 			       req, req_len, resp, sizeof(resp),
 			       OBMF_DEFAULT_TIMEOUT_MS);
 	mutex_unlock(&ch->lock);
@@ -316,7 +316,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 	if (len < 1) {
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_GPIO,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}
@@ -333,7 +332,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 		if (!gd) {
 			obmf_send_response(odev, ch->channel_id,
-					   OBMF_TYPE_GPIO,
 					   OBMF_STATUS_INVALID_CMD,
 					   resp, 1);
 			return;
@@ -346,7 +344,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 			if (idx >= gd->gc.ngpio) {
 				obmf_send_response(odev, ch->channel_id,
-						   OBMF_TYPE_GPIO,
 						   OBMF_STATUS_GPIO_IDX_NOT_SUPPORTED,
 						   resp, 1);
 				return;
@@ -354,7 +351,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 			if (!test_bit(idx, gd->dir_out)) {
 				obmf_send_response(odev, ch->channel_id,
-						   OBMF_TYPE_GPIO,
 						   OBMF_STATUS_GPIO_INVALID_OP,
 						   resp, 1);
 				return;
@@ -369,7 +365,7 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 			}
 		}
 
-		obmf_send_response(odev, ch->channel_id, OBMF_TYPE_GPIO,
+		obmf_send_response(odev, ch->channel_id,
 				   OBMF_STATUS_SUCCESS, resp, resp_len);
 		return;
 	}
@@ -379,7 +375,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 		if (!gd) {
 			obmf_send_response(odev, ch->channel_id,
-					   OBMF_TYPE_GPIO,
 					   OBMF_STATUS_INVALID_CMD,
 					   &resp_cmd, 1);
 			return;
@@ -391,7 +386,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 			if (idx >= gd->gc.ngpio) {
 				obmf_send_response(odev, ch->channel_id,
-						   OBMF_TYPE_GPIO,
 						   OBMF_STATUS_GPIO_IDX_NOT_SUPPORTED,
 						   &resp_cmd, 1);
 				return;
@@ -404,7 +398,7 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 						idx));
 		}
 
-		obmf_send_response(odev, ch->channel_id, OBMF_TYPE_GPIO,
+		obmf_send_response(odev, ch->channel_id,
 				   OBMF_STATUS_SUCCESS, &resp_cmd, 1);
 		return;
 	}
@@ -417,7 +411,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 		if (!gd) {
 			obmf_send_response(odev, ch->channel_id,
-					   OBMF_TYPE_GPIO,
 					   OBMF_STATUS_INVALID_CMD,
 					   resp, 1);
 			return;
@@ -430,7 +423,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 			if (idx >= gd->gc.ngpio) {
 				obmf_send_response(odev, ch->channel_id,
-						   OBMF_TYPE_GPIO,
 						   OBMF_STATUS_GPIO_IDX_NOT_SUPPORTED,
 						   resp, 1);
 				return;
@@ -445,7 +437,7 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 			}
 		}
 
-		obmf_send_response(odev, ch->channel_id, OBMF_TYPE_GPIO,
+		obmf_send_response(odev, ch->channel_id,
 				   OBMF_STATUS_SUCCESS, resp, resp_len);
 		return;
 	}
@@ -455,7 +447,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 		if (!gd) {
 			obmf_send_response(odev, ch->channel_id,
-					   OBMF_TYPE_GPIO,
 					   OBMF_STATUS_INVALID_CMD,
 					   &resp_cmd, 1);
 			return;
@@ -468,7 +459,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 			if (idx >= gd->gc.ngpio) {
 				obmf_send_response(odev, ch->channel_id,
-						   OBMF_TYPE_GPIO,
 						   OBMF_STATUS_GPIO_IDX_NOT_SUPPORTED,
 						   &resp_cmd, 1);
 				return;
@@ -476,7 +466,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 			if (cfg > OBMF_GPIO_IRQ_BOTH) {
 				obmf_send_response(odev, ch->channel_id,
-						   OBMF_TYPE_GPIO,
 						   OBMF_STATUS_INVALID_CMD,
 						   &resp_cmd, 1);
 				return;
@@ -489,7 +478,7 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 				clear_bit(idx, gd->irq_enabled);
 		}
 
-		obmf_send_response(odev, ch->channel_id, OBMF_TYPE_GPIO,
+		obmf_send_response(odev, ch->channel_id,
 				   OBMF_STATUS_SUCCESS, &resp_cmd, 1);
 		return;
 	}
@@ -514,7 +503,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 			u8 resp_cmd = OBMF_GPIO_CMD_IRQ_NOTIFY;
 
 			obmf_send_response(odev, ch->channel_id,
-					   OBMF_TYPE_GPIO,
 					   OBMF_STATUS_SUCCESS,
 					   &resp_cmd, 1);
 		}
@@ -522,7 +510,6 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 
 	default:
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_GPIO,
 				   OBMF_STATUS_INVALID_CMD, &cmd, 1);
 		break;
 	}

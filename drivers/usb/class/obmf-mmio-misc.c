@@ -10,7 +10,8 @@
  *   write() — send response to device-initiated requests
  *   poll()  — check for pending device-initiated requests
  *
- * Kernel manages MMIO Sub-Header (Transaction + Tag) in both directions.
+ * Kernel manages the MMIO Sub-Header (Transaction only, no Tag) in both
+ * directions.
  */
 
 #include <linux/miscdevice.h>
@@ -39,7 +40,6 @@ struct obmf_mmio_data {
 	u8			dev_req_buf[512];
 	int			dev_req_len;
 	u8			dev_req_transaction;
-	u8			dev_req_tag;
 	bool			dev_req_ready;
 	bool			dev_resp_pending; /* write() expected */
 
@@ -152,7 +152,7 @@ static ssize_t obmf_mmio_read(struct file *file, char __user *buf,
 
 	/*
 	 * dev_req_buf layout (stored by handle_dev_request):
-	 *   [addr(4B LE for SHORT, 8B LE for LONG)] [size(1B/2B)] [data...]
+	 *   [addr(4B LE for SHORT, 8B LE for LONG)] [size(2B LE)] [data...]
 	 */
 	transaction = md->dev_req_transaction;
 
@@ -163,11 +163,11 @@ static ssize_t obmf_mmio_read(struct file *file, char __user *buf,
 		const u8 *payload = NULL;
 
 		if (transaction == OBMF_TRANS_SHORT_WRITE &&
-		    md->dev_req_len >= (int)(4 + 1 + 1)) {
-			/* SHORT: addr32(4) + size_u8(1) + data */
+		    md->dev_req_len >= (int)(4 + 2 + 1)) {
+			/* SHORT: addr32(4) + size_u16(2) + data */
 			address   = get_unaligned_le32(md->dev_req_buf);
-			data_size = md->dev_req_buf[4];
-			payload   = md->dev_req_buf + 5;
+			data_size = get_unaligned_le16(md->dev_req_buf + 4);
+			payload   = md->dev_req_buf + 6;
 		} else if (transaction == OBMF_TRANS_LONG_WRITE &&
 			   md->dev_req_len >= (int)(8 + 2 + 1)) {
 			/* LONG: addr64(8) + size_u16(2) + data */
@@ -197,11 +197,10 @@ static ssize_t obmf_mmio_read(struct file *file, char __user *buf,
 				return -EFAULT;
 			}
 			mhdr->transaction = transaction;
-			mhdr->tag         = md->dev_req_tag;
 			md->dev_req_ready = false;
 			mutex_unlock(&md->flock);
 			rv = obmf_send_response(odev, ch->channel_id,
-						OBMF_TYPE_MMIO, OBMF_STATUS_SUCCESS,
+						OBMF_STATUS_SUCCESS,
 						resp, sizeof(resp));
 			return rv ? rv : (ssize_t)data_size;
 		}
@@ -250,9 +249,8 @@ static ssize_t obmf_mmio_write(struct file *file, const char __user *buf,
 		return -EINVAL;
 	}
 
-	/* Build MMIO Sub-Header with saved transaction and tag */
+	/* Build MMIO Sub-Header with saved transaction (no tag, spec §4.3) */
 	mhdr->transaction = md->dev_req_transaction;
-	mhdr->tag         = md->dev_req_tag;
 
 	/* Copy userspace response: [Status(1B)][Data(NB)] */
 	if (copy_from_user(resp + OBMF_MMIO_SUBHDR_SIZE, buf, count)) {
@@ -261,7 +259,7 @@ static ssize_t obmf_mmio_write(struct file *file, const char __user *buf,
 	}
 
 	/*
-	 * v0.9: Status moves to Common Header byte 2[7:1].
+	 * Status moves to Common Header Status field.
 	 * Userspace still writes Status(1B) + Data(NB).
 	 * Extract status from first byte; payload is sub-header + data only.
 	 */
@@ -279,7 +277,7 @@ static ssize_t obmf_mmio_write(struct file *file, const char __user *buf,
 		mutex_unlock(&md->flock);
 
 		rv = obmf_send_response(odev, ch->channel_id,
-					OBMF_TYPE_MMIO, user_status,
+					user_status,
 					resp, payload_len);
 	}
 	if (rv)
@@ -383,7 +381,7 @@ void obmf_mmio_unregister(struct obmf_channel *ch)
 /* ------------------------------------------------------------------ */
 
 void obmf_mmio_handle_dev_request(struct obmf_channel *ch,
-				  u8 transaction, u8 tag,
+				  u8 transaction,
 				  const u8 *data, int len)
 {
 	struct obmf_mmio_data *md = ch->priv;
@@ -393,7 +391,6 @@ void obmf_mmio_handle_dev_request(struct obmf_channel *ch,
 
 	mutex_lock(&md->flock);
 	md->dev_req_transaction = transaction;
-	md->dev_req_tag         = tag;
 	md->dev_req_len = min_t(int, len, (int)sizeof(md->dev_req_buf));
 	if (md->dev_req_len > 0)
 		memcpy(md->dev_req_buf, data, md->dev_req_len);

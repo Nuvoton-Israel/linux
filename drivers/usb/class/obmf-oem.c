@@ -112,7 +112,6 @@ static ssize_t obmf_oem_write(struct file *file, const char __user *buf,
 		mutex_unlock(&od->flock);
 
 		rv = obmf_send_response(odev, ch->channel_id,
-					ch->channel_type,
 					OBMF_STATUS_SUCCESS, req, count);
 		return rv < 0 ? rv : count;
 	}
@@ -123,7 +122,7 @@ static ssize_t obmf_oem_write(struct file *file, const char __user *buf,
 	mutex_lock(&ch->lock);
 	mutex_lock(&od->flock);
 
-	rv = obmf_send_request(odev, ch, ch->channel_type,
+	rv = obmf_send_request(odev, ch,
 			       req, count,
 			       od->resp_buf, sizeof(od->resp_buf),
 			       OBMF_DEFAULT_TIMEOUT_MS);
@@ -209,7 +208,6 @@ void obmf_oem_handle_dev_request(struct obmf_channel *ch,
 
 	if (!od) {
 		obmf_send_response(odev, ch->channel_id,
-				   ch->channel_type,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}
