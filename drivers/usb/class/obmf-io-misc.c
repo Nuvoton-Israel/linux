@@ -43,10 +43,25 @@
 /* Well-known I/O port address for BIOS POST codes (standard x86 port 80h) */
 #define OBMF_IO_PORT_POSTCODE	0x0080U
 
+struct obmf_io_range {
+	bool	enabled;
+	u16	start;
+	u16	end;
+	u16	mask;
+};
+
 struct obmf_io_data {
 	struct miscdevice	mdev;
 	struct obmf_channel	*ch;
 	char			name[32];
+
+	/* Channel 0 IO_RANGE_CFG (spec \u00a74.13.2); config_loaded stays false
+	 * (permissive) if the device does not expose this configuration.
+	 */
+	bool			config_loaded;
+	u16			tx_types_supported;
+	int			num_ranges;
+	struct obmf_io_range	*ranges;
 
 	/* Device-initiated request state (protected by flock) */
 	u8			dev_req_buf[512];
@@ -98,8 +113,97 @@ static int obmf_io_data_width(u8 transaction)
 	}
 }
 
+/* ------------------------------------------------------------------ *//* Config data reader (spec \u00a74.13.2 IO Channel Configuration Data)     */
 /* ------------------------------------------------------------------ */
-/* ioctl — host-initiated I/O port transaction                         */
+
+static int obmf_io_read_config(struct obmf_device *odev, struct obmf_io_data *id)
+{
+	struct obmf_channel *ch  = id->ch;
+	struct obmf_channel *ch0 = &odev->channels[0];
+	u32 base = ch->config_offset + OBMF_CHCFG_CONFIG_DATA;
+	u8 hdr[4];
+	u16 range_count;
+	int i, rv;
+
+	if (!ch->config_offset || ch->config_size < 4)
+		return -ENODATA;
+
+	rv = obmf_send_mmio_request(odev, ch0, OBMF_TRANS_SHORT_READ,
+				    base + OBMF_IO_CFG_TX_TYPES_SUPPORTED,
+				    NULL, 0, hdr, sizeof(hdr));
+	if (rv < 0)
+		return rv;
+
+	id->tx_types_supported = get_unaligned_le16(hdr);
+	range_count = get_unaligned_le16(hdr + 2);
+	if (range_count == 0)
+		return 0;
+
+	id->ranges = kcalloc(range_count, sizeof(*id->ranges), GFP_KERNEL);
+	if (!id->ranges)
+		return -ENOMEM;
+
+	for (i = 0; i < range_count; i++) {
+		u8 entry[OBMF_IO_RANGE_CFG_SIZE];
+
+		rv = obmf_send_mmio_request(odev, ch0, OBMF_TRANS_SHORT_READ,
+					    base + OBMF_IO_CFG_RANGE_ARRAY +
+					    i * OBMF_IO_RANGE_CFG_SIZE,
+					    NULL, 0, entry, sizeof(entry));
+		if (rv < 0) {
+			kfree(id->ranges);
+			id->ranges = NULL;
+			return rv;
+		}
+
+		id->ranges[i].enabled = entry[OBMF_IO_RANGE_FLAGS] &
+					 OBMF_IO_RANGE_FLAGS_ENABLE;
+		id->ranges[i].start   = get_unaligned_le16(entry + OBMF_IO_RANGE_START);
+		id->ranges[i].end     = get_unaligned_le16(entry + OBMF_IO_RANGE_END);
+		id->ranges[i].mask    = get_unaligned_le16(entry + OBMF_IO_RANGE_MASK);
+	}
+
+	id->num_ranges = range_count;
+	return 0;
+}
+
+/* Bit position in TRANSACTION_TYPES_SUPPORTED matches the transaction code */
+static bool obmf_io_transaction_supported(struct obmf_io_data *id, u8 transaction)
+{
+	if (!id->config_loaded)
+		return true;
+	if (transaction > OBMF_IO_TRANS_FIXED_WRITE_32)
+		return false;
+	return id->tx_types_supported & BIT(transaction);
+}
+
+/* Port range is decoded like a PCI I/O BAR: (port & MASK) == (START & MASK) */
+static bool obmf_io_port_allowed(struct obmf_io_data *id, u16 port_addr,
+				 unsigned int len)
+{
+	u16 port_end;
+	int i;
+
+	if (!id->config_loaded)
+		return true;
+	if (len == 0)
+		return false;
+
+	port_end = port_addr + len - 1;
+	for (i = 0; i < id->num_ranges; i++) {
+		struct obmf_io_range *r = &id->ranges[i];
+
+		if (!r->enabled)
+			continue;
+		if ((port_addr & r->mask) != (r->start & r->mask))
+			continue;
+		if (port_addr >= r->start && port_end <= r->end)
+			return true;
+	}
+	return false;
+}
+
+/* ------------------------------------------------------------------ *//* ioctl — host-initiated I/O port transaction                         */
 /* ------------------------------------------------------------------ */
 
 static long obmf_io_ioctl(struct file *file, unsigned int cmd,
@@ -125,6 +229,9 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 	if (xfer.transaction > OBMF_IO_TRANS_FIXED_WRITE_32)
 		return -EINVAL;
 
+	if (!obmf_io_transaction_supported(id, xfer.transaction))
+		return -EOPNOTSUPP;
+
 	width = obmf_io_data_width(xfer.transaction);
 
 	/* Copy write data from userspace */
@@ -133,6 +240,8 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 		if (width > 1 && (xfer.wr_len % width) != 0)
 			return -EINVAL;
+		if (!obmf_io_port_allowed(id, xfer.port_addr, xfer.wr_len))
+			return -EPERM;
 		if (copy_from_user(wr_buf, u64_to_user_ptr(xfer.wr_data_ptr),
 				   xfer.wr_len))
 			return -EFAULT;
@@ -142,6 +251,8 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 		if (width > 1 && (xfer.rd_len % width) != 0)
 			return -EINVAL;
+		if (!obmf_io_port_allowed(id, xfer.port_addr, xfer.rd_len))
+			return -EPERM;
 	}
 
 	mutex_lock(&ch->lock);
@@ -251,7 +362,6 @@ static ssize_t obmf_io_read(struct file *file, char __user *buf,
 
 			/* ACK: success, IO sub-header only, no data payload */
 			rv = obmf_send_response(odev, ch->channel_id,
-						OBMF_TYPE_IO,
 						OBMF_STATUS_SUCCESS,
 						resp, sizeof(resp));
 			return rv ? rv : (ssize_t)data_size;
@@ -332,7 +442,7 @@ static ssize_t obmf_io_write(struct file *file, const char __user *buf,
 		mutex_unlock(&id->flock);
 
 		rv = obmf_send_response(odev, ch->channel_id,
-					OBMF_TYPE_IO, user_status,
+					user_status,
 					resp, payload_len);
 	}
 
@@ -398,6 +508,14 @@ int obmf_io_register(struct obmf_device *odev, struct obmf_channel *ch)
 	mutex_init(&id->flock);
 	init_waitqueue_head(&id->read_wait);
 
+	rv = obmf_io_read_config(odev, id);
+	if (rv)
+		dev_dbg(&odev->intf->dev,
+			"ch%u: IO_RANGE_CFG unavailable (%d), permissive mode\n",
+			ch->channel_id, rv);
+	else
+		id->config_loaded = true;
+
 	snprintf(id->name, sizeof(id->name), "obmf%d-io-%u",
 		 odev->device_index, ch->channel_id);
 	id->mdev.minor = MISC_DYNAMIC_MINOR;
@@ -427,6 +545,7 @@ void obmf_io_unregister(struct obmf_channel *ch)
 		if (ch->kobj)
 			sysfs_remove_link(ch->kobj, "io");
 		misc_deregister(&id->mdev);
+		kfree(id->ranges);
 		kfree(id);
 		ch->priv = NULL;
 	}
