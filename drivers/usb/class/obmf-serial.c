@@ -117,7 +117,7 @@ static int obmf_serial_write(struct tty_struct *tty,
 	send_len = 3 + tx_count;
 
 	mutex_lock(&ch->lock);
-	rv = obmf_send_request(odev, ch, OBMF_TYPE_SERIAL,
+	rv = obmf_send_request(odev, ch,
 			       req, send_len, resp, sizeof(resp),
 			       OBMF_DEFAULT_TIMEOUT_MS);
 	mutex_unlock(&ch->lock);
@@ -242,7 +242,6 @@ void obmf_serial_handle_dev_request(struct obmf_channel *ch,
 
 	if (!sp || len < 3) {
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_SERIAL,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}
@@ -265,7 +264,6 @@ void obmf_serial_handle_dev_request(struct obmf_channel *ch,
 	put_unaligned_le16((u16)accepted, &resp[1]);
 
 	obmf_send_response(odev, ch->channel_id,
-			   OBMF_TYPE_SERIAL,
 			   OBMF_STATUS_SUCCESS, resp, sizeof(resp));
 }
 

@@ -67,10 +67,10 @@
  * (OBMF_COMMON_HDR_SIZE) that obmf_send_request() wraps every request
  * and response with:
  *   Request  sub-header: cmd_byte(1) + WriteDataSize(2) + ReadDataSize(2)
- *   Response sub-header: cmd_echo(1) + reserved(1)      + ReadDataSize(2)
+ *   Response sub-header: cmd_echo(1) + ReadDataSize(2)
  */
 #define OBMF_SPI_REQ_SUBHDR_SIZE	5
-#define OBMF_SPI_RESP_SUBHDR_SIZE	4
+#define OBMF_SPI_RESP_SUBHDR_SIZE	3
 
 enum obmf_spi_mode {
 	OBMF_SPI_MODE_ESPI,	/* device-initiated / MTD-backed */
@@ -214,7 +214,7 @@ static int obmf_spi_xfer(struct obmf_channel *ch, u8 cmd_byte,
 	}
 
 	mutex_lock(&ch->lock);
-	rv = obmf_send_request(odev, ch, OBMF_TYPE_SPI,
+	rv = obmf_send_request(odev, ch,
 			       req, req_len, resp, sizeof(resp),
 			       OBMF_DEFAULT_TIMEOUT_MS);
 	mutex_unlock(&ch->lock);
@@ -222,9 +222,9 @@ static int obmf_spi_xfer(struct obmf_channel *ch, u8 cmd_byte,
 	if (rv < 0)
 		return rv;
 
-	/* Parse response: cmd(1) + reserved(1) + rd_size(2) + rd_data(N) */
-	if (rv >= 4 && rd_data && rd_len > 0) {
-		u16 actual_rd = get_unaligned_le16(&resp[2]);
+	/* Parse response: cmd(1) + rd_size(2) + rd_data(N) */
+	if (rv >= OBMF_SPI_RESP_SUBHDR_SIZE && rd_data && rd_len > 0) {
+		u16 actual_rd = get_unaligned_le16(&resp[1]);
 		int copy = min_t(u16, actual_rd, rd_len);
 
 		if (copy > 0) {
@@ -236,9 +236,9 @@ static int obmf_spi_xfer(struct obmf_channel *ch, u8 cmd_byte,
 			 * uninitialised caller memory as if it were valid
 			 * flash data.
 			 */
-			if (rv < 4 + copy)
+			if (rv < OBMF_SPI_RESP_SUBHDR_SIZE + copy)
 				return -EIO;
-			memcpy(rd_data, resp + 4, copy);
+			memcpy(rd_data, resp + OBMF_SPI_RESP_SUBHDR_SIZE, copy);
 		}
 		return copy;
 	}
@@ -275,7 +275,6 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 
 	if (!sd || len < 5) {
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_SPI,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}
@@ -286,7 +285,6 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 	 */
 	if (sd->mode != OBMF_SPI_MODE_ESPI) {
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_SPI,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}
@@ -299,7 +297,6 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 
 	if (len < 5 + wr_size) {
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_SPI,
 				   OBMF_STATUS_SIZE_NOT_SUPPORTED, NULL, 0);
 		return;
 	}
@@ -310,14 +307,14 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 		struct mtd_info *mtd = sd->mtd;
 		size_t retlen;
 
-		resp = kmalloc(3 + rd_size, GFP_KERNEL);
+		resp = kmalloc(OBMF_SPI_RESP_SUBHDR_SIZE + rd_size, GFP_KERNEL);
 		if (!resp) {
 			status = OBMF_STATUS_PERMANENT_ERROR;
 			break;
 		}
 
 		rv = mtd_read(mtd, sd->flash_offset, rd_size, &retlen,
-			      resp + 3);
+			      resp + OBMF_SPI_RESP_SUBHDR_SIZE);
 
 		if (rv && rv != -EUCLEAN) {
 			status = OBMF_SPI_STATUS_TRANSFER_ERROR;
@@ -326,10 +323,10 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 
 		resp[0] = cmd_byte;
 		put_unaligned_le16((u16)retlen, &resp[1]);
-		resp_len = 3 + retlen;
+		resp_len = OBMF_SPI_RESP_SUBHDR_SIZE + retlen;
 
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_SPI, status,
+				   status,
 				   resp, resp_len);
 		kfree(resp);
 		return;
@@ -390,14 +387,15 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 			size_t retlen;
 			u32 addr = obmf_spi_extract_addr(wr_data, wr_size);
 
-			resp = kmalloc(4 + rd_size, GFP_KERNEL);
+			resp = kmalloc(OBMF_SPI_RESP_SUBHDR_SIZE + rd_size,
+				      GFP_KERNEL);
 			if (!resp) {
 				status = OBMF_STATUS_PERMANENT_ERROR;
 				break;
 			}
 
 			rv = mtd_read(mtd, addr, rd_size, &retlen,
-				      resp + 4);
+				      resp + OBMF_SPI_RESP_SUBHDR_SIZE);
 
 			if (rv && rv != -EUCLEAN) {
 				status = OBMF_SPI_STATUS_TRANSFER_ERROR;
@@ -405,12 +403,11 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 			}
 
 			resp[0] = cmd_byte;
-			resp[1] = rv;
-			put_unaligned_le16((u16)retlen, &resp[2]);
-			resp_len = 4 + retlen;
+			put_unaligned_le16((u16)retlen, &resp[1]);
+			resp_len = OBMF_SPI_RESP_SUBHDR_SIZE + retlen;
 
 			obmf_send_response(odev, ch->channel_id,
-					   OBMF_TYPE_SPI, status,
+					   status,
 					   resp, resp_len);
 			kfree(resp);
 			return;
@@ -432,13 +429,12 @@ void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 
 	/* Send response (for non-read commands) */
 	{
-		u8 simple_resp[4];
+		u8 simple_resp[OBMF_SPI_RESP_SUBHDR_SIZE];
 
 		simple_resp[0] = cmd_byte;
-		simple_resp[1] = rv;
-		put_unaligned_le16(0, &simple_resp[2]);
+		put_unaligned_le16(0, &simple_resp[1]);
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_SPI, status,
+				   status,
 				   simple_resp, sizeof(simple_resp));
 	}
 	kfree(resp);

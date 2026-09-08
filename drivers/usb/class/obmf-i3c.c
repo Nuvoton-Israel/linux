@@ -427,7 +427,7 @@ static int obmf_i3c_bus_init(struct i3c_master_controller *master)
 			 "ch%u: SET_ASSOC_I2C(ch%u)\n",
 			 ch->channel_id, priv->assoc_i2c_ch->channel_id);
 		mutex_lock(&ch->lock);
-		rv = obmf_send_request(odev, ch, OBMF_TYPE_I3C,
+		rv = obmf_send_request(odev, ch,
 				       req, sizeof(req),
 				       resp, sizeof(resp),
 				       OBMF_DEFAULT_TIMEOUT_MS);
@@ -480,7 +480,7 @@ static int obmf_i3c_do_daa(struct i3c_master_controller *master)
 	/* bytes 1–5 remain zero */
 
 	mutex_lock(&ch->lock);
-	rv = obmf_send_request(odev, ch, OBMF_TYPE_I3C,
+	rv = obmf_send_request(odev, ch,
 			       req, 6,
 			       resp, OBMF_I3C_BUF_SZ,
 			       OBMF_DEFAULT_TIMEOUT_MS);
@@ -611,7 +611,7 @@ static int obmf_i3c_send_ccc_cmd(struct i3c_master_controller *master,
 		ch->channel_id, cmd->id, num_ops, !!cmd->rnw);
 
 	mutex_lock(&ch->lock);
-	rv = obmf_send_request(odev, ch, OBMF_TYPE_I3C,
+	rv = obmf_send_request(odev, ch,
 			       req, off,
 			       resp, OBMF_I3C_BUF_SZ,
 			       OBMF_DEFAULT_TIMEOUT_MS);
@@ -715,7 +715,7 @@ static int obmf_i3c_priv_xfers(struct i3c_dev_desc *dev,
 		}
 
 		mutex_lock(&ch->lock);
-		rv = obmf_send_request(odev, ch, OBMF_TYPE_I3C,
+		rv = obmf_send_request(odev, ch,
 				       req, off,
 				       resp, OBMF_I3C_BUF_SZ,
 				       OBMF_DEFAULT_TIMEOUT_MS);
@@ -1051,7 +1051,7 @@ void obmf_i3c_handle_dev_request(struct obmf_channel *ch,
 	 */
 	resp[0] = data[0];
 	resp[1] = 0;
-	obmf_send_response(priv->odev, ch->channel_id, OBMF_TYPE_I3C,
+	obmf_send_response(priv->odev, ch->channel_id,
 			   ack_status, resp, sizeof(resp));
 }
 

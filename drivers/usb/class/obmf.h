@@ -55,44 +55,42 @@ struct miscdevice;
  */
 #define OBMF_DEFAULT_TIMEOUT_MS		5000
 
-/* ---------- Common Header (5 bytes) ----------------------------------------
+/* ---------- Common Header (4 bytes, OBMF-ICP v1.0.0 RC1 §4.1) --------------
  *
  * Byte 0:   Channel [7:0]
- * Byte 1:   Channel Type [7:0]
- * Byte 2:   RqResp [0], Status [7:1]
- * Byte 3-4: Size [15:0]  (LE)
- * Byte 5+:  Payload
+ * Byte 1:   Status [6:0], RqResp [7]
+ * Byte 2-3: Size [15:0]  (LE)
+ * Byte 4+:  Payload
  */
 struct obmf_common_hdr {
 	u8	channel;
-	u8	channel_type;
-	u8	rqresp_status;
+	u8	status_rqresp;
 	__le16	size;
 } __packed;
 
 #define OBMF_COMMON_HDR_SIZE	sizeof(struct obmf_common_hdr)
 
-/* Header byte 2 accessor macros */
-#define OBMF_HDR_IS_RESPONSE(h)		((h)->rqresp_status & 0x01)
-#define OBMF_HDR_STATUS(h)		(((h)->rqresp_status >> 1) & 0x7F)
-#define OBMF_HDR_SET_REQUEST(h)		((h)->rqresp_status = 0)
-#define OBMF_HDR_SET_RESPONSE(h, s)	((h)->rqresp_status = (((s) & 0x7F) << 1) | 0x01)
+/* Header byte 1 accessor macros */
+#define OBMF_HDR_IS_RESPONSE(h)		((h)->status_rqresp & 0x80)
+#define OBMF_HDR_STATUS(h)		((h)->status_rqresp & 0x7F)
+#define OBMF_HDR_SET_REQUEST(h)		((h)->status_rqresp = 0)
+#define OBMF_HDR_SET_RESPONSE(h, s)	((h)->status_rqresp = 0x80 | ((s) & 0x7F))
 
-/* ---------- MMIO Sub-Header (2 bytes, Channel Type 01h only) ---------------
+/* ---------- MMIO Sub-Header (1 byte, Channel Type 01h only) ----------------
  *
  * Byte 0: Transaction [2:0], Reserved [7:3]
- * Byte 1: Tag [7:0]  (alternates 0 <-> 1)
+ *
+ * Present in both Request and Response payloads (spec §4.3); no Tag field.
  */
 struct obmf_mmio_subhdr {
 	u8	transaction;
-	u8	tag;
 } __packed;
 
 #define OBMF_MMIO_SUBHDR_SIZE	sizeof(struct obmf_mmio_subhdr)
 
-/* MMIO Transaction types (3-bit field, spec §3.4 Layer 2) */
-#define OBMF_TRANS_SHORT_READ	0x00	/* 32-bit addr, Size u8 (up to 255B) */
-#define OBMF_TRANS_SHORT_WRITE	0x01	/* 32-bit addr, Size u8 (up to 255B) */
+/* MMIO Transaction types (3-bit field, spec §4.3) */
+#define OBMF_TRANS_SHORT_READ	0x00	/* 32-bit addr, Size u16 */
+#define OBMF_TRANS_SHORT_WRITE	0x01	/* 32-bit addr, Size u16 */
 #define OBMF_TRANS_LONG_READ	0x02	/* 64-bit addr, Size u16 */
 #define OBMF_TRANS_LONG_WRITE	0x03	/* 64-bit addr, Size u16 */
 
@@ -302,7 +300,7 @@ struct obmf_mmio_subhdr {
 /* ---------- I/O Port Channel (v0.9.2, Channel Type 09h) ------------------- */
 
 /*
- * I/O Sub-Header: same wire format as MMIO Sub-Header.
+ * I/O Sub-Header (2 bytes, Channel Type 09h, spec §4.11):
  *   Byte 0 [3:0]: Transaction type (4-bit; spec says [2:0] but values go to 11)
  *   Byte 0 [7:4]: Reserved
  *   Byte 1 [7:0]: Tag (alternates 0 <-> 1)
@@ -434,42 +432,65 @@ struct obmf_functional_desc {
 	__le16	bcdOCPOBMFVersion;
 } __packed;
 
-/* ---------- Channel 0 Discovery Register Map (v0.9) ---------------------- */
-#define OBMF_DISC_OBMF_VER		0x00	/* R   16-bit BCD version */
+/* ---------- Channel 0 Discovery Register Map (v1.0.0 RC1 §4.13) ---------- */
+#define OBMF_DISC_OBMF_VER		0x00	/* R   16-bit BCD version (minor@0, major@1) */
 #define OBMF_DISC_VENDOR_ID		0x02	/* R   16-bit PCI-SIG vendor */
 #define OBMF_DISC_DEVICE_ID		0x04	/* R   16-bit */
-#define OBMF_DISC_DEVICE_ROLE		0x06	/* R   32-bit */
-#define OBMF_DISC_DEVICE_NAME		0x0A	/* R   32-byte UTF-8 */
-#define OBMF_DISC_NUM_CHANNELS		0x2A	/* R    8-bit */
-#define OBMF_DISC_CONFIG_STATUS		0x2B	/* R    8-bit */
-#define OBMF_DISC_VENDOR_CFG_OFF	0x2C	/* R   32-bit */
-#define OBMF_DISC_CHANNEL_OFFSET_BASE	0x30	/* R   4B × N */
+#define OBMF_DISC_DEVICE_NAME		0x06	/* R   32-byte UTF-8 */
+#define OBMF_DISC_NUM_CHANNELS		0x26	/* R    8-bit */
+#define OBMF_DISC_CONFIG_STATUS		0x27	/* RW   8-bit */
+#define OBMF_DISC_VENDOR_CFG_OFF	0x28	/* R   32-bit */
+#define OBMF_DISC_CHANNEL_OFFSET_BASE	0x2C	/* R   4B × N */
 
 #define OBMF_DISC_DEVICE_NAME_LEN	32
 
-/* DEVICE_ROLE values */
-#define OBMF_ROLE_UNSPECIFIED		0
-#define OBMF_ROLE_HOST			1
-#define OBMF_ROLE_DEVICE		2
+/* CONFIG_STATUS bits (Channel 0, spec §4.13) */
+#define OBMF_CFGSTAT_MANUF_LOCK_SUPPORTED	BIT(0)
+#define OBMF_CFGSTAT_MANUF_LOCKED		BIT(1)
+#define OBMF_CFGSTAT_MANUF_LOCK_REQUEST		BIT(2)
+#define OBMF_CFGSTAT_MANUF_VALID		BIT(3)
+#define OBMF_CFGSTAT_RUNTIME_APPLIED		BIT(4)
 
-/* ---------- Channel Config Common Header ---------------------------------- */
+/* Per-channel DEVICE_ROLE values (offset OBMF_CHCFG_DEVICE_ROLE) */
+#define OBMF_ROLE_PRODUCER		0
+#define OBMF_ROLE_CONSUMER		1
+
+/* ---------- Channel Config Common Header (spec §4.13) --------------------- */
 #define OBMF_CHCFG_TYPE			0x00	/* 1B */
 #define OBMF_CHCFG_NUMBER		0x01	/* 1B */
 #define OBMF_CHCFG_NAME			0x02	/* 16B */
-#define OBMF_CHCFG_STATUS		0x12	/* 1B */
-#define OBMF_CHCFG_CONTROL		0x13	/* 1B */
-#define OBMF_CHCFG_SPECIFIC_STATUS	0x14	/* 1B */
-#define OBMF_CHCFG_SPECIFIC_CONTROL	0x15	/* 1B */
-#define OBMF_CHCFG_CONFIG_SIZE		0x18	/* 4B */
-#define OBMF_CHCFG_CONFIG_DATA		0x1C	/* variable */
+#define OBMF_CHCFG_DEVICE_ROLE		0x12	/* 1B */
+#define OBMF_CHCFG_STATUS		0x13	/* 1B */
+#define OBMF_CHCFG_CONTROL		0x14	/* 1B */
+#define OBMF_CHCFG_SPECIFIC_STATUS	0x15	/* 1B */
+#define OBMF_CHCFG_SPECIFIC_CONTROL	0x16	/* 1B */
+#define OBMF_CHCFG_MAX_REQUEST_PAYLOAD	0x17	/* 2B */
+#define OBMF_CHCFG_MAX_RESPONSE_PAYLOAD	0x19	/* 2B */
+#define OBMF_CHCFG_CONFIG_SIZE		0x1C	/* 4B */
+#define OBMF_CHCFG_CONFIG_DATA		0x20	/* variable */
 
 #define OBMF_CHCFG_NAME_LEN		16
 
+/* CHANNEL_STATUS bits (spec §4.13) */
+#define OBMF_CHSTAT_HEALTH_MASK		0x0F	/* [3:0] HEALTH_STATUS */
+#define OBMF_CHSTAT_HEALTH_OK		1
+#define OBMF_CHSTAT_HEALTH_DISABLED	2
+#define OBMF_CHSTAT_HEALTH_NOT_READY	3
+#define OBMF_CHSTAT_HEALTH_ERROR	15
+#define OBMF_CHSTAT_RESET_DONE		BIT(4)
+#define OBMF_CHSTAT_CONFIG_VALID	BIT(5)
+#define OBMF_CHSTAT_CONFIG_LOCKED	BIT(6)
+#define OBMF_CHSTAT_ERROR_INDICATOR	BIT(7)
+
 /* CHANNEL_CONTROL bits */
 #define OBMF_CHCTL_ENABLE		BIT(0)
+#define OBMF_CHCTL_RESET		BIT(1)
+#define OBMF_CHCTL_APPLY_CONFIGURATION	BIT(2)
+#define OBMF_CHCTL_MANUF_LOCK_REQUEST	BIT(3)
+#define OBMF_CHCTL_CLEAR_CHANNEL_ERROR	BIT(4)
 
-/* Minimum spec version we support */
-#define OBMF_MIN_SPEC_VERSION		0x0090	/* v0.9.0 */
+/* Minimum spec version we support (BCD: byte0=minor, byte1=major) */
+#define OBMF_MIN_SPEC_VERSION		0x0100	/* v1.0.0 */
 
 /* ---------- Maximum device-request queue depth ----------------------------- */
 #define OBMF_DEV_REQ_QUEUE_DEPTH	8
@@ -479,8 +500,8 @@ struct obmf_channel {
 	u8			channel_id;
 	u8			channel_type;
 	u8			channel_cfg;
-	u8			tag;		/* MMIO only: host→device tag, alternates 0/1 */
-	u8			dev_tag;	/* MMIO only: device→host expected tag, alternates 0/1 */
+	u8			io_tag;		/* IO only: host→device tag, alternates 0/1 */
+	u8			io_dev_tag;	/* IO only: device→host expected tag, alternates 0/1 */
 
 	struct mutex		lock;		/* One outstanding request per ch */
 	struct completion	done;		/* Signalled by RX demux */
@@ -493,6 +514,8 @@ struct obmf_channel {
 
 	u32			config_offset;	/* CH0 offset to channel config header */
 	u32			config_size;	/* Size of channel config data area */
+	u16			max_request_payload;	/* MAX_REQUEST_PAYLOAD_SIZE, 0=unknown */
+	u16			max_response_payload;	/* MAX_RESPONSE_PAYLOAD_SIZE, 0=unknown */
 	u16			gpio_count;	/* GPIO channels: number of GPIO lines */
 
 	struct kobject		*kobj;		/* sysfs: /obmf/channel/<N> */
@@ -513,8 +536,8 @@ struct obmf_dev_req {
 	struct obmf_device	*odev;
 	u8			channel_id;
 	u8			channel_type;
-	u8			transaction;	/* MMIO only */
-	u8			tag;		/* MMIO only */
+	u8			transaction;	/* MMIO/IO only */
+	u8			tag;		/* IO only */
 	int			data_len;
 	u8			data[];
 };
@@ -627,7 +650,7 @@ int  obmf_transport_init(struct obmf_device *odev);
 void obmf_transport_exit(struct obmf_device *odev);
 
 int  obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
-		       u8 channel_type, const void *payload, int payload_len,
+		       const void *payload, int payload_len,
 		       void *resp_buf, int resp_buf_len,
 		       unsigned long timeout_ms);
 
@@ -637,7 +660,7 @@ int  obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
 			    void *rd_data, int rd_len);
 
 int  obmf_send_response(struct obmf_device *odev, u8 channel_id,
-			u8 channel_type, u8 status,
+			u8 status,
 			const void *payload, int payload_len);
 
 /* ---------- Discovery (obmf-discovery.c) ---------------------------------- */
@@ -749,7 +772,7 @@ static inline void obmf_ipmi_handle_dev_request(struct obmf_channel *ch,
 int  obmf_mmio_register(struct obmf_device *odev, struct obmf_channel *ch);
 void obmf_mmio_unregister(struct obmf_channel *ch);
 void obmf_mmio_handle_dev_request(struct obmf_channel *ch,
-				 u8 transaction, u8 tag,
+				 u8 transaction,
 				 const u8 *data, int len);
 
 /* ---------- IO misc device (obmf-io-misc.c) -------------------------------- */

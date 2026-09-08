@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * obmf-discovery.c - OBMF-ICP Channel 0 Discovery protocol (v0.9)
+ * obmf-discovery.c - OBMF-ICP Channel 0 Discovery protocol (v1.0.0 RC1)
  *
  * Copyright (C) 2025-2026 Nuvoton Technology Corp.
  *
@@ -73,10 +73,11 @@ static int obmf_disc_read_bytes(struct obmf_device *odev, u32 offset,
 	int rv;
 
 	/*
-	 * v0.9: Short Read supports 32-bit address with u8 Size (up to 255B).
-	 * Use Long Read only for reads > 255 bytes (u16 Size, 64-bit address).
+	 * Short Read supports a 32-bit address with a u16 Size field
+	 * (driver-side transport buffer caps at 256B); use Long Read for
+	 * larger reads (u16 Size, 64-bit address).
 	 */
-	if (len <= 255)
+	if (len <= 256)
 		rv = obmf_send_mmio_request(odev, ch0, OBMF_TRANS_SHORT_READ,
 					    offset, NULL, 0, buf, len);
 	else
@@ -95,7 +96,6 @@ static int obmf_disc_read_bytes(struct obmf_device *odev, u32 offset,
 int obmf_discover_channels(struct obmf_device *odev)
 {
 	u16 obmf_ver, vendor_id, device_id;
-	u32 device_role;
 	u8 num_channels;
 	char device_name[OBMF_DISC_DEVICE_NAME_LEN + 1];
 	int rv, i;
@@ -136,16 +136,14 @@ int obmf_discover_channels(struct obmf_device *odev)
 	rv = obmf_disc_read16(odev, OBMF_DISC_VENDOR_ID, &vendor_id);
 	if (rv == 0)
 		rv = obmf_disc_read16(odev, OBMF_DISC_DEVICE_ID, &device_id);
-	if (rv == 0)
-		rv = obmf_disc_read32(odev, OBMF_DISC_DEVICE_ROLE, &device_role);
 	if (rv) {
 		dev_warn(&odev->intf->dev,
 			 "discovery: failed to read device info: %d\n", rv);
 		/* Non-fatal, continue */
 	} else {
 		dev_info(&odev->intf->dev,
-			 "Vendor=0x%04x Device=0x%04x Role=%u\n",
-			 vendor_id, device_id, device_role);
+			 "Vendor=0x%04x Device=0x%04x\n",
+			 vendor_id, device_id);
 	}
 
 	memset(device_name, 0, sizeof(device_name));
@@ -253,6 +251,11 @@ int obmf_discover_channels(struct obmf_device *odev)
 				      &config_size);
 		if (rv)
 			config_size = 0;
+
+		obmf_disc_read16(odev, ch_offset + OBMF_CHCFG_MAX_REQUEST_PAYLOAD,
+				 &ch->max_request_payload);
+		obmf_disc_read16(odev, ch_offset + OBMF_CHCFG_MAX_RESPONSE_PAYLOAD,
+				 &ch->max_response_payload);
 
 		ch->channel_id   = ch_number;
 		ch->channel_type = ch_type;

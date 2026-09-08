@@ -99,7 +99,6 @@ static ssize_t obmf_ipmi_write(struct file *file, const char __user *buf,
 		return -EFAULT;
 
 	rv = obmf_send_response(odev, ch->channel_id,
-				OBMF_TYPE_IPMI,
 				OBMF_STATUS_SUCCESS, resp, count + 1);
 	return rv < 0 ? rv : count;
 }
@@ -188,7 +187,6 @@ void obmf_ipmi_handle_dev_request(struct obmf_channel *ch,
 
 	if (!id || len < 2) {
 		obmf_send_response(odev, ch->channel_id,
-				   OBMF_TYPE_IPMI,
 				   OBMF_STATUS_INVALID_CMD, NULL, 0);
 		return;
 	}

@@ -53,7 +53,7 @@ static struct obmf_dev_req *obmf_alloc_dev_req(int payload_len)
 /* ------------------------------------------------------------------ */
 
 int obmf_send_response(struct obmf_device *odev, u8 channel_id,
-		       u8 channel_type, u8 status,
+		       u8 status,
 		       const void *payload, int payload_len)
 {
 	struct obmf_common_hdr *hdr;
@@ -78,7 +78,6 @@ int obmf_send_response(struct obmf_device *odev, u8 channel_id,
 
 	hdr = (struct obmf_common_hdr *)odev->tx_buf;
 	hdr->channel      = channel_id;
-	hdr->channel_type = channel_type;
 	OBMF_HDR_SET_RESPONSE(hdr, status);
 
 	do {
@@ -131,12 +130,11 @@ static void obmf_dev_request_work(struct work_struct *work)
 	case OBMF_TYPE_CONFIG: {
 		/*
 		 * MMIO device-initiated request.
-		 * v0.9: Short transactions use 32-bit address,
-		 *        Long transactions use 64-bit address.
+		 * Short transactions use 32-bit address, Long transactions
+		 * use 64-bit address; both use a u16 length field.
 		 * Dispatch to MMIO misc handler.
 		 */
 		obmf_mmio_handle_dev_request(ch, dreq->transaction,
-					     dreq->tag,
 					     dreq->data, dreq->data_len);
 		break;
 	}
@@ -184,7 +182,6 @@ static void obmf_dev_request_work(struct work_struct *work)
 						    dreq->data_len);
 		} else {
 			obmf_send_response(odev, dreq->channel_id,
-					   dreq->channel_type,
 					   OBMF_STATUS_INVALID_CMD,
 					   NULL, 0);
 		}
@@ -260,26 +257,28 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 			return;
 		}
 
-		/* For MMIO / CONFIG (Discovery) / IO: validate tag in sub-header */
-		if ((hdr->channel_type == OBMF_TYPE_MMIO ||
-		     hdr->channel_type == OBMF_TYPE_CONFIG ||
-		     hdr->channel_type == OBMF_TYPE_IO) &&
-		    payload_len >= OBMF_MMIO_SUBHDR_SIZE) {
-			struct obmf_mmio_subhdr *mhdr =
-				(struct obmf_mmio_subhdr *)payload;
-			const char *type_str =
-				(hdr->channel_type == OBMF_TYPE_IO) ? "IO" : "MMIO";
+		/* IO: validate tag in 2-byte sub-header */
+		if (ch->channel_type == OBMF_TYPE_IO &&
+		    payload_len >= OBMF_IO_SUBHDR_SIZE) {
+			struct obmf_io_subhdr *ihdr =
+				(struct obmf_io_subhdr *)payload;
 
-			if (mhdr->tag != ch->tag) {
+			if (ihdr->tag != ch->io_tag) {
 				dev_err(&odev->intf->dev,
-					"ch%u: %s tag mismatch (got %u exp %u)\n",
-					channel_id, type_str, mhdr->tag, ch->tag);
+					"ch%u: IO tag mismatch (got %u exp %u)\n",
+					channel_id, ihdr->tag, ch->io_tag);
 				ch->status = -EIO;
 				complete(&ch->done);
 				return;
 			}
-			ch->tag ^= 1;
+			ch->io_tag ^= 1;
 			/* Skip sub-header for payload copy */
+			payload     += OBMF_IO_SUBHDR_SIZE;
+			payload_len -= OBMF_IO_SUBHDR_SIZE;
+		} else if ((ch->channel_type == OBMF_TYPE_MMIO ||
+			    ch->channel_type == OBMF_TYPE_CONFIG) &&
+			   payload_len >= OBMF_MMIO_SUBHDR_SIZE) {
+			/* MMIO / CONFIG (Discovery): 1-byte sub-header, no tag */
 			payload     += OBMF_MMIO_SUBHDR_SIZE;
 			payload_len -= OBMF_MMIO_SUBHDR_SIZE;
 		}
@@ -292,50 +291,73 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 		complete(&ch->done);
 	} else {
 		dev_dbg(&odev->intf->dev,
-			"OBMF RX: channel=%u type=0x%02x rqresp_status=0x%02x size=%u\n",
-			channel_id, hdr->channel_type, hdr->rqresp_status,
+			"OBMF RX: channel=%u ch_type=0x%02x status_rqresp=0x%02x size=%u\n",
+			channel_id, ch->channel_type, hdr->status_rqresp,
 			payload_len);
 		/*
 		 * RqResp=0 on Bulk IN: device-initiated request.
 		 * Host must respond (Host = Responder).
 		 * All channel types are deferred to workqueue.
 		 */
-		if ((hdr->channel_type == OBMF_TYPE_MMIO ||
-		     hdr->channel_type == OBMF_TYPE_CONFIG ||
-		     hdr->channel_type == OBMF_TYPE_IO) &&
-		    payload_len >= OBMF_MMIO_SUBHDR_SIZE) {
-			struct obmf_mmio_subhdr *mhdr =
-				(struct obmf_mmio_subhdr *)payload;
-			/*
-			 * IO channel has 12 transaction types (0-11), so use
-			 * 0x0F mask; MMIO uses 0x07 mask (3 bits, 4 types).
-			 */
-			u8 trans = (hdr->channel_type == OBMF_TYPE_IO)
-				   ? (mhdr->transaction & 0x0F)
-				   : (mhdr->transaction & 0x07);
-			u8 disp_type = (hdr->channel_type == OBMF_TYPE_IO)
-					? OBMF_TYPE_IO : OBMF_TYPE_MMIO;
+		if (ch->channel_type == OBMF_TYPE_IO &&
+		    payload_len >= OBMF_IO_SUBHDR_SIZE) {
+			struct obmf_io_subhdr *ihdr =
+				(struct obmf_io_subhdr *)payload;
+			u8 trans = ihdr->transaction & 0x0F;
 
 			/* Validate incoming tag from device */
-			if (mhdr->tag != ch->dev_tag) {
+			if (ihdr->tag != ch->io_dev_tag) {
 				dev_err(&odev->intf->dev,
-					"ch%u: %s dev-req tag mismatch (got %u exp %u), dropping\n",
-					channel_id,
-					(disp_type == OBMF_TYPE_IO) ? "IO" : "MMIO",
-					mhdr->tag, ch->dev_tag);
+					"ch%u: IO dev-req tag mismatch (got %u exp %u), dropping\n",
+					channel_id, ihdr->tag, ch->io_dev_tag);
 				return;
 			}
-			ch->dev_tag ^= 1;
+			ch->io_dev_tag ^= 1;
 
 			{
 				struct obmf_dev_req *dreq;
 				int req_payload_len;
 
 				dev_dbg(&odev->intf->dev,
-					"ch%u: %s dev-req (trans=%u)\n",
-					channel_id,
-					(disp_type == OBMF_TYPE_IO) ? "IO" : "MMIO",
-					trans);
+					"ch%u: IO dev-req (trans=%u)\n",
+					channel_id, trans);
+
+				req_payload_len = payload_len - OBMF_IO_SUBHDR_SIZE;
+				dreq = obmf_alloc_dev_req(req_payload_len);
+				if (dreq) {
+					INIT_WORK(&dreq->work,
+						  obmf_dev_request_work);
+					dreq->odev = odev;
+					dreq->channel_id = channel_id;
+					dreq->channel_type = OBMF_TYPE_IO;
+					dreq->transaction = trans;
+					dreq->tag = ihdr->tag;
+					dreq->data_len = req_payload_len;
+					if (dreq->data_len > 0)
+						memcpy(dreq->data,
+						       payload + OBMF_IO_SUBHDR_SIZE,
+						       dreq->data_len);
+					queue_work(odev->dev_req_wq, &dreq->work);
+				} else {
+					dev_err(&odev->intf->dev,
+						"ch%u: alloc dev-req failed (len=%d)\n",
+						channel_id, req_payload_len);
+				}
+			}
+		} else if ((ch->channel_type == OBMF_TYPE_MMIO ||
+			    ch->channel_type == OBMF_TYPE_CONFIG) &&
+			   payload_len >= OBMF_MMIO_SUBHDR_SIZE) {
+			struct obmf_mmio_subhdr *mhdr =
+				(struct obmf_mmio_subhdr *)payload;
+			u8 trans = mhdr->transaction & 0x07;
+
+			{
+				struct obmf_dev_req *dreq;
+				int req_payload_len;
+
+				dev_dbg(&odev->intf->dev,
+					"ch%u: MMIO dev-req (trans=%u)\n",
+					channel_id, trans);
 
 				req_payload_len = payload_len - OBMF_MMIO_SUBHDR_SIZE;
 				dreq = obmf_alloc_dev_req(req_payload_len);
@@ -344,9 +366,9 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 						  obmf_dev_request_work);
 					dreq->odev = odev;
 					dreq->channel_id = channel_id;
-					dreq->channel_type = disp_type;
+					dreq->channel_type = OBMF_TYPE_MMIO;
 					dreq->transaction = trans;
-					dreq->tag = mhdr->tag;
+					dreq->tag = 0;
 					dreq->data_len = req_payload_len;
 					if (dreq->data_len > 0)
 						memcpy(dreq->data,
@@ -371,7 +393,7 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 				INIT_WORK(&dreq->work, obmf_dev_request_work);
 				dreq->odev = odev;
 				dreq->channel_id = channel_id;
-				dreq->channel_type = hdr->channel_type;
+				dreq->channel_type = ch->channel_type;
 				dreq->transaction = 0;
 				dreq->tag = 0;
 				dreq->data_len = payload_len;
@@ -451,17 +473,16 @@ static void obmf_rx_complete(struct urb *urb)
 
 	if (ch->reasm_active) {
 		/*
-		 * Continuation segment — validate that channel and type
-		 * match the first segment, then append payload data.
+		 * Continuation segment — validate that channel and
+		 * status/rqresp match the first segment, then append
+		 * payload data.
 		 */
-		if (hdr->channel_type != ch->reasm_hdr.channel_type ||
-		    hdr->rqresp_status != ch->reasm_hdr.rqresp_status) {
+		if (hdr->status_rqresp != ch->reasm_hdr.status_rqresp) {
 			dev_err(&odev->intf->dev,
-				"rx reasm: header mismatch on ch%u (type/status got 0x%02x/0x%02x exp 0x%02x/0x%02x), reset\n",
+				"rx reasm: header mismatch on ch%u (status_rqresp got 0x%02x exp 0x%02x), reset\n",
 				hdr->channel,
-				hdr->channel_type, hdr->rqresp_status,
-				ch->reasm_hdr.channel_type,
-				ch->reasm_hdr.rqresp_status);
+				hdr->status_rqresp,
+				ch->reasm_hdr.status_rqresp);
 			obmf_reasm_reset(ch);
 			goto resubmit;
 		}
@@ -644,7 +665,7 @@ void obmf_transport_exit(struct obmf_device *odev)
 /* ------------------------------------------------------------------ */
 
 int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
-		      u8 channel_type, const void *payload, int payload_len,
+		      const void *payload, int payload_len,
 		      void *resp_buf, int resp_buf_len,
 		      unsigned long timeout_ms)
 {
@@ -670,7 +691,6 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 	/* Build Common Header in tx_buf */
 	hdr = (struct obmf_common_hdr *)odev->tx_buf;
 	hdr->channel      = ch->channel_id;
-	hdr->channel_type = channel_type;
 	OBMF_HDR_SET_REQUEST(hdr);
 	hdr->size         = cpu_to_le16(payload_len);
 
@@ -721,7 +741,8 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 }
 
 /* ------------------------------------------------------------------ */
-/* obmf_send_mmio_request — MMIO read/write with sub-header + tag      */
+/* obmf_send_mmio_request — MMIO read/write, sub-header carries only   */
+/* the transaction type (no tag, spec §4.3); length fields are u16.    */
 /* ------------------------------------------------------------------ */
 
 int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
@@ -733,22 +754,26 @@ int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
 	struct obmf_mmio_subhdr *mhdr = (struct obmf_mmio_subhdr *)payload;
 	int payload_len;
 
+	if (wr_len < 0 || wr_len > 256 || rd_len < 0 || rd_len > 256)
+		return -EINVAL;
+
 	/* Build MMIO sub-header */
 	mhdr->transaction = transaction;
-	mhdr->tag         = ch->tag;
 
 	switch (transaction) {
 	case OBMF_TRANS_SHORT_READ:
-		/* Short Read: Address(4B, 32-bit LE) + Size(1B) */
+		/* Short Read: Address(4B, 32-bit LE) + Size(2B, u16 LE) */
 		put_unaligned_le32((u32)address, payload + OBMF_MMIO_SUBHDR_SIZE);
 		payload_len = OBMF_MMIO_SUBHDR_SIZE + 4;
-		payload[payload_len++] = (u8)rd_len;
+		put_unaligned_le16(rd_len, payload + payload_len);
+		payload_len += 2;
 		break;
 	case OBMF_TRANS_SHORT_WRITE:
-		/* Short Write: Address(4B, 32-bit LE) + Size(1B) + Data(N) */
+		/* Short Write: Address(4B, 32-bit LE) + Size(2B, u16 LE) + Data(N) */
 		put_unaligned_le32((u32)address, payload + OBMF_MMIO_SUBHDR_SIZE);
 		payload_len = OBMF_MMIO_SUBHDR_SIZE + 4;
-		payload[payload_len++] = (u8)wr_len;
+		put_unaligned_le16(wr_len, payload + payload_len);
+		payload_len += 2;
 		if (wr_data && wr_len > 0) {
 			memcpy(payload + payload_len, wr_data, wr_len);
 			payload_len += wr_len;
@@ -776,7 +801,7 @@ int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
 		return -EINVAL;
 	}
 
-	return obmf_send_request(odev, ch, ch->channel_type,
+	return obmf_send_request(odev, ch,
 				 payload, payload_len,
 				 rd_data, rd_len,
 				 OBMF_DEFAULT_TIMEOUT_MS);
@@ -810,7 +835,7 @@ int obmf_send_io_request(struct obmf_device *odev, struct obmf_channel *ch,
 
 	/* Build IO sub-header */
 	ihdr->transaction = transaction;
-	ihdr->tag         = ch->tag;
+	ihdr->tag         = ch->io_tag;
 
 	/* port_addr (2B LE) */
 	put_unaligned_le16(port_addr, payload + OBMF_IO_SUBHDR_SIZE);
@@ -826,7 +851,7 @@ int obmf_send_io_request(struct obmf_device *odev, struct obmf_channel *ch,
 		payload[payload_len++] = (u8)rd_len;
 	}
 
-	return obmf_send_request(odev, ch, OBMF_TYPE_IO,
+	return obmf_send_request(odev, ch,
 				 payload, payload_len,
 				 rd_data, rd_len,
 				 OBMF_DEFAULT_TIMEOUT_MS);
