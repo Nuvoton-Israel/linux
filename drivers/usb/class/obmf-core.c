@@ -283,6 +283,9 @@ static void obmf_register_channel(struct obmf_device *odev,
 		 */
 		rv = obmf_io_register(odev, ch);
 		break;
+	case OBMF_TYPE_MEM_DEV:
+		rv = obmf_mem_dev_register(odev, ch);
+		break;
 	default:
 		if (ch->channel_type >= OBMF_TYPE_OEM_MIN &&
 		    ch->channel_type <= OBMF_TYPE_OEM_MAX) {
@@ -344,6 +347,9 @@ static void obmf_unregister_channel(struct obmf_channel *ch)
 		break;
 	case OBMF_TYPE_IO:
 		obmf_io_unregister(ch);
+		break;
+	case OBMF_TYPE_MEM_DEV:
+		obmf_mem_dev_unregister(ch);
 		break;
 	default:
 		if (ch->channel_type >= OBMF_TYPE_OEM_MIN &&
