@@ -94,6 +94,15 @@ config USB_OBMF_SPI
 	  Enable OBMF-ICP SPI Controller optimised channel (Type 08h, v0.9).
 	  Handles device-initiated SPI NOR operations via Linux MTD framework.
 
+config USB_OBMF_MEM_DEV
+	bool "OBMF Memory Device channel support"
+	depends on USB_OBMF && MTD
+	default y
+	help
+	  Enable OBMF-ICP Memory Device channel (Type 0Ah, v1.0.0 RC1).
+	  Handles device-initiated byte-addressable read/write/erase
+	  operations via Linux MTD framework.
+
 config USB_OBMF_SERIAL
 	bool "OBMF Serial channel support"
 	depends on USB_OBMF && TTY
