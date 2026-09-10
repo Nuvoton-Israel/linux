@@ -14,5 +14,6 @@ obmf-$(CONFIG_USB_OBMF_I3C)		+= obmf-i3c.o
 obmf-$(CONFIG_USB_OBMF_I2C)		+= obmf-i2c.o
 obmf-$(CONFIG_USB_OBMF_GPIO)		+= obmf-gpio.o
 obmf-$(CONFIG_USB_OBMF_SPI)		+= obmf-spi.o
+obmf-$(CONFIG_USB_OBMF_MEM_DEV)	+= obmf-mem-dev.o
 obmf-$(CONFIG_USB_OBMF_SERIAL)		+= obmf-serial.o
 obmf-$(CONFIG_USB_OBMF_IPMI)		+= obmf-ipmi.o

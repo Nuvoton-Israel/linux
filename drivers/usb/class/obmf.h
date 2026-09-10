@@ -109,6 +109,7 @@ struct obmf_mmio_subhdr {
 #define OBMF_TYPE_IPMI		0x07
 #define OBMF_TYPE_SPI		0x08	/* SPI Controller */
 #define OBMF_TYPE_IO		0x09	/* I/O Port Channel (v0.9.2) */
+#define OBMF_TYPE_MEM_DEV	0x0A	/* Memory Device (v1.0.0 RC1 §4.12) */
 #define OBMF_TYPE_OEM_MIN	0xF8
 #define OBMF_TYPE_OEM_MAX	0xFF
 
@@ -296,6 +297,36 @@ struct obmf_mmio_subhdr {
 /* SPI channel-specific status codes */
 #define OBMF_SPI_STATUS_MODE_UNSUPPORTED		0x40
 #define OBMF_SPI_STATUS_TRANSFER_ERROR		0x41
+
+/* ---------- Memory Device Channel (v1.0.0 RC1 §4.12, Channel Type 0Ah) ----
+ *
+ * Request:  Command(1B)[1:0] + Address(4B LE32) + DataSize(2B LE) + Data(N)
+ * Response: Status (Common Header byte 2[7:1]) + Data(N, Read only)
+ */
+#define OBMF_MEM_DEV_CMD_READ		0
+#define OBMF_MEM_DEV_CMD_WRITE		1
+#define OBMF_MEM_DEV_CMD_ERASE		2
+#define OBMF_MEM_DEV_CMD_MASK		0x03
+
+/* Request sub-header: cmd(1) + addr(4) + size(2), before the Data field */
+#define OBMF_MEM_DEV_REQ_SUBHDR_SIZE	7
+
+/* Memory Device channel-specific status codes */
+#define OBMF_MEM_DEV_STATUS_ACCESS_DENIED		0x40
+#define OBMF_MEM_DEV_STATUS_UNSUPPORTED_SIZE		0x41
+#define OBMF_MEM_DEV_STATUS_ERASE_NOT_ALIGNED		0x42
+#define OBMF_MEM_DEV_STATUS_WRITE_PROTECTED		0x43
+
+/* MEM_DEV_CFG (CONFIGURATION_DATA) field offsets */
+#define OBMF_MEM_DEV_CFG_CAPABILITIES	0x00	/* 4B */
+#define OBMF_MEM_DEV_CFG_DEVICE_SIZE	0x04	/* 4B */
+#define OBMF_MEM_DEV_CFG_ERASE_SIZE	0x08	/* 2B, KB units */
+#define OBMF_MEM_DEV_CFG_READ_SIZE	0x0A	/* 2B */
+#define OBMF_MEM_DEV_CFG_WRITE_SIZE	0x0C	/* 2B */
+
+/* CAPABILITIES field bits */
+#define OBMF_MEM_DEV_CAP_WRITEABLE	BIT(0)
+#define OBMF_MEM_DEV_CAP_NO_ERASE	BIT(1)
 
 /* ---------- I/O Port Channel (v0.9.2, Channel Type 09h) ------------------- */
 
@@ -730,6 +761,20 @@ static inline int obmf_spi_register(struct obmf_device *odev,
 static inline void obmf_spi_unregister(struct obmf_channel *ch) {}
 static inline void obmf_spi_handle_dev_request(struct obmf_channel *ch,
 					       const u8 *data, int len) {}
+#endif
+
+/* ---------- Memory Device (obmf-mem-dev.c) --------------------------------- */
+#if IS_ENABLED(CONFIG_USB_OBMF_MEM_DEV)
+int  obmf_mem_dev_register(struct obmf_device *odev, struct obmf_channel *ch);
+void obmf_mem_dev_unregister(struct obmf_channel *ch);
+void obmf_mem_dev_handle_dev_request(struct obmf_channel *ch,
+				     const u8 *data, int len);
+#else
+static inline int obmf_mem_dev_register(struct obmf_device *odev,
+					struct obmf_channel *ch) { return 0; }
+static inline void obmf_mem_dev_unregister(struct obmf_channel *ch) {}
+static inline void obmf_mem_dev_handle_dev_request(struct obmf_channel *ch,
+						   const u8 *data, int len) {}
 #endif
 
 /* ---------- Serial (obmf-serial.c) ---------------------------------------- */
