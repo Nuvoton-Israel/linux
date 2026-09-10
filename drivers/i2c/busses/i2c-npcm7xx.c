@@ -831,6 +831,21 @@ static void npcm_i2c_callback(struct npcm_i2c *bus,
 		bus->cmd_err = bus->msgs_num;
 		if (bus->tx_complete_cnt < ULLONG_MAX)
 			bus->tx_complete_cnt++;
+		/*
+		 * When the module also acts as a slave, the NMATCH and
+		 * SLVRSTR handlers flush the shared RX FIFO, so a master
+		 * read can lose data yet still reach STOP/EOB. Reporting
+		 * success leaves the caller buffer untouched and
+		 * i2c_smbus_xfer_emulated() returns it as a valid value.
+		 * No upstream fix exists to backport.
+		 */
+		if (!bus->read_block_use && bus->rd_size &&
+		    info < bus->rd_size) {
+			dev_err_ratelimited(bus->dev,
+					    "I2C%d master read short: %u/%u\n",
+					    bus->num, info, bus->rd_size);
+			bus->cmd_err = -EIO;
+		}
 		fallthrough;
 	case I2C_BLOCK_BYTES_ERR_IND:
 		/* Master tx finished and all transmit bytes were sent */
