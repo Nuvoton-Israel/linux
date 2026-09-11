@@ -3,9 +3,11 @@
 
 #include <linux/bitfield.h>
 #include <linux/debugfs.h>
+#include <linux/hrtimer.h>
 #include <linux/module.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
+#include <linux/spinlock.h>
 
 #include <linux/i3c/device.h>
 #include <linux/i3c/master.h>
@@ -33,6 +35,8 @@
 #define I3C_HUB_DCR					0x09
 #define I3C_HUB_DEV_CAPAB				0x0A
 #define I3C_HUB_DEV_REV					0x0B
+#define I3C_HUB_DEV_REV_LDO_MASK   GENMASK(7, 6)
+#define I3C_HUB_DEV_REV_LDO_GET(x) FIELD_GET(I3C_HUB_DEV_REV_LDO_MASK, (x))
 
 /* Device Configuration Registers */
 #define I3C_HUB_PROTECTION_CODE				0x10
@@ -149,6 +153,7 @@
 #define I3C_HUB_TP7_SMBUS_AGNT_STS			0x6B
 #define I3C_HUB_ONCHIP_TD_AND_SMBUS_AGNT_CONF		0x6C
 #define SMBUS_TIMEOUT_DISABLE				BIT(3)
+#define TARGET_AGENT_BUF_FULL_SDA_LOW_EN		BIT(5)
 
 #define HUB_REG_AGENT_CNTRL_STATUS_FINISH		1
 #define HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0		2
@@ -235,10 +240,18 @@
 #define I3C_HUB_TP_BUFFER_STATUS_MASK			0xFF
 #define I3C_HUB_TP_TRANSACTION_CODE_MASK		0xF0
 
+
+#define I3C_HUB_POLLING_ROLL_PERIOD_NS			NSEC_PER_MSEC
+#define I3C_HUB_POLLING_DRAIN_MAX			16
+#define I3C_HUB_SMBUS_STATUS_READ_INTERVAL_US(len, clk_khz) \
+	DIV_ROUND_UP(1000U * 9U * (u32)(len), (u32)(clk_khz))
+
 /* Hub buffer size */
 #define I3C_HUB_CONTROLLER_BUFFER_SIZE			88
+#define I3C_HUB_TARGET_BUFFER_SIZE			80
 #define I3C_HUB_SMBUS_DESCRIPTOR_SIZE			4
 #define I3C_HUB_SMBUS_PAYLOAD_SIZE			84
+#define I3C_HUB_SMBUS_TARGET_PAYLOAD_SIZE		78
 
 /* page numbers, per port */
 #define HUB_PAGE_AGENT_TX(p)		(16 + (4 * (p)) + 0)
@@ -320,6 +333,13 @@ struct i3c_hub {
 	u8 reg_addr;
 	struct dentry *debug_dir;
 	struct delayed_work delayed_work;
+	struct hrtimer smbus_agent_polling_timer;
+	struct work_struct smbus_agent_polling_work;
+	spinlock_t smbus_agent_polling_lock;
+	u8 smbus_target_mask;
+	bool smbus_agent_polling_active;
+	bool smbus_use_polling;
+	u16 part_id;
 	struct device_node *node;
 	struct device_node *child_nodes[I3C_HUB_TP_MAX_COUNT];
 	struct smbus_agent agents[I3C_HUB_TP_MAX_COUNT];
@@ -1108,7 +1128,102 @@ exit_unlock:
 }
 
 #if IS_ENABLED(CONFIG_I2C_SLAVE)
-static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
+
+static int i3c_hub_slave_agent_rx_polling(struct smbus_agent *agent, int buf_idx,
+                                          bool overflow)
+{
+	struct i3c_hub_agent_rx_hdr hdr;
+	struct i3c_hub *hub = agent->hub;
+	u8 status, len, addr;
+	unsigned int page;
+	int ret;
+
+	status = buf_idx ? HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1 :
+		HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0;
+	if (overflow)
+		status |= HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF;
+
+	if (!agent->client) {
+		ret = 0;
+		goto ack;
+	}
+
+	page = HUB_PAGE_AGENT_RX_BUF(agent->port_id, buf_idx);
+	ret = i3c_hub_read_paged(hub, page, 0, &hdr, sizeof(hdr));
+	if (ret)
+		goto ack;
+
+	len = hdr.len;
+	if (!len) {
+		ret = 0;
+		goto ack;
+	}
+
+	if (len > I3C_HUB_TARGET_BUFFER_SIZE) {
+		dev_warn_ratelimited(&hub->i3cdev->dev,
+				     "TP[%d]: target message too long: %u\n",
+				     agent->port_id, len);
+		ret = -EMSGSIZE;
+		goto ack;
+	}
+
+	if (hdr.addr & 0x1) {
+		dev_dbg(&hub->i3cdev->dev, "unsupported read requested\n");
+		ret = -EOPNOTSUPP;
+		goto ack;
+	}
+
+	addr = hdr.addr >> 1;
+	if (addr != (agent->client->addr & 0x7f)) {
+		ret = -ENXIO;
+		goto ack;
+	}
+
+	len--;
+	if (len > I3C_HUB_SMBUS_TARGET_PAYLOAD_SIZE) {
+		ret = -EMSGSIZE;
+		goto ack;
+	}
+
+	ret = i3c_hub_read_paged(hub, page, 2, agent->target_rx_buf, len);
+	if (ret)
+		goto ack;
+
+	/* Free the hardware buffer before delivering the packet to the backend. */
+	ret = regmap_write(hub->regmap,
+			   HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id), status);
+	if (ret)
+		return ret;
+
+	agent->next_buf_idx = !buf_idx;
+
+	ret = i2c_slave_event(agent->client, I2C_SLAVE_WRITE_REQUESTED, &addr);
+	if (!ret) {
+		unsigned int i;
+
+		for (i = 0; i < len; i++) {
+			ret = i2c_slave_event(agent->client,
+					      I2C_SLAVE_WRITE_RECEIVED,
+					      &agent->target_rx_buf[i]);
+			if (ret)
+				break;
+		}
+	}
+	i2c_slave_event(agent->client, I2C_SLAVE_STOP, &addr);
+
+	return ret;
+
+ack:
+	if (regmap_write(hub->regmap,
+			 HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id), status))
+		dev_warn(&hub->i3cdev->dev, "TP[%d]: Failed to clear RX status\n",
+			 agent->port_id);
+	agent->next_buf_idx = !buf_idx;
+
+	return ret;
+}
+
+static void i3c_hub_slave_agent_rx_ibi(struct smbus_agent *agent, int buf_idx)
 {
 	struct i3c_hub_agent_rx_hdr hdr;
 	struct i3c_hub *hub = agent->hub;
@@ -1119,14 +1234,7 @@ static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
 	if (!agent->client)
 		goto ack;
 
-	/* Switch to RX BUF page */
 	page = HUB_PAGE_AGENT_RX_BUF(agent->port_id, buf_idx);
-
-	/* We need the length to figure out the size of our read. But we also
-	 * read the first byte of i2c data in the same read; the hardware has
-	 * no facility for filtering on incoming local addresses, so we have a
-	 * fast-path to aborting the transaction if it's not targeted to us.
-	 */
 	ret = i3c_hub_read_paged(hub, page, 0, &hdr, sizeof(hdr));
 	if (ret)
 		goto ack;
@@ -1140,7 +1248,6 @@ static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
 		goto ack;
 	}
 
-	/* not for us? discard and ack */
 	addr = hdr.addr >> 1;
 	if (addr != (agent->client->addr & 0x7f))
 		goto ack;
@@ -1150,13 +1257,11 @@ static void i3c_hub_slave_agent_rx(struct smbus_agent *agent, int buf_idx)
 	if (ret)
 		goto ack;
 
-	/* synthesize i2c target events from the target write */
 	tmp = 0;
 	ret = i2c_slave_event(agent->client, I2C_SLAVE_WRITE_REQUESTED, &tmp);
 	if (ret)
 		goto stop;
 
-	/* len includes the address byte, which we have already read */
 	for (i = 0; i < len - 1; i++) {
 		tmp = agent->target_rx_buf[i];
 		i2c_slave_event(agent->client, I2C_SLAVE_WRITE_RECEIVED, &tmp);
@@ -1177,13 +1282,96 @@ ack:
 }
 #endif
 
+static void i3c_hub_process_agent_status(struct smbus_agent *agent,
+                                         unsigned int stat)
+{
+	struct i3c_hub *hub = agent->hub;
+	int ret;
+	if (!hub->smbus_use_polling &&
+	    (stat & HUB_REG_AGENT_CNTRL_STATUS_FINISH)) {
+		ret = regmap_write(hub->regmap,
+				   HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
+				   HUB_REG_AGENT_CNTRL_STATUS_FINISH);
+		if (ret)
+			dev_warn(&hub->i3cdev->dev,
+				 "TP[%d] - failed to clear finish status\n",
+				 agent->port_id);
+		agent->tx_res = stat;
+		complete(&agent->completion);
+	}
+
+#if IS_ENABLED(CONFIG_I2C_SLAVE)
+	if (hub->smbus_use_polling) {
+		/* polling-mode target handling. */
+		if (stat & (HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0 |
+			    HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)) {
+			bool overflow = stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF;
+
+			if (overflow)
+				dev_info_ratelimited(&agent->adap.dev, "rx overflow\n");
+
+			if (agent->next_buf_idx == 0) {
+				if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0) {
+					i3c_hub_slave_agent_rx_polling(agent, 0, overflow);
+					overflow = false;
+				}
+				if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)
+					i3c_hub_slave_agent_rx_polling(agent, 1, overflow);
+			} else {
+				if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1) {
+					i3c_hub_slave_agent_rx_polling(agent, 1, overflow);
+					overflow = false;
+				}
+				if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0)
+					i3c_hub_slave_agent_rx_polling(agent, 0, overflow);
+			}
+		} else if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF) {
+			dev_info_ratelimited(&agent->adap.dev, "rx overflow\n");
+			ret = regmap_write(hub->regmap,
+					   HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
+					   HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF);
+			if (ret)
+				dev_warn(&hub->i3cdev->dev,
+					 "Port[%d] - failed to clear rx overflow status\n",
+					 agent->port_id);
+		}
+	} else {
+		/* IBI-mode target handling. */
+		if (stat & (HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0 |
+			    HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)) {
+			if (agent->next_buf_idx == 0) {
+				if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0)
+					i3c_hub_slave_agent_rx_ibi(agent, 0);
+				if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)
+					i3c_hub_slave_agent_rx_ibi(agent, 1);
+			} else {
+				if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)
+					i3c_hub_slave_agent_rx_ibi(agent, 1);
+				if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0)
+					i3c_hub_slave_agent_rx_ibi(agent, 0);
+			}
+		}
+
+		if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF) {
+			dev_info(&agent->adap.dev, "rx overflow\n");
+			ret = regmap_write(hub->regmap,
+					   HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
+					   HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF);
+			if (ret)
+				dev_warn(&hub->i3cdev->dev,
+					 "Port[%d] - failed to clear rx overflow status\n",
+					 agent->port_id);
+		}
+	}
+#endif
+}
+
 static void i3c_hub_agent_ibi(struct smbus_agent *agent)
 {
 	struct i3c_hub *hub = agent->hub;
-	unsigned int stat = 0;
+	unsigned int stat;
 	int ret;
 
-	/* Read SMBus agent status */
 	ret = regmap_read(hub->regmap,
 			  HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id), &stat);
 	if (ret) {
@@ -1192,52 +1380,11 @@ static void i3c_hub_agent_ibi(struct smbus_agent *agent)
 		return;
 	}
 
-	/* Master Agent IBI */
-	if (stat & HUB_REG_AGENT_CNTRL_STATUS_FINISH) {
-		/* Clear Master Agent Finish flag */
-		ret = regmap_write(hub->regmap,
-				   HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
-				   HUB_REG_AGENT_CNTRL_STATUS_FINISH);
-		if (ret)
-			dev_warn(&hub->i3cdev->dev,
-				 "TP[%d] - failed to clear finish status\n", agent->port_id);
-		agent->tx_res = stat;
-		complete(&agent->completion);
-	}
-
-#if IS_ENABLED(CONFIG_I2C_SLAVE)
-	/* Slave Agent IBI */
-	if (stat & (HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0 | HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)) {
-		if (agent->next_buf_idx == 0) {
-			/* Check BUF0 first */
-			if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0)
-				i3c_hub_slave_agent_rx(agent, 0);
-
-			if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)
-				i3c_hub_slave_agent_rx(agent, 1);
-		} else {
-			/* Check BUF1 first */
-			if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1)
-				i3c_hub_slave_agent_rx(agent, 1);
-			if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0)
-				i3c_hub_slave_agent_rx(agent, 0);
-		}
-	}
-
-	if (stat & HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF) {
-		dev_info(&agent->adap.dev, "rx overflow\n");
-		ret = regmap_write(hub->regmap,
-				   HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
-				   HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF);
-		if (ret)
-			dev_warn(&hub->i3cdev->dev,
-				 "Port[%d] - failed to clear rx overflow status\n", agent->port_id);
-	}
-#endif
+	i3c_hub_process_agent_status(agent, stat);
 }
 
-static void i3c_hub_ibi(struct i3c_device *i3c,
-			const struct i3c_ibi_payload *payload)
+static void __maybe_unused i3c_hub_ibi(struct i3c_device *i3c,
+				       const struct i3c_ibi_payload *payload)
 {
 	struct i3c_hub *hub = i3cdev_get_drvdata(i3c);
 	const struct i3c_hub_ibi_payload *p = NULL;
@@ -1270,6 +1417,99 @@ static void i3c_hub_ibi(struct i3c_device *i3c,
 	}
 exit:
 	mutex_unlock(&hub->ibi_lock);
+}
+
+static bool i3c_hub_smbus_polling_enabled(struct i3c_hub *hub)
+{
+	unsigned long flags;
+	bool enabled;
+
+	spin_lock_irqsave(&hub->smbus_agent_polling_lock, flags);
+	enabled = hub->smbus_agent_polling_active && hub->smbus_target_mask;
+	spin_unlock_irqrestore(&hub->smbus_agent_polling_lock, flags);
+
+	return enabled;
+}
+
+static void i3c_hub_smbus_start_polling(struct i3c_hub *hub)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&hub->smbus_agent_polling_lock, flags);
+	if (hub->smbus_agent_polling_active && hub->smbus_target_mask)
+		hrtimer_start(&hub->smbus_agent_polling_timer,
+			      ns_to_ktime(I3C_HUB_POLLING_ROLL_PERIOD_NS),
+			      HRTIMER_MODE_REL);
+	spin_unlock_irqrestore(&hub->smbus_agent_polling_lock, flags);
+}
+
+static enum hrtimer_restart i3c_hub_smbus_agent_polling_timer(struct hrtimer *timer)
+{
+	struct i3c_hub *hub = container_of(timer, struct i3c_hub,
+					   smbus_agent_polling_timer);
+
+	if (!i3c_hub_smbus_polling_enabled(hub))
+		return HRTIMER_NORESTART;
+
+	queue_work(system_highpri_wq, &hub->smbus_agent_polling_work);
+	return HRTIMER_NORESTART;
+}
+
+static int i3c_hub_smbus_drain_targets(struct i3c_hub *hub, u8 target_mask)
+{
+	unsigned int status;
+	bool handled;
+	int count = 0;
+	int i, ret;
+
+	do {
+		handled = false;
+		for (i = 0; i < I3C_HUB_TP_MAX_COUNT; i++) {
+			if (!(target_mask & BIT(i)))
+				continue;
+
+			ret = regmap_read(hub->regmap,
+					  HUB_REG_TP_SMBUS_AGNT_STS(i), &status);
+			if (ret)
+				return ret;
+
+			if (!(status & (HUB_REG_AGENT_CNTRL_STATUS_RX_BUF0 |
+					HUB_REG_AGENT_CNTRL_STATUS_RX_BUF1 |
+					HUB_REG_AGENT_CNTRL_STATUS_RX_BUF_OVF)))
+				continue;
+
+			i3c_hub_process_agent_status(&hub->agents[i], status);
+			handled = true;
+			count++;
+			if (count >= I3C_HUB_POLLING_DRAIN_MAX)
+				return -EAGAIN;
+		}
+	} while (handled);
+
+	return 0;
+}
+
+static void i3c_hub_smbus_agent_polling_work(struct work_struct *work)
+{
+	struct i3c_hub *hub = container_of(work, struct i3c_hub,
+					   smbus_agent_polling_work);
+	unsigned long flags;
+	u8 target_mask;
+	int ret;
+
+	spin_lock_irqsave(&hub->smbus_agent_polling_lock, flags);
+	target_mask = hub->smbus_target_mask;
+	spin_unlock_irqrestore(&hub->smbus_agent_polling_lock, flags);
+
+	ret = i3c_hub_smbus_drain_targets(hub, target_mask);
+	if (ret && ret != -EAGAIN)
+		dev_warn_ratelimited(&hub->i3cdev->dev,
+				     "Failed to poll SMBus target status: %d\n", ret);
+
+	if (ret == -EAGAIN && i3c_hub_smbus_polling_enabled(hub))
+		queue_work(system_highpri_wq, &hub->smbus_agent_polling_work);
+	else
+		i3c_hub_smbus_start_polling(hub);
 }
 
 static int i3c_hub_get_target_bus_stat(struct i3c_hub *hub, int port_id, u8 *scl_stat, u8 *sda_stat)
@@ -1489,7 +1729,8 @@ static int i3c_hub_smbus_xfer_one(struct i2c_adapter *adap, struct i2c_msg *wr_m
 		}
 	}
 
-	reinit_completion(&agent->completion);
+	if (!hub->smbus_use_polling)
+		reinit_completion(&agent->completion);
 	/* Clear master agent status */
 	regmap_write(hub->regmap, reg_status, I3C_HUB_SMBUS_MASTER_STATUS_MASK);
 
@@ -1498,20 +1739,41 @@ static int i3c_hub_smbus_xfer_one(struct i2c_adapter *adap, struct i2c_msg *wr_m
 	if (ret)
 		return ret;
 
-	if (wait_for_completion_timeout(&agent->completion, agent->adap.timeout) == 0) {
-		/* Re-check status in case IBI has error */
-		ret = regmap_read(hub->regmap, HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
-				  &port_stat);
-		if (!ret && (port_stat & HUB_REG_AGENT_CNTRL_STATUS_FINISH)) {
-			dev_warn(&hub->i3cdev->dev,
-				 "port[%d]: finish status set but no completion! (%d, %02X)\n",
-				 port_id, ret, port_stat);
-		} else {
-			dev_info(&adap->dev, "wait_for_complete timeout\n");
+	if (hub->smbus_use_polling) {
+		ret = regmap_read_poll_timeout(
+			hub->regmap, reg_status, port_stat,
+			port_stat & HUB_REG_AGENT_CNTRL_STATUS_FINISH,
+			I3C_HUB_SMBUS_STATUS_READ_INTERVAL_US(wr_len + rd_len,
+						      agent->clk_freq / 1000),
+			jiffies_to_usecs(agent->adap.timeout));
+		if (ret) {
+			dev_info(&adap->dev, "status polling timeout\n");
 			i3c_hub_reset_smbus_agent(agent, 0);
 			agent->error = 1;
-			ret = -ETIMEDOUT;
 			return ret;
+		}
+
+		ret = regmap_write(hub->regmap, reg_status,
+				   HUB_REG_AGENT_CNTRL_STATUS_FINISH);
+		if (ret)
+			return ret;
+
+		agent->tx_res = port_stat;
+	} else {
+		if (wait_for_completion_timeout(&agent->completion, agent->adap.timeout) == 0) {
+			ret = regmap_read(hub->regmap,
+					  HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id),
+					  &port_stat);
+			if (!ret && (port_stat & HUB_REG_AGENT_CNTRL_STATUS_FINISH)) {
+				dev_warn(&hub->i3cdev->dev,
+					 "port[%d]: finish status set but no completion! (%d, %02X)\n",
+					 port_id, ret, port_stat);
+			} else {
+				dev_info(&adap->dev, "wait_for_complete timeout\n");
+				i3c_hub_reset_smbus_agent(agent, 0);
+				agent->error = 1;
+				return -ETIMEDOUT;
+			}
 		}
 	}
 
@@ -1570,11 +1832,27 @@ static u32 i3c_hub_i2c_funcs(struct i2c_adapter *adapter)
 static int i3c_hub_agent_i2c_reg_target(struct i2c_client *client)
 {
 	struct smbus_agent *agent = i2c_get_adapdata(client->adapter);
+	struct i3c_hub *hub = agent->hub;
+	unsigned long flags;
+	bool start_polling;
 
 	if (agent->client)
 		return -EBUSY;
 
 	agent->client = client;
+
+	if (!hub->smbus_use_polling)
+		return 0;
+
+	spin_lock_irqsave(&hub->smbus_agent_polling_lock, flags);
+	start_polling = !hub->smbus_target_mask;
+	hub->smbus_target_mask |= BIT(agent->port_id);
+	spin_unlock_irqrestore(&hub->smbus_agent_polling_lock, flags);
+
+	if (start_polling && hub->smbus_agent_polling_active)
+		hrtimer_start(&hub->smbus_agent_polling_timer,
+			      ns_to_ktime(I3C_HUB_POLLING_ROLL_PERIOD_NS),
+			      HRTIMER_MODE_REL);
 
 	return 0;
 }
@@ -1582,8 +1860,24 @@ static int i3c_hub_agent_i2c_reg_target(struct i2c_client *client)
 static int i3c_hub_agent_i2c_unreg_target(struct i2c_client *client)
 {
 	struct smbus_agent *agent = i2c_get_adapdata(client->adapter);
+	struct i3c_hub *hub = agent->hub;
+	unsigned long flags;
+	bool stop_polling;
 
 	agent->client = NULL;
+
+	if (!hub->smbus_use_polling)
+		return 0;
+
+	spin_lock_irqsave(&hub->smbus_agent_polling_lock, flags);
+	hub->smbus_target_mask &= ~BIT(agent->port_id);
+	stop_polling = !hub->smbus_target_mask;
+	spin_unlock_irqrestore(&hub->smbus_agent_polling_lock, flags);
+
+	if (stop_polling) {
+		hrtimer_cancel(&hub->smbus_agent_polling_timer);
+		cancel_work_sync(&hub->smbus_agent_polling_work);
+	}
 
 	return 0;
 }
@@ -1708,8 +2002,19 @@ static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
 	ret = regmap_set_bits(hub->regmap, I3C_HUB_TP_IO_MODE_CONF, BIT(i));
 	if (ret)
 		return ret;
-	/* Enable agent IBI */
-	ret = regmap_update_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i), BIT(i));
+	if (hub->smbus_use_polling) {
+		ret = regmap_clear_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i));
+		if (ret)
+			return ret;
+
+		/* Prevent target RX loss if both buffers fill before polling drains them. */
+		ret = regmap_set_bits(hub->regmap,
+				      I3C_HUB_ONCHIP_TD_AND_SMBUS_AGNT_CONF,
+				      TARGET_AGENT_BUF_FULL_SDA_LOW_EN);
+	} else {
+		/* SMBus Agent events are reported by Hub IBI. */
+		ret = regmap_set_bits(hub->regmap, I3C_HUB_TP_IBI_CONF, BIT(i));
+	}
 	if (ret)
 		return ret;
 
@@ -1727,7 +2032,7 @@ static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
 	adap->owner = THIS_MODULE;
 	adap->algo = &i3c_hub_i2c_algo;
 	adap->algo_data = &hub->agents[i];
-	adap->timeout = 1000;
+	adap->timeout = HZ;
 	adap->retries = 3;
 	snprintf(adap->name, sizeof(adap->name), "hub%s.port%d",
 		 dev_name(&hub->i3cdev->dev), i);
@@ -1749,7 +2054,8 @@ static int i3c_hub_add_smbus_adapter(struct i3c_hub *hub, int port)
 	if (ret)
 		dev_err(dev, "Failed to lock HUB's protected registers\n");
 
-	if (!of_property_read_u32(hub->child_nodes[i], "clock-frequency", &val))
+	if (!of_property_read_u32(hub->child_nodes[i], "clock-frequency", &val) &&
+	    (val >= 100000))
 		hub->agents[i].clk_freq = val;
 	else
 		hub->agents[i].clk_freq = 400000;
@@ -1915,13 +2221,16 @@ static int i3c_hub_setup_child_nodes(struct i3c_hub *hub)
 	if (!enable_smbus_agent)
 		return 0;
 
-	/* Enable hub IBI after all SMBus adapters have been initialized */
-	if (!hub->ibi_enabled) {
+	if (hub->smbus_use_polling) {
+		hub->smbus_agent_polling_active = true;
+		i3c_hub_smbus_start_polling(hub);
+	} else if (!hub->ibi_enabled) {
 		ret = i3c_device_request_ibi(i3cdev, &i3c_hub_ibi_setup);
 		if (ret) {
 			dev_err(&i3cdev->dev, "Failed requesting IBI\n");
 			return ret;
 		}
+
 		ret = i3c_device_enable_ibi(i3cdev);
 		if (ret) {
 			i3c_device_free_ibi(i3cdev);
@@ -1931,7 +2240,6 @@ static int i3c_hub_setup_child_nodes(struct i3c_hub *hub)
 		hub->ibi_enabled = true;
 	}
 
-	/* Register i2c devices after hub IBI is enabled */
 	for (i = 0; i < I3C_HUB_TP_MAX_COUNT; ++i) {
 		if (hub->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS)
 			i3c_hub_register_i2c_devices(hub, i);
@@ -1957,6 +2265,43 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 
 	if (priv->node && of_property_read_bool(priv->node, "do-entdaa"))
 		i3c_master_do_daa(master);
+}
+
+static int i3c_hub_select_smbus_mode(struct i3c_hub *hub)
+{
+	unsigned int val;
+	u16 part_id = 0;
+	int ret;
+
+	ret = regmap_read(hub->regmap, I3C_HUB_DEV_INFO_0, &val);
+	if (ret)
+		return ret;
+
+	part_id = (val & 0xFF) << 8;
+
+	ret = regmap_read(hub->regmap, I3C_HUB_DEV_REV, &val);
+	if (ret)
+		return ret;
+
+	part_id |= I3C_HUB_DEV_REV_LDO_GET(val);
+
+	hub->part_id = part_id;
+
+	switch (part_id) {
+	case 0x4000:
+	case 0x4100:
+	case 0x8000:
+	case 0x8100:
+	case 0x4001:
+	case 0x8001:
+		hub->smbus_use_polling = true;
+		break;
+	default:
+		hub->smbus_use_polling = false;
+		break;
+	}
+
+	return 0;
 }
 
 static int i3c_hub_probe(struct i3c_device *i3cdev)
@@ -1994,8 +2339,22 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	}
 
 	priv->regmap = regmap;
+
+	ret = i3c_hub_select_smbus_mode(priv);
+	if (ret) {
+		dev_err(dev, "Failed to read I3C Hub device information: %d\n", ret);
+		goto error;
+	}
+
 	mutex_init(&priv->lock);
 	mutex_init(&priv->ibi_lock);
+	spin_lock_init(&priv->smbus_agent_polling_lock);
+	INIT_WORK(&priv->smbus_agent_polling_work,
+		  i3c_hub_smbus_agent_polling_work);
+	hrtimer_init(&priv->smbus_agent_polling_timer, CLOCK_MONOTONIC,
+		     HRTIMER_MODE_REL);
+	priv->smbus_agent_polling_timer.function =
+		i3c_hub_smbus_agent_polling_timer;
 
 	ret = regmap_write(priv->regmap, I3C_HUB_CP_MUX_SET, BIT(0));
 	if (ret) {
@@ -2072,6 +2431,13 @@ static void i3c_hub_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_hub *priv = i3cdev_get_drvdata(i3cdev);
 	struct i3c_dev_desc *desc = priv->i3cdev->desc;
+
+	cancel_delayed_work_sync(&priv->delayed_work);
+	if (priv->smbus_use_polling) {
+		priv->smbus_agent_polling_active = false;
+		hrtimer_cancel(&priv->smbus_agent_polling_timer);
+		cancel_work_sync(&priv->smbus_agent_polling_work);
+	}
 
 	mutex_lock(&hubdevs_lock);
 	list_del(&priv->list);
