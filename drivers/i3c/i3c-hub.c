@@ -1173,7 +1173,7 @@ ack:
 	if (regmap_write(hub->regmap, HUB_REG_TP_SMBUS_AGNT_STS(agent->port_id), tmp))
 		dev_warn(&hub->i3cdev->dev, "TP[%d]: Failed to clear RX status: %d\n",
 			 agent->port_id, ret);
-	agent->next_buf_idx = !agent->next_buf_idx;
+	agent->next_buf_idx = !buf_idx;
 }
 #endif
 
