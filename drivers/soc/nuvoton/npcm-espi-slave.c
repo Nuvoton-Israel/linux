@@ -227,23 +227,9 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = misc_register(&priv->miscdev);
-	if (ret) {
-		dev_err(dev, "Unable to register device\n");
-		kfree(priv->miscdev.name);
-		return ret;
-	}
-
 	priv->irq = platform_get_irq(pdev, 0);
 	if (priv->irq < 0)
 		return priv->irq;
-
-	ret = devm_request_irq(dev, priv->irq, npcm_espi_slave_irq_handler,
-			       IRQF_SHARED, "espi-slave", priv);
-	if (ret) {
-		dev_err(dev, "failed to request IRQ\n");
-		return ret;
-	}
 
 	spin_lock_init(&priv->pltrstn_lock);
 	init_waitqueue_head(&priv->pltrstn_waitq);
@@ -252,6 +238,19 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 	priv->dev =  &pdev->dev;
 
 	dev_set_drvdata(dev, priv);
+
+	ret = devm_request_irq(dev, priv->irq, npcm_espi_slave_irq_handler,
+			       IRQF_SHARED, "espi-slave", priv);
+	if (ret) {
+		dev_err(dev, "failed to request IRQ\n");
+		return ret;
+	}
+
+	ret = misc_register(&priv->miscdev);
+	if (ret) {
+		dev_err(dev, "Unable to register device\n");
+		return ret;
+	}
 
 	npcm_espi_slave_config_irq(priv);
 
@@ -263,8 +262,6 @@ static int npcm_espi_slave_remove(struct platform_device *pdev)
 {
 	struct npcm_espi_slave *priv = dev_get_drvdata(&pdev->dev);
 	misc_deregister(&priv->miscdev);
-	kfree(priv->miscdev.name);
-	kfree(priv);
 	return 0;
 }
 
