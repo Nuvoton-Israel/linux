@@ -48,20 +48,28 @@ struct npcm_espi_slave {
 };
 
 
-static void npcm_espi_slave_config_irq(struct npcm_espi_slave *priv)
+/*
+ * CFGUPD is shared with spi-npcm-flash, which is the only one that clears the
+ * status when the flash channel is built in.  Its enable therefore belongs to
+ * it, and @cfgupd lets the caller say whether this driver may switch the bit
+ * on: never while spi-npcm-flash may still be waiting to probe, always once a
+ * reset has cleared an enable it had already set.
+ */
+static void npcm_espi_slave_config_irq(struct npcm_espi_slave *priv,
+				       bool cfgupd)
 {
-	regmap_update_bits(priv->espi_regmap, ESPIIE, ESPIIE_PLTRSTIE,
-			ESPIIE_PLTRSTIE);
-	regmap_update_bits(priv->espi_regmap, ESPIIE, ESPIIE_ESPIRSTIE,
-			ESPIIE_ESPIRSTIE);
-	regmap_update_bits(priv->espi_regmap, ESPIIE, ESPIIE_CFGUPDIE,
-			ESPIIE_CFGUPDIE);
+	u32 ie = ESPIIE_PLTRSTIE | ESPIIE_ESPIRSTIE;
+
+	if (cfgupd)
+		ie |= ESPIIE_CFGUPDIE;
+
+	regmap_update_bits(priv->espi_regmap, ESPIIE, ie, ie);
 }
 
 static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 {
 	struct npcm_espi_slave *priv = arg;
-	uint32_t sts, evms1;
+	u32 sts, evms1, handled = 0;
 
 	regmap_read(priv->espi_regmap, ESPISTS, &sts);
 	regmap_read(priv->espi_regmap, VWEVMS1, &evms1);
@@ -74,6 +82,7 @@ static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 		wake_up_interruptible(&priv->pltrstn_waitq);
 
 		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_PLTRST);
+		handled |= ESPISTS_PLTRST;
 	}
 
 	if (sts & ESPISTS_ESPIRST) {
@@ -84,8 +93,9 @@ static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 		wake_up_interruptible(&priv->pltrstn_waitq);
 
 		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_ESPIRST);
+		handled |= ESPISTS_ESPIRST;
 
-		npcm_espi_slave_config_irq(priv);
+		npcm_espi_slave_config_irq(priv, true);
 	}
 
 	if (sts & ESPISTS_CFGUPD) {
@@ -94,15 +104,22 @@ static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 		priv->pltrstn_in_avail = true;
 		spin_unlock(&priv->pltrstn_lock);
 		wake_up_interruptible(&priv->pltrstn_waitq);
-#ifdef CONFIG_SPI_NPCM_FLASH
-		return IRQ_HANDLED;
-#endif
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_CFGUPD);
+
+		/*
+		 * Sampling the state is all this driver does with CFGUPD; the
+		 * status belongs to spi-npcm-flash, which has more work to do
+		 * before it may be cleared.  Leave it out of @handled so that
+		 * a stuck bit reaches the spurious interrupt detector instead
+		 * of being reported as serviced.
+		 */
+		if (!IS_ENABLED(CONFIG_SPI_NPCM_FLASH)) {
+			regmap_write(priv->espi_regmap, ESPISTS,
+				     ESPISTS_CFGUPD);
+			handled |= ESPISTS_CFGUPD;
+		}
 	}
 
-	regmap_read(priv->espi_regmap, ESPISTS, &sts);
-
-	return IRQ_HANDLED;
+	return handled ? IRQ_HANDLED : IRQ_NONE;
 }
 
 static inline struct npcm_espi_slave *to_npcm_espi_slave(struct file *filp)
@@ -239,6 +256,16 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(dev, priv);
 
+	/*
+	 * Drop what the bootloader left latched, but only for the status this
+	 * driver owns.  A latched CFGUPD is what makes the interrupt fire once
+	 * spi-npcm-flash enables it, and both drivers still need that first
+	 * event: one to set the flash channel up, the other to learn the
+	 * PLTRST_N level it reports as 'U' until then.
+	 */
+	regmap_write(priv->espi_regmap, ESPISTS,
+		     ESPISTS_PLTRST | ESPISTS_ESPIRST);
+
 	ret = devm_request_irq(dev, priv->irq, npcm_espi_slave_irq_handler,
 			       IRQF_SHARED, "espi-slave", priv);
 	if (ret) {
@@ -252,7 +279,7 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	npcm_espi_slave_config_irq(priv);
+	npcm_espi_slave_config_irq(priv, !IS_ENABLED(CONFIG_SPI_NPCM_FLASH));
 
 	return 0;
 
