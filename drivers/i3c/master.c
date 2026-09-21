@@ -506,14 +506,26 @@ static void i3c_bus_notify(struct i3c_bus *bus, unsigned int action)
 static void i3c_master_do_detach(struct i3c_master_controller *master,
 				 struct i3c_dev_desc *i3cdev)
 {
-	i3c_bus_maintenance_lock(&master->bus);
-	/* Release IBI resource */
+	i3c_bus_normaluse_lock(&master->bus);
+	mutex_lock(&i3cdev->ibi_lock);
 	if (i3cdev->ibi && i3cdev->ibi->enabled) {
-		i3c_dev_disable_ibi_locked(i3cdev);
-		i3cdev->ibi->enabled = false;
-		i3c_dev_free_ibi_locked(i3cdev);
-	}
+		/* Disable IBI */
+		master->ops->disable_ibi(i3cdev);
 
+		/* Wait for pending IBI work to complete */
+		reinit_completion(&i3cdev->ibi->all_ibis_handled);
+		if (atomic_read(&i3cdev->ibi->pending_ibis))
+			wait_for_completion(&i3cdev->ibi->all_ibis_handled);
+
+		i3cdev->ibi->enabled = false;
+	}
+	/* Release IBI resource */
+	if (i3cdev->ibi)
+		i3c_dev_free_ibi_locked(i3cdev);
+	mutex_unlock(&i3cdev->ibi_lock);
+	i3c_bus_normaluse_unlock(&master->bus);
+
+	i3c_bus_maintenance_lock(&master->bus);
 	/* Reset the dynamic address */
 	i3c_master_rstdaa_locked(master, i3cdev->info.dyn_addr);
 	i3c_bus_maintenance_unlock(&master->bus);
