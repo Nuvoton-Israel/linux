@@ -1278,6 +1278,7 @@ static ssize_t npcm750_otp_write(struct file *filp, const char __user *buff, siz
 	if (copy_from_user(prog_buf, buff, count)) {
 		printk("otp: copy_from_user failed\n");
 		bytes_prog = -EFAULT;
+		goto out;
 	}
 
     while ( bytes_prog < count)
@@ -1299,6 +1300,7 @@ static ssize_t npcm750_otp_write(struct file *filp, const char __user *buff, siz
 	    }
 	}
 
+out:
 	mutex_unlock(&npcm750_otp_lock);
 
 	kfree(prog_buf);
