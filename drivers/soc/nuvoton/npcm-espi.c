@@ -22,6 +22,7 @@
 #include <linux/interrupt.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/notifier.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
@@ -34,6 +35,10 @@ struct npcm_espi {
 	struct regmap			*map;
 	struct regmap_irq_chip_data	*irq_data;
 	struct blocking_notifier_head	notifier;
+	/* serialises a broadcast against a subscriber joining */
+	struct mutex			notifier_lock;
+	/* set once a configuration update has been broadcast */
+	bool				cfgupd_seen;
 };
 
 static const struct regmap_irq npcm_espi_irqs[] = {
@@ -77,18 +82,29 @@ static void npcm_espi_remove_notifier(void *data)
  * devm_npcm_espi_register_notifier() - hear about eSPI configuration updates
  * @dev: a child of the eSPI block
  * @nb: caller's notifier, invoked with %NPCM_ESPI_EVENT_CFGUPD and a
- *	pointer to the new ESPICFG value
+ *	pointer to the current ESPICFG value
  *
  * The host sends a configuration update whenever it changes the channels
  * it has enabled.  That is one event several drivers have to react to, so
  * it is not an interrupt any single one of them can own.  Callbacks run in
  * process context and are removed when @dev is unbound.
+ *
+ * What the host enabled is state, not a one-off event, and a child only
+ * subscribes once it probes: an update the host sent before that, whether
+ * it was latched before this driver took the line or arrived while the
+ * children were still probing, has already been acknowledged and would
+ * otherwise be lost.  So if an update has already been broadcast, @nb is
+ * called once here with the current ESPICFG, which makes a late subscriber
+ * see the channel state the host asked for.  If none has been seen yet
+ * there is nothing to catch up on, and @nb simply waits for the first one.
+ * Callbacks must be idempotent.
  */
 int devm_npcm_espi_register_notifier(struct device *dev,
 				     struct notifier_block *nb)
 {
 	struct npcm_espi_notifier *n;
 	struct npcm_espi *espi;
+	unsigned int cfg;
 	int ret;
 
 	if (!dev->parent)
@@ -105,9 +121,24 @@ int devm_npcm_espi_register_notifier(struct device *dev,
 	n->espi = espi;
 	n->nb = nb;
 
+	/*
+	 * Hold off a broadcast while joining, so that @nb sees the catch-up
+	 * call and any update that races with it in that order, and never
+	 * the newer value first.
+	 */
+	mutex_lock(&espi->notifier_lock);
+
 	ret = blocking_notifier_chain_register(&espi->notifier, nb);
-	if (ret)
+	if (ret) {
+		mutex_unlock(&espi->notifier_lock);
 		return ret;
+	}
+
+	if (espi->cfgupd_seen &&
+	    !regmap_read(espi->map, NPCM_ESPI_ESPICFG, &cfg))
+		nb->notifier_call(nb, NPCM_ESPI_EVENT_CFGUPD, &cfg);
+
+	mutex_unlock(&espi->notifier_lock);
 
 	return devm_add_action_or_reset(dev, npcm_espi_remove_notifier, n);
 }
@@ -118,10 +149,24 @@ static irqreturn_t npcm_espi_cfgupd_thread(int irq, void *arg)
 	struct npcm_espi *espi = arg;
 	unsigned int cfg;
 
-	if (regmap_read(espi->map, NPCM_ESPI_ESPICFG, &cfg))
-		return IRQ_NONE;
+	guard(mutex)(&espi->notifier_lock);
+
+	if (regmap_read(espi->map, NPCM_ESPI_ESPICFG, &cfg)) {
+		/*
+		 * Nothing else is on this interrupt, so there is no one to
+		 * hand it to; say it was handled and drop the update.
+		 */
+		dev_err_ratelimited(espi->dev, "couldn't read ESPICFG\n");
+		return IRQ_HANDLED;
+	}
 
 	dev_dbg(espi->dev, "configuration update, ESPICFG = %08x\n", cfg);
+
+	/*
+	 * From here on a child that probes later has missed an update, so
+	 * it has to be told the current state when it subscribes.
+	 */
+	espi->cfgupd_seen = true;
 
 	blocking_notifier_call_chain(&espi->notifier,
 				     NPCM_ESPI_EVENT_CFGUPD, &cfg);
@@ -141,6 +186,10 @@ static int npcm_espi_probe(struct platform_device *pdev)
 
 	espi->dev = dev;
 	BLOCKING_INIT_NOTIFIER_HEAD(&espi->notifier);
+
+	ret = devm_mutex_init(dev, &espi->notifier_lock);
+	if (ret)
+		return ret;
 
 	espi->map = syscon_node_to_regmap(dev->of_node);
 	if (IS_ERR(espi->map))

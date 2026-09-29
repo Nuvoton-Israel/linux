@@ -435,6 +435,14 @@ static int npcm_espi_flash_cfgupd(struct notifier_block *nb,
 	if (!(cfg & NPCM_ESPI_ESPICFG_HFLASHCHANEN))
 		return NOTIFY_OK;
 
+	/*
+	 * This runs again for every update the host sends, and once more when
+	 * subscribing, so do nothing if the channel is already reported as
+	 * enabled.
+	 */
+	if (cfg & NPCM_ESPI_ESPICFG_FLASHCHANEN)
+		return NOTIFY_OK;
+
 	regmap_update_bits(priv->espi_regmap, FLASHCTL,
 			   FLASHCTL_SAF_AUTO_READ, 0);
 	regmap_update_bits(priv->espi_regmap, FLASHCFG,
@@ -597,12 +605,6 @@ static int npcm_espi_flash_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to request sflashrd\n");
 
-	priv->nb.notifier_call = npcm_espi_flash_cfgupd;
-	ret = devm_npcm_espi_register_notifier(dev, &priv->nb);
-	if (ret)
-		return dev_err_probe(dev, ret,
-				     "failed to subscribe to cfgupd\n");
-
 	priv->dev = &pdev->dev;
 
 	/* Bus lock */
@@ -612,6 +614,17 @@ static int npcm_espi_flash_probe(struct platform_device *pdev)
 	dev_set_drvdata(dev, priv);
 
 	npcm_espi_flash_enable(priv);
+
+	/*
+	 * Subscribe last: this calls back immediately with the configuration
+	 * the host has already asked for, which may enable the channel, so
+	 * the block has to be set up by then.
+	 */
+	priv->nb.notifier_call = npcm_espi_flash_cfgupd;
+	ret = devm_npcm_espi_register_notifier(dev, &priv->nb);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to subscribe to cfgupd\n");
 
 	return 0;
 }
