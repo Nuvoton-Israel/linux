@@ -192,6 +192,10 @@ enum dwmac_core_type {
 #define STMMAC_FLAG_EN_TX_LPI_CLK_PHY_CAP	BIT(12)
 #define STMMAC_FLAG_HWTSTAMP_CORRECT_LATENCY	BIT(13)
 
+#define NPCM_IND_AC_INDX    0x1FE
+#define NPCM_SR_MII_CTRL    0x003E0000
+#define NPCM_SR_MII_CTRL1   0x003F0000
+
 struct plat_stmmacenet_data {
 	enum dwmac_core_type core_type;
 	int bus_id;
@@ -304,5 +308,7 @@ struct plat_stmmacenet_data {
 	const struct dwmac4_addrs *dwmac4_addrs;
 	unsigned int flags;
 	bool use_ncsi;
+	bool sgmii_npcm;
+	void __iomem *npcm_base;
 };
 #endif

@@ -20,12 +20,6 @@
 #include "stmmac.h"
 #include "stmmac_platform.h"
 
-void __iomem *npcm_base;
-bool sgmii_npcm = false;
-
-#define IND_AC_INDX	0x1FE
-#define SR_MII_CTRL	0x003E0000
-
 #ifdef CONFIG_OF
 
 /**
@@ -437,7 +431,6 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	struct device_node *np = pdev->dev.of_node;
 	struct plat_stmmacenet_data *plat;
 	struct stmmac_dma_cfg *dma_cfg;
-	u16 RegValue;
 	int phy_mode;
 	void *ret;
 	int rc;
@@ -679,22 +672,15 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		goto error_hw_init;
 	}
 
+	plat->sgmii_npcm = false;
+	plat->npcm_base = NULL;
 	if (of_device_is_compatible(np, "nuvoton,npcm-dwmac")) {
-		sgmii_npcm = true;
-		npcm_base = devm_platform_ioremap_resource(pdev, 1);
-		if (IS_ERR(npcm_base)) {
+		plat->sgmii_npcm = true;
+		plat->npcm_base = devm_platform_ioremap_resource(pdev, 1);
+		if (IS_ERR(plat->npcm_base)) {
 			dev_warn(&pdev->dev, "devm_platform_ioremap_resource failed\n");
-			sgmii_npcm = false;
+			plat->sgmii_npcm = false;
 		}
-		iowrite16((u16)(SR_MII_CTRL >> 9), npcm_base + IND_AC_INDX);
-		RegValue = ioread16(npcm_base + 0x2);
-		RegValue = ioread16(npcm_base + 0x0);
-		RegValue |= BIT(15);
-		iowrite16(RegValue, npcm_base + 0x0);
-		while (RegValue & BIT(15))
-			RegValue = ioread16(npcm_base + 0x0);
-		RegValue &= ~(BIT(12));
-		iowrite16(RegValue, npcm_base + 0x0);
 	}
 
 	return plat;
@@ -866,6 +852,7 @@ int stmmac_pltfr_probe(struct platform_device *pdev,
 		       struct stmmac_resources *res)
 {
 	int ret;
+	u16 RegValue;
 
 	if (!plat->suspend && plat->exit)
 		plat->suspend = stmmac_plat_suspend;
@@ -875,6 +862,39 @@ int stmmac_pltfr_probe(struct platform_device *pdev,
 	ret = stmmac_pltfr_init(pdev, plat);
 	if (ret)
 		return ret;
+
+	if (plat->sgmii_npcm && !of_property_read_bool(pdev->dev.of_node, "npcm,dis-sw-rst")) {
+		iowrite16((u16)(NPCM_SR_MII_CTRL >> 9), plat->npcm_base + NPCM_IND_AC_INDX);
+		RegValue = ioread16(plat->npcm_base + 0x0);
+		RegValue |= BIT(15);
+		iowrite16(RegValue, plat->npcm_base + 0x0);
+		while (RegValue & BIT(15))
+			RegValue = ioread16(plat->npcm_base + 0x0);
+		mdelay(10);
+	}
+
+	if (plat->sgmii_npcm) {
+		iowrite16((u16)(NPCM_SR_MII_CTRL >> 9), plat->npcm_base + NPCM_IND_AC_INDX);
+		if (of_property_read_bool(pdev->dev.of_node, "npcm,sgmii-an")) {
+			RegValue = ioread16(plat->npcm_base + 0x0);
+			RegValue |= (BIT(12));
+			iowrite16(RegValue, plat->npcm_base + 0x0);
+
+			iowrite16((u16)(NPCM_SR_MII_CTRL1 >> 9),
+				  plat->npcm_base + NPCM_IND_AC_INDX);
+			RegValue = ioread16(plat->npcm_base + 0x2);
+			RegValue &= ~GENMASK(2, 1);
+			RegValue |= 0x04;
+			iowrite16(RegValue, plat->npcm_base + 0x2);
+			RegValue = ioread16(plat->npcm_base + 0x0);
+			RegValue |= BIT(9);
+			iowrite16(RegValue, plat->npcm_base + 0x0);
+		} else {
+			RegValue = ioread16(plat->npcm_base + 0x0);
+			RegValue &= ~(BIT(12));
+			iowrite16(RegValue, plat->npcm_base + 0x0);
+		}
+	}
 
 	ret = stmmac_dvr_probe(&pdev->dev, plat, res);
 	if (ret) {
