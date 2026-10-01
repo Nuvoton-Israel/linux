@@ -957,7 +957,6 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 		u16 RegValue;
 
 		iowrite16((u16)(NPCM_SR_MII_CTRL >> 9), priv->plat->npcm_base + NPCM_IND_AC_INDX);
-		RegValue = ioread16(priv->plat->npcm_base + 0x2);
 		RegValue = ioread16(priv->plat->npcm_base + 0x0);
 		RegValue &= 0xDFBF;
 		switch (speed) {
