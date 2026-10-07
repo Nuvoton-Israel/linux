@@ -492,6 +492,51 @@ static int npcm_sgpio_setup_irqs(struct npcm_sgpio *gpio,
 	return 0;
 }
 
+/*
+ * Preload XDOUT for lines listed in "nuvoton,init-output-high". Must run
+ * while SIOX is disabled and before the gpiochip is registered.
+ */
+static void npcm_sgpio_init_output_high(struct npcm_sgpio *gpio,
+					struct device *dev)
+{
+	u8 mask[ARRAY_SIZE(npcm_sgpio_banks)] = {};
+	u32 offsets[MAX_NR_HW_SGPIO];
+	void __iomem *addr;
+	int i, n, rc;
+
+	n = device_property_count_u32(dev, "nuvoton,init-output-high");
+	if (n <= 0)
+		return;
+
+	if (n > MAX_NR_HW_SGPIO) {
+		dev_warn(dev, "too many nuvoton,init-output-high entries (%d), ignoring\n", n);
+		return;
+	}
+
+	rc = device_property_read_u32_array(dev, "nuvoton,init-output-high",
+					    offsets, n);
+	if (rc < 0) {
+		dev_warn(dev, "Could not read nuvoton,init-output-high: %d\n", rc);
+		return;
+	}
+
+	for (i = 0; i < n; i++) {
+		if (offsets[i] >= gpio->nout_sgpio) {
+			dev_warn(dev, "init-output-high offset %u is not an output line, skipping\n",
+				 offsets[i]);
+			continue;
+		}
+		mask[GPIO_BANK(offsets[i])] |= BIT(GPIO_BIT(offsets[i]));
+	}
+
+	for (i = 0; i < ARRAY_SIZE(npcm_sgpio_banks); i++) {
+		if (!mask[i])
+			continue;
+		addr = bank_reg(gpio, &npcm_sgpio_banks[i], WRITE_DATA);
+		iowrite8(ioread8(addr) | mask[i], addr);
+	}
+}
+
 static int npcm_sgpio_probe(struct platform_device *pdev)
 {
 	struct npcm_sgpio *gpio;
@@ -556,6 +601,8 @@ static int npcm_sgpio_probe(struct platform_device *pdev)
 	rc = npcm_sgpio_setup_irqs(gpio, pdev);
 	if (rc < 0)
 		return rc;
+
+	npcm_sgpio_init_output_high(gpio, &pdev->dev);
 
 	rc = devm_gpiochip_add_data(&pdev->dev, &gpio->chip, gpio);
 	if (rc)
