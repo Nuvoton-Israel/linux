@@ -33,6 +33,12 @@
 #define NPCM_USB3PHYCTL_OFFSET	0x148
 #define NPCM_USBXPHYCTL_RS	BIT(28)
 
+/* nuvoton,usbphy-reset-mask bits */
+#define NPCM_USBPHY_RESET_PHY1	BIT(0)
+#define NPCM_USBPHY_RESET_PHY2	BIT(1)
+#define NPCM_USBPHY_RESET_PHY3	BIT(2)
+#define NPCM_USBPHY_RESET_MASK	GENMASK(2, 0)
+
 /* NPCM7xx Reset registers */
 #define NPCM_SWRSTR		0x14
 #define NPCM_SWRST		BIT(2)
@@ -87,9 +93,11 @@ static const struct npcm_reset_info npxm8xx_reset_info[] = {
 struct npcm_rc_data {
 	struct reset_controller_dev rcdev;
 	struct notifier_block restart_nb;
+	struct notifier_block usbphy_reset_nb;
 	const struct npcm_reset_info *info;
 	struct regmap *gcr_regmap;
 	u32 sw_reset_number;
+	u32 usbphy_reset_mask;
 	void __iomem *base;
 	spinlock_t lock;
 };
@@ -106,6 +114,59 @@ static int npcm_rc_restart(struct notifier_block *nb, unsigned long mode,
 	mdelay(1000);
 
 	pr_emerg("%s: unable to restart system\n", __func__);
+
+	return NOTIFY_DONE;
+}
+
+static int npcm_usbphy_reset(struct notifier_block *nb, unsigned long mode,
+			   void *cmd)
+{
+	struct npcm_rc_data *rc = container_of(nb, struct npcm_rc_data,
+					       usbphy_reset_nb);
+	u32 mask = rc->usbphy_reset_mask;
+	u32 iprst3_bits = 0, iprst4_bits = 0;
+	u32 iprst3, iprst4 = 0;
+
+	if (rc->info->bmc_id != BMC_NPCM8XX)
+		mask &= ~NPCM_USBPHY_RESET_PHY3;
+
+	if (mask & NPCM_USBPHY_RESET_PHY1) {
+		regmap_update_bits(rc->gcr_regmap, NPCM_USB1PHYCTL_OFFSET,
+				   NPCM_USBXPHYCTL_RS, 0);
+		iprst3_bits |= NPCM_IPSRST3_USBPHY1;
+	}
+	if (mask & NPCM_USBPHY_RESET_PHY2) {
+		regmap_update_bits(rc->gcr_regmap, NPCM_USB2PHYCTL_OFFSET,
+				   NPCM_USBXPHYCTL_RS, 0);
+		iprst3_bits |= NPCM_IPSRST3_USBPHY2;
+	}
+	if (mask & NPCM_USBPHY_RESET_PHY3) {
+		regmap_update_bits(rc->gcr_regmap, NPCM_USB3PHYCTL_OFFSET,
+				   NPCM_USBXPHYCTL_RS, 0);
+		iprst4_bits |= NPCM_IPSRST4_USBPHY3;
+	}
+
+	if (!iprst3_bits && !iprst4_bits)
+		return NOTIFY_DONE;
+
+	iprst3 = readl(rc->base + NPCM_IPSRST3);
+	if (iprst4_bits)
+		iprst4 = readl(rc->base + NPCM_IPSRST4);
+
+	/* assert USB PHY reset */
+	if (iprst3_bits)
+		writel(iprst3 | iprst3_bits, rc->base + NPCM_IPSRST3);
+	if (iprst4_bits)
+		writel(iprst4 | iprst4_bits, rc->base + NPCM_IPSRST4);
+
+	/* make sure the disconnect was observed */
+	mdelay(10);
+
+	/* deassert USB PHY reset */
+	if (iprst3_bits)
+		writel(iprst3 & ~iprst3_bits, rc->base + NPCM_IPSRST3);
+	if (iprst4_bits)
+		writel(iprst4 & ~iprst4_bits, rc->base + NPCM_IPSRST4);
 
 	return NOTIFY_DONE;
 }
@@ -424,6 +485,17 @@ static int npcm_rc_probe(struct platform_device *pdev)
 			ret = register_restart_handler(&rc->restart_nb);
 			if (ret)
 				dev_warn(&pdev->dev, "failed to register restart handler\n");
+		}
+	}
+	if (!of_property_read_u32(pdev->dev.of_node, "nuvoton,usbphy-reset-mask",
+				  &rc->usbphy_reset_mask)) {
+		if ((rc->usbphy_reset_mask & NPCM_USBPHY_RESET_MASK) &&
+		    !IS_ERR_OR_NULL(rc->gcr_regmap)) {
+			rc->usbphy_reset_nb.priority = 255,
+			rc->usbphy_reset_nb.notifier_call = npcm_usbphy_reset,
+			ret = register_restart_handler(&rc->usbphy_reset_nb);
+			if (ret)
+				dev_warn(&pdev->dev, "failed to register usbphy reset handler\n");
 		}
 	}
 
