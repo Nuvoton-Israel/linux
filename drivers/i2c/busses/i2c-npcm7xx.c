@@ -2308,9 +2308,13 @@ static int npcm_i2c_master_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 	} while (time_is_after_jiffies(time_left) && bus_busy);
 
 	bus->dest_addr = slave_addr << 1;
-	if (bus_busy || bus->ber_state) {
-		dev_dbg(bus->dev, "I2C%d module BB: %d, ber_state: %d\n",
-			bus->num, bus_busy, bus->ber_state);
+	/* bus free but state not idle: stale, unless a slave event awaits the ISR */
+	if (bus_busy || bus->ber_state ||
+	    (bus->state != I2C_IDLE &&
+	     !(ioread8(bus->reg + NPCM_I2CST) &
+	       (NPCM_I2CST_SLVSTP | NPCM_I2CST_NMATCH)))) {
+		dev_dbg(bus->dev, "I2C%d module BB: %d, ber_state: %d, state: %d\n",
+			bus->num, bus_busy, bus->ber_state, bus->state);
 		iowrite8(NPCM_I2CCST_BB, bus->reg + NPCM_I2CCST);
 		npcm_i2c_reset(bus);
 		i2c_recover_bus(adap);
@@ -2344,11 +2348,10 @@ static int npcm_i2c_master_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 		if (time_left == 0) {
 			if (bus->timeout_cnt < ULLONG_MAX)
 				bus->timeout_cnt++;
-			if (bus->master_or_slave == I2C_MASTER) {
-				i2c_recover_bus(adap);
-				bus->cmd_err = -EIO;
-				bus->state = I2C_IDLE;
-			}
+			/* master_or_slave may be I2C_SLAVE here, still retire the xfer */
+			i2c_recover_bus(adap);
+			bus->cmd_err = -EIO;
+			bus->state = I2C_IDLE;
 		}
 	}
 
