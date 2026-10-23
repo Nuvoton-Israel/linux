@@ -131,7 +131,8 @@ static void obmf_dev_request_work(struct work_struct *work)
 		/*
 		 * MMIO device-initiated request.
 		 * Short transactions use 32-bit address, Long transactions
-		 * use 64-bit address; both use a u16 length field.
+		 * use 64-bit address; reads add a u16 Read Length, writes
+		 * carry the data with no length field.
 		 * Dispatch to MMIO misc handler.
 		 */
 		obmf_mmio_handle_dev_request(ch, dreq->transaction,
@@ -281,7 +282,7 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 		} else if ((ch->channel_type == OBMF_TYPE_MMIO ||
 			    ch->channel_type == OBMF_TYPE_CONFIG) &&
 			   payload_len >= OBMF_MMIO_SUBHDR_SIZE) {
-			/* MMIO / CONFIG (Discovery): 1-byte sub-header, no tag */
+			/* MMIO / CONFIG (Discovery): 2-byte header, no tag */
 			payload     += OBMF_MMIO_SUBHDR_SIZE;
 			payload_len -= OBMF_MMIO_SUBHDR_SIZE;
 		}
@@ -744,8 +745,9 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 }
 
 /* ------------------------------------------------------------------ */
-/* obmf_send_mmio_request — MMIO read/write, sub-header carries only   */
-/* the transaction type (no tag, spec §4.3); length fields are u16.    */
+/* obmf_send_mmio_request — MMIO read/write.  The 2-byte header carries */
+/* only the transaction type (Table 5).  Reads carry a u16 Read Length; */
+/* writes carry no length, the data runs to the end (Tables 10, 14).   */
 /* ------------------------------------------------------------------ */
 
 int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
@@ -753,15 +755,16 @@ int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
 			   const void *wr_data, int wr_len,
 			   void *rd_data, int rd_len)
 {
-	u8 payload[OBMF_MMIO_SUBHDR_SIZE + 8 + 2 + 256]; /* sub-hdr + addr + size + data */
+	u8 payload[OBMF_MMIO_SUBHDR_SIZE + 8 + 256]; /* hdr + addr + size/data */
 	struct obmf_mmio_subhdr *mhdr = (struct obmf_mmio_subhdr *)payload;
 	int payload_len;
 
 	if (wr_len < 0 || wr_len > 256 || rd_len < 0 || rd_len > 256)
 		return -EINVAL;
 
-	/* Build MMIO sub-header */
+	/* Build MMIO header */
 	mhdr->transaction = transaction;
+	mhdr->reserved    = 0;
 
 	switch (transaction) {
 	case OBMF_TRANS_SHORT_READ:
@@ -772,11 +775,9 @@ int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
 		payload_len += 2;
 		break;
 	case OBMF_TRANS_SHORT_WRITE:
-		/* Short Write: Address(4B, 32-bit LE) + Size(2B, u16 LE) + Data(N) */
+		/* Short Write: Address(4B, 32-bit LE) + Data(N) */
 		put_unaligned_le32((u32)address, payload + OBMF_MMIO_SUBHDR_SIZE);
 		payload_len = OBMF_MMIO_SUBHDR_SIZE + 4;
-		put_unaligned_le16(wr_len, payload + payload_len);
-		payload_len += 2;
 		if (wr_data && wr_len > 0) {
 			memcpy(payload + payload_len, wr_data, wr_len);
 			payload_len += wr_len;
@@ -790,11 +791,9 @@ int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
 		payload_len += 2;
 		break;
 	case OBMF_TRANS_LONG_WRITE:
-		/* Long Write: Address(8B, 64-bit LE) + Size(2B, u16 LE) + Data(N) */
+		/* Long Write: Address(8B, 64-bit LE) + Data(N) */
 		put_unaligned_le64(address, payload + OBMF_MMIO_SUBHDR_SIZE);
 		payload_len = OBMF_MMIO_SUBHDR_SIZE + 8;
-		put_unaligned_le16(wr_len, payload + payload_len);
-		payload_len += 2;
 		if (wr_data && wr_len > 0) {
 			memcpy(payload + payload_len, wr_data, wr_len);
 			payload_len += wr_len;
