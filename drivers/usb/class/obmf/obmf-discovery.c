@@ -124,10 +124,13 @@ int obmf_discover_channels(struct obmf_device *odev)
 
 	dev_info(&odev->intf->dev, "OBMF_VER = 0x%04x\n", obmf_ver);
 
-	if (obmf_ver < OBMF_MIN_SPEC_VERSION) {
+	/* A Host shall reject a device whose version it does not support */
+	if (obmf_ver < OBMF_MIN_SPEC_VERSION ||
+	    OBMF_SPEC_VERSION_MAJOR(obmf_ver) !=
+	    OBMF_SPEC_VERSION_MAJOR(OBMF_MIN_SPEC_VERSION)) {
 		dev_err(&odev->intf->dev,
-			"OBMF version 0x%04x too old (need >= 0x%04x)\n",
-			obmf_ver, OBMF_MIN_SPEC_VERSION);
+			"OBMF version %x.%x not supported (need 1.x)\n",
+			OBMF_SPEC_VERSION_MAJOR(obmf_ver), obmf_ver & 0xff);
 		rv = -ENODEV;
 		goto err;
 	}
