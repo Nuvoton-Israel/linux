@@ -121,9 +121,16 @@ static void obmf_dev_request_work(struct work_struct *work)
 	if (odev->disconnected)
 		goto out;
 
+	/*
+	 * The Host never exposes Channel 0 (Table 1, requirement 28), and an
+	 * unknown channel has nothing to serve it: answer, don't drop.
+	 */
 	ch = obmf_find_channel(odev, dreq->channel_id);
-	if (!ch)
+	if (!ch || dreq->channel_id == 0) {
+		obmf_send_response(odev, dreq->channel_id,
+				   OBMF_STATUS_UNKNOWN_CHANNEL, NULL, 0);
 		goto out;
+	}
 
 	switch (dreq->channel_type) {
 	case OBMF_TYPE_MMIO:
@@ -245,9 +252,26 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 	u8 channel_id = hdr->channel;
 
 	ch = obmf_find_channel(odev, channel_id);
-	if (!ch) {
-		dev_err(&odev->intf->dev, "rx: unknown channel %u\n",
+	if (!ch || (channel_id == 0 && !OBMF_HDR_IS_RESPONSE(hdr))) {
+		struct obmf_dev_req *dreq;
+
+		dev_err(&odev->intf->dev, "rx: %s on unknown channel %u\n",
+			OBMF_HDR_IS_RESPONSE(hdr) ? "response" : "request",
 			channel_id);
+		if (OBMF_HDR_IS_RESPONSE(hdr))
+			return;
+
+		/* Let the work item answer it; we can't send from here */
+		dreq = obmf_alloc_dev_req(0);
+		if (!dreq)
+			return;
+		INIT_WORK(&dreq->work, obmf_dev_request_work);
+		dreq->odev = odev;
+		dreq->channel_id = channel_id;
+		dreq->channel_type = OBMF_TYPE_CONFIG;
+		dreq->transaction = 0;
+		dreq->data_len = 0;
+		queue_work(odev->dev_req_wq, &dreq->work);
 		return;
 	}
 
@@ -477,8 +501,10 @@ static void obmf_rx_complete(struct urb *urb)
 	hdr = (struct obmf_common_hdr *)odev->rx_buf;
 	ch = obmf_find_channel(odev, hdr->channel);
 	if (!ch) {
-		dev_err(&odev->intf->dev, "rx: unknown channel %u\n",
-			hdr->channel);
+		/* No reassembly state: let the dispatcher answer a request */
+		obmf_dispatch_message(odev, hdr,
+				      odev->rx_buf + OBMF_COMMON_HDR_SIZE,
+				      urb->actual_length - OBMF_COMMON_HDR_SIZE);
 		goto resubmit;
 	}
 
