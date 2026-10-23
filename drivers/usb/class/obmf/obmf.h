@@ -76,14 +76,17 @@ struct obmf_common_hdr {
 #define OBMF_HDR_SET_REQUEST(h)		((h)->status_rqresp = 0)
 #define OBMF_HDR_SET_RESPONSE(h, s)	((h)->status_rqresp = 0x80 | ((s) & 0x7F))
 
-/* ---------- MMIO Sub-Header (1 byte, Channel Type 01h only) ----------------
+/* ---------- MMIO Header (2 bytes, OBMF-ICP 1.0.0 Table 5) -----------------
  *
  * Byte 0: Transaction [2:0], Reserved [7:3]
+ * Byte 1: Reserved, set to 0
  *
- * Present in both Request and Response payloads (spec §4.3); no Tag field.
+ * Present in both Request and Response payloads of the MMIO channel and of
+ * Channel 0, which uses MMIO Short Read/Write (spec §5.15); no Tag field.
  */
 struct obmf_mmio_subhdr {
 	u8	transaction;
+	u8	reserved;
 } __packed;
 
 #define OBMF_MMIO_SUBHDR_SIZE	sizeof(struct obmf_mmio_subhdr)
