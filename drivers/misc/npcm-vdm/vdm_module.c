@@ -465,8 +465,21 @@ static long vdm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	unsigned long flags;
 	vdm_instance_t *pVDM_Instance;
 	bdf_arg_t lbdf_arg;
+	void *new_buf = NULL;
 	pVDM_Instance=filp->private_data;
 	VDM_DEBUG_LOG(pVDM_Instance->mBDF,"<1> %s vdm : cmd = %d \n",__FUNCTION__,cmd);
+
+	/* GFP_KERNEL may sleep, so allocate before taking the spinlock */
+	if (cmd == PCIE_VDM_SET_TRANSMIT_BUFFER_SIZE ||
+	    cmd == PCIE_VDM_SET_RECEIVE_BUFFER_SIZE) {
+		if (cmd == PCIE_VDM_SET_RECEIVE_BUFFER_SIZE &&
+		    (uint32_t)arg < sizeof(uint32_t))
+			return -EINVAL;
+		new_buf = kmalloc((uint32_t)arg, GFP_KERNEL);
+		if (!new_buf)
+			return -ENOMEM;
+	}
+
 	spin_lock_irqsave(&lock,   flags);
 
     if (vdm_is_in_reset())
@@ -505,24 +518,14 @@ static long vdm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
         case PCIE_VDM_SET_TRANSMIT_BUFFER_SIZE:
         	kfree(pVDM_Instance->mptxBuffer);
+		pVDM_Instance->mptxBuffer = new_buf;
         	pVDM_Instance->mptxBufferLength=(uint32_t)arg;
-        	pVDM_Instance->mptxBuffer=kmalloc(pVDM_Instance->mptxBufferLength,GFP_KERNEL);
-            if (pVDM_Instance->mptxBuffer == NULL)
-            {
-            	ret = -EINVAL;
-        	}
             break;
 
         case PCIE_VDM_SET_RECEIVE_BUFFER_SIZE:
         	kfree(pVDM_Instance->mprxBuffer);
-
+		pVDM_Instance->mprxBuffer = new_buf;
         	pVDM_Instance->mprxBufferLength=(uint32_t)arg;
-        	pVDM_Instance->mprxBuffer=kmalloc((uint32_t)arg,GFP_KERNEL);
-            if (pVDM_Instance->mprxBuffer == NULL)
-            {
-        		ret = -EINVAL;
-                break;
-        	}
             cbInit(&pVDM_Instance->circularBuffer, (pVDM_Instance->mprxBufferLength/sizeof(uint32_t)) ,
             		pVDM_Instance->mprxBuffer , sizeof(uint32_t),memcpy,copy_to_user_wrapper);
 
