@@ -523,8 +523,12 @@ struct obmf_functional_desc {
 #define OBMF_CHCTL_MANUF_LOCK_REQUEST	BIT(3)
 #define OBMF_CHCTL_CLEAR_CHANNEL_ERROR	BIT(4)
 
-/* Minimum spec version we support (BCD: byte0=minor, byte1=major) */
+/*
+ * OBMF_VER (BCD: byte0=minor, byte1=major).  The driver implements major
+ * version 1 and stays compatible with any 1.x minor version.
+ */
 #define OBMF_MIN_SPEC_VERSION		0x0100	/* v1.0.0 */
+#define OBMF_SPEC_VERSION_MAJOR(v)	((v) >> 8)
 
 /* ---------- Maximum device-request queue depth ----------------------------- */
 #define OBMF_DEV_REQ_QUEUE_DEPTH	8
