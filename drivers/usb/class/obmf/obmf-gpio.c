@@ -606,6 +606,18 @@ static bool obmf_gpio_populate_names_from_of(struct obmf_gpio_data *gd,
 	return found;
 }
 
+static void obmf_gpio_free(struct obmf_gpio_data *gd)
+{
+	int i;
+
+	if (gd->gpio_names) {
+		for (i = 0; i < gd->gc.ngpio; i++)
+			kfree(gd->gpio_names[i]);
+		kfree(gd->gpio_names);
+	}
+	kfree(gd);
+}
+
 int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 {
 	struct obmf_gpio_data *gd;
@@ -733,7 +745,7 @@ int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 
 	rv = gpiochip_add_data(&gd->gc, gd);
 	if (rv) {
-		kfree(gd);
+		obmf_gpio_free(gd);
 		return rv;
 	}
 
@@ -763,15 +775,8 @@ void obmf_gpio_unregister(struct obmf_channel *ch)
 	struct obmf_gpio_data *gd = ch->priv;
 
 	if (gd) {
-		int j;
-
 		gpiochip_remove(&gd->gc);
-		if (gd->gpio_names) {
-			for (j = 0; j < gd->gc.ngpio; j++)
-				kfree(gd->gpio_names[j]);
-			kfree(gd->gpio_names);
-		}
-		kfree(gd);
+		obmf_gpio_free(gd);
 		ch->priv = NULL;
 	}
 }
