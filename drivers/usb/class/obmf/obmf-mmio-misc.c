@@ -62,6 +62,7 @@ static long obmf_mmio_ioctl(struct file *file, unsigned int cmd,
 	u8 wr_buf[256];
 	u8 rd_buf[256];
 	void *wr_data = NULL;
+	bool is_read;
 	int rv;
 
 	if (cmd != OBMF_MMIO_IOC_XFER)
@@ -87,8 +88,9 @@ static long obmf_mmio_ioctl(struct file *file, unsigned int cmd,
 	}
 
 	/* Validate read length */
-	if (xfer.transaction == OBMF_TRANS_SHORT_READ ||
-	    xfer.transaction == OBMF_TRANS_LONG_READ) {
+	is_read = xfer.transaction == OBMF_TRANS_SHORT_READ ||
+		  xfer.transaction == OBMF_TRANS_LONG_READ;
+	if (is_read) {
 		if (xfer.rd_len == 0 || xfer.rd_len > sizeof(rd_buf))
 			return -EINVAL;
 	}
@@ -99,6 +101,10 @@ static long obmf_mmio_ioctl(struct file *file, unsigned int cmd,
 				    rd_buf, xfer.rd_len);
 	mutex_unlock(&ch->lock);
 
+	/* A read response must carry exactly the requested number of bytes */
+	if (rv >= 0 && is_read && rv != xfer.rd_len)
+		rv = -EIO;
+
 	if (rv < 0) {
 		xfer.status = OBMF_STATUS_PERMANENT_ERROR;
 		if (copy_to_user(argp, &xfer, sizeof(xfer)))
@@ -108,13 +114,9 @@ static long obmf_mmio_ioctl(struct file *file, unsigned int cmd,
 
 	/* Copy read data to userspace */
 	xfer.status = OBMF_STATUS_SUCCESS;
-	if ((xfer.transaction == OBMF_TRANS_SHORT_READ ||
-	     xfer.transaction == OBMF_TRANS_LONG_READ) && rv > 0) {
-		if (copy_to_user(u64_to_user_ptr(xfer.rd_data_ptr),
-				 rd_buf, rv))
-			return -EFAULT;
-		xfer.rd_len = rv;
-	}
+	if (is_read && copy_to_user(u64_to_user_ptr(xfer.rd_data_ptr),
+				    rd_buf, xfer.rd_len))
+		return -EFAULT;
 
 	if (copy_to_user(argp, &xfer, sizeof(xfer)))
 		return -EFAULT;
