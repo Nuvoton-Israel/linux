@@ -101,7 +101,6 @@ static int obmf_gpio_get(struct gpio_chip *gc, unsigned int offset)
 	if (rv < 1)
 		return rv < 0 ? rv : -EIO;
 
-	/* Data nibble: 0=HIGH, 1=LOW */
 	return OBMF_GPIO_UNPACK_DATA(pair_out) == OBMF_GPIO_VAL_HIGH ? 1 : 0;
 }
 
