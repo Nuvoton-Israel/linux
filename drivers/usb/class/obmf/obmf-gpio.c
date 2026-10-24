@@ -36,7 +36,25 @@ struct obmf_gpio_data {
 	DECLARE_BITMAP(dir_out, OBMF_GPIO_MAX_LINES);
 	DECLARE_BITMAP(output_val, OBMF_GPIO_MAX_LINES);
 	u8			irq_type[OBMF_GPIO_MAX_LINES];
+	u16			*hw_index;	/* GPIO_INDEX of each line */
 };
+
+/* GPIO_INDEX the device knows line @offset by (Table 77) */
+static u16 obmf_gpio_index(struct obmf_gpio_data *gd, unsigned int offset)
+{
+	return gd->hw_index ? gd->hw_index[offset] : offset;
+}
+
+/* Line carrying GPIO_INDEX @idx, or -1 if no line does */
+static int obmf_gpio_line(struct obmf_gpio_data *gd, u16 idx)
+{
+	unsigned int i;
+
+	for (i = 0; i < gd->gc.ngpio; i++)
+		if (obmf_gpio_index(gd, i) == idx)
+			return i;
+	return -1;
+}
 
 /* ------------------------------------------------------------------ */
 /* GPIO optimised channel transfer helper                              */
@@ -95,7 +113,7 @@ static int obmf_gpio_get(struct gpio_chip *gc, unsigned int offset)
 	u16 pair_in, pair_out;
 	int rv;
 
-	pair_in = OBMF_GPIO_PACK(offset, 0);
+	pair_in = OBMF_GPIO_PACK(obmf_gpio_index(gd, offset), 0);
 	rv = obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_GET_VALUES,
 			    &pair_in, 1, &pair_out, 1);
 	if (rv < 1)
@@ -114,7 +132,7 @@ static void obmf_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
 	else
 		clear_bit(offset, gd->output_val);
 
-	pair_in = OBMF_GPIO_PACK(offset,
+	pair_in = OBMF_GPIO_PACK(obmf_gpio_index(gd, offset),
 				 value ? OBMF_GPIO_VAL_HIGH : OBMF_GPIO_VAL_LOW);
 	obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_VALUES,
 		       &pair_in, 1, NULL, 0);
@@ -136,7 +154,7 @@ static void obmf_gpio_set_multiple(struct gpio_chip *gc,
 		else
 			clear_bit(i, gd->output_val);
 
-		pairs[n++] = OBMF_GPIO_PACK(i,
+		pairs[n++] = OBMF_GPIO_PACK(obmf_gpio_index(gd, i),
 				val ? OBMF_GPIO_VAL_HIGH : OBMF_GPIO_VAL_LOW);
 
 		if (n == 256) {
@@ -280,7 +298,7 @@ static void obmf_gpio_irq_bus_sync_unlock(struct irq_data *d)
 	}
 
 	cfg = want ? gd->irq_type[hwirq] : OBMF_GPIO_IRQ_DISABLE;
-	pair = OBMF_GPIO_PACK(hwirq, cfg);
+	pair = OBMF_GPIO_PACK(obmf_gpio_index(gd, hwirq), cfg);
 	rv = obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_IRQ_CFG, &pair, 1, NULL, 0);
 	if (rv < 0) {
 		/* Keep the old state so the next sync retries the request */
@@ -345,23 +363,24 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 		for (i = 0; i < num_pairs; i++) {
 			u16 pair = get_unaligned_le16(data + 1 + i * 2);
 			u16 idx = OBMF_GPIO_UNPACK_IDX(pair);
+			int line = obmf_gpio_line(gd, idx);
 			u8 val;
 
-			if (idx >= gd->gc.ngpio) {
+			if (line < 0) {
 				obmf_send_response(odev, ch->channel_id,
 						   OBMF_STATUS_GPIO_IDX_NOT_SUPPORTED,
 						   resp, 1);
 				return;
 			}
 
-			if (!test_bit(idx, gd->dir_out)) {
+			if (!test_bit(line, gd->dir_out)) {
 				obmf_send_response(odev, ch->channel_id,
 						   OBMF_STATUS_GPIO_INVALID_OP,
 						   resp, 1);
 				return;
 			}
 
-			val = test_bit(idx, gd->output_val) ?
+			val = test_bit(line, gd->output_val) ?
 			      OBMF_GPIO_VAL_HIGH : OBMF_GPIO_VAL_LOW;
 			if (resp_len + 2 <= (int)sizeof(resp)) {
 				put_unaligned_le16(OBMF_GPIO_PACK(idx, val),
@@ -388,19 +407,20 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 		for (i = 0; i < num_pairs; i++) {
 			u16 pair = get_unaligned_le16(data + 1 + i * 2);
 			u16 idx = OBMF_GPIO_UNPACK_IDX(pair);
+			int line = obmf_gpio_line(gd, idx);
 
-			if (idx >= gd->gc.ngpio) {
+			if (line < 0) {
 				obmf_send_response(odev, ch->channel_id,
 						   OBMF_STATUS_GPIO_IDX_NOT_SUPPORTED,
 						   &resp_cmd, 1);
 				return;
 			}
 
-			if (!test_bit(idx, gd->dir_out) && test_bit(idx, gd->irq_enabled))
+			if (!test_bit(line, gd->dir_out) && test_bit(line, gd->irq_enabled))
 				handle_nested_irq(
 					irq_find_mapping(
 						gd->gc.irq.domain,
-						idx));
+						line));
 		}
 
 		obmf_send_response(odev, ch->channel_id,
@@ -424,17 +444,18 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 		for (i = 0; i < num_pairs; i++) {
 			u16 pair = get_unaligned_le16(data + 1 + i * 2);
 			u16 idx = OBMF_GPIO_UNPACK_IDX(pair);
+			int line = obmf_gpio_line(gd, idx);
 			u8 cfg;
 
-			if (idx >= gd->gc.ngpio) {
+			if (line < 0) {
 				obmf_send_response(odev, ch->channel_id,
 						   OBMF_STATUS_GPIO_IDX_NOT_SUPPORTED,
 						   resp, 1);
 				return;
 			}
 
-			cfg = test_bit(idx, gd->irq_enabled) ?
-			      gd->irq_type[idx] : OBMF_GPIO_IRQ_DISABLE;
+			cfg = test_bit(line, gd->irq_enabled) ?
+			      gd->irq_type[line] : OBMF_GPIO_IRQ_DISABLE;
 			if (resp_len + 2 <= (int)sizeof(resp)) {
 				put_unaligned_le16(OBMF_GPIO_PACK(idx, cfg),
 						   resp + resp_len);
@@ -460,9 +481,10 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 		for (i = 0; i < num_pairs; i++) {
 			u16 pair = get_unaligned_le16(data + 1 + i * 2);
 			u16 idx = OBMF_GPIO_UNPACK_IDX(pair);
+			int line = obmf_gpio_line(gd, idx);
 			u8 cfg = OBMF_GPIO_UNPACK_DATA(pair);
 
-			if (idx >= gd->gc.ngpio) {
+			if (line < 0) {
 				obmf_send_response(odev, ch->channel_id,
 						   OBMF_STATUS_GPIO_IDX_NOT_SUPPORTED,
 						   &resp_cmd, 1);
@@ -476,11 +498,11 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 				return;
 			}
 
-			gd->irq_type[idx] = cfg;
+			gd->irq_type[line] = cfg;
 			if (cfg != OBMF_GPIO_IRQ_DISABLE)
-				set_bit(idx, gd->irq_enabled);
+				set_bit(line, gd->irq_enabled);
 			else
-				clear_bit(idx, gd->irq_enabled);
+				clear_bit(line, gd->irq_enabled);
 		}
 
 		obmf_send_response(odev, ch->channel_id,
@@ -494,13 +516,14 @@ void obmf_gpio_handle_dev_request(struct obmf_channel *ch,
 			for (i = 0; i < num_pairs; i++) {
 				u16 pair = get_unaligned_le16(data + 1 + i * 2);
 				u16 idx = OBMF_GPIO_UNPACK_IDX(pair);
+				int line = obmf_gpio_line(gd, idx);
 
-				if (idx < gd->gc.ngpio &&
-				    test_bit(idx, gd->irq_enabled))
+				if (line >= 0 &&
+				    test_bit(line, gd->irq_enabled))
 					handle_nested_irq(
 						irq_find_mapping(
 							gd->gc.irq.domain,
-							idx));
+							line));
 			}
 		}
 
@@ -615,6 +638,7 @@ static void obmf_gpio_free(struct obmf_gpio_data *gd)
 			kfree(gd->gpio_names[i]);
 		kfree(gd->gpio_names);
 	}
+	kfree(gd->hw_index);
 	kfree(gd);
 }
 
@@ -637,6 +661,11 @@ int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 		}
 
 		ch->gpio_count = get_unaligned_le16(buf);
+		if (!ch->gpio_count) {
+			dev_info(&odev->intf->dev, "ch%u: no GPIOs exposed\n",
+				 ch->channel_id);
+			return 0;
+		}
 	}
 
 	gd = kzalloc(sizeof(*gd), GFP_KERNEL);
@@ -701,31 +730,35 @@ int obmf_gpio_register(struct obmf_device *odev, struct obmf_channel *ch)
 			}
 		}
 
+		gd->hw_index = kcalloc(ngpio, sizeof(*gd->hw_index), GFP_KERNEL);
+		if (!gd->hw_index) {
+			obmf_gpio_free(gd);
+			return -ENOMEM;
+		}
+
 		for (j = 0; j < ngpio; j++) {
 			u32 entry_addr = ch->config_offset +
 					 OBMF_CHCFG_CONFIG_DATA + 2 +
 					 (u32)j * OBMF_GPIO_CONFIG_ENTRY_SIZE;
-			u8 direction;
+			u8 entry[OBMF_GPIO_CFG_DEFAULT_OUT + 1];
 
+			/* GPIO_INDEX through GPIO_DEFAULT_OUTPUT in one read */
+			gd->hw_index[j] = j;
 			rv = obmf_send_mmio_request(odev, ch0,
 						    OBMF_TRANS_SHORT_READ,
-						    entry_addr + OBMF_GPIO_CFG_DIRECTION,
-						    NULL, 0, &direction, 1);
+						    entry_addr, NULL, 0,
+						    entry, sizeof(entry));
 			if (rv < 0) {
 				dev_dbg(&odev->intf->dev,
-					"ch%u: failed to read GPIO%d direction\n",
+					"ch%u: failed to read GPIO%d config\n",
 					ch->channel_id, j);
 				continue;
 			}
-			if (direction == OBMF_GPIO_DIR_OUTPUT) {
-				u8 default_out = 0;
-
+			gd->hw_index[j] = get_unaligned_le16(entry +
+					OBMF_GPIO_CFG_INDEX) & OBMF_GPIO_IDX_MASK;
+			if (entry[OBMF_GPIO_CFG_DIRECTION] == OBMF_GPIO_DIR_OUTPUT) {
 				set_bit(j, gd->dir_out);
-				rv = obmf_send_mmio_request(odev, ch0,
-							    OBMF_TRANS_SHORT_READ,
-							    entry_addr + OBMF_GPIO_CFG_DEFAULT_OUT,
-							    NULL, 0, &default_out, 1);
-				if (rv >= 0 && default_out)
+				if (entry[OBMF_GPIO_CFG_DEFAULT_OUT])
 					set_bit(j, gd->output_val);
 			}
 		}
