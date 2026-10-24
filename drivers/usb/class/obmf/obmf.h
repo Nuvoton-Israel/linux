@@ -14,6 +14,7 @@
 
 #include <linux/usb.h>
 #include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/completion.h>
 #include <linux/kref.h>
 #include <linux/workqueue.h>
@@ -544,6 +545,8 @@ struct obmf_channel {
 	struct mutex		lock;		/* One outstanding request per ch */
 	struct completion	done;		/* Signalled by RX demux */
 
+	spinlock_t		resp_lock;	/* resp_buf/resp_len/status/waiting */
+	bool			waiting;	/* a requester waits on done */
 	u8			*resp_buf;	/* Response payload written by RX */
 	int			resp_len;
 	int			status;		/* Completion code */
