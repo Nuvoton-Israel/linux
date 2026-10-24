@@ -185,9 +185,16 @@ static ssize_t obmf_mmio_read(struct file *file, char __user *buf,
 			int min_len = (int)(payload - md->dev_req_buf) +
 				      (int)data_size;
 
+			mhdr->transaction = transaction;
+
+			/* Answer a malformed request so it can't block the channel */
 			if ((data_size != 1 && data_size != 4) ||
 			    md->dev_req_len < min_len) {
+				md->dev_req_ready = false;
 				mutex_unlock(&md->flock);
+				obmf_send_response(odev, ch->channel_id,
+						   OBMF_STATUS_INVALID_CMD,
+						   resp, sizeof(resp));
 				return -EIO;
 			}
 			if (count < data_size) {
@@ -198,7 +205,6 @@ static ssize_t obmf_mmio_read(struct file *file, char __user *buf,
 				mutex_unlock(&md->flock);
 				return -EFAULT;
 			}
-			mhdr->transaction = transaction;
 			md->dev_req_ready = false;
 			mutex_unlock(&md->flock);
 			rv = obmf_send_response(odev, ch->channel_id,
