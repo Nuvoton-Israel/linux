@@ -258,6 +258,27 @@ static int obmf_status_to_errno(u8 channel_type, u8 status)
 	return -EIO;
 }
 
+/*
+ * Whether an MMIO / Channel 0 response can answer the outstanding request.
+ * The response header echoes the request's Transaction (Table 5), and a
+ * successful read carries exactly Read Length bytes while a write carries
+ * none (Tables 9, 11, 13, 15).  A response that fails either test belongs
+ * to an earlier request that timed out, or that a previous driver instance
+ * left in flight.  Called with ch->resp_lock held.
+ */
+static bool obmf_mmio_rsp_matches(struct obmf_channel *ch, const u8 *payload,
+				  int payload_len, bool success)
+{
+	if (ch->expect_trans == OBMF_EXPECT_ANY)
+		return true;
+	if (payload_len < OBMF_MMIO_SUBHDR_SIZE)
+		return !success;	/* an error may come without a header */
+	if ((payload[0] & 0x07) != ch->expect_trans)
+		return false;
+	return !success ||
+	       payload_len - (int)OBMF_MMIO_SUBHDR_SIZE == ch->expect_len;
+}
+
 static void obmf_dispatch_message(struct obmf_device *odev,
 				  struct obmf_common_hdr *hdr,
 				  const u8 *payload, int payload_len)
@@ -304,6 +325,14 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 			spin_unlock_irqrestore(&ch->resp_lock, flags);
 			dev_warn_ratelimited(&odev->intf->dev,
 					     "ch%u: response with no request waiting, dropped\n",
+					     channel_id);
+			return;
+		}
+		if (!obmf_mmio_rsp_matches(ch, payload, payload_len,
+					   hdr_status == OBMF_STATUS_SUCCESS)) {
+			spin_unlock_irqrestore(&ch->resp_lock, flags);
+			dev_warn_ratelimited(&odev->intf->dev,
+					     "ch%u: response does not answer the outstanding request, dropped\n",
 					     channel_id);
 			return;
 		}
@@ -618,6 +647,27 @@ resubmit:
 /* Transport init / exit                                               */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Responses to requests that a previous driver instance left in flight can
+ * still be queued at the device.  Read and drop them before discovery, so
+ * that they are not taken as answers to its Channel 0 reads.
+ */
+static void obmf_drain_stale_in(struct obmf_device *odev)
+{
+	int i, len;
+
+	for (i = 0; i < OBMF_DRAIN_MAX; i++) {
+		if (usb_bulk_msg(odev->udev,
+				 usb_rcvbulkpipe(odev->udev, odev->bulk_in_ep),
+				 odev->rx_buf, odev->max_rd_transfer_size,
+				 &len, OBMF_DRAIN_TIMEOUT_MS))
+			break;
+	}
+	if (i)
+		dev_info(&odev->intf->dev,
+			 "dropped %d stale Bulk IN transfer(s)\n", i);
+}
+
 int obmf_transport_init(struct obmf_device *odev)
 {
 	int rv;
@@ -648,6 +698,8 @@ int obmf_transport_init(struct obmf_device *odev)
 		rv = -ENOMEM;
 		goto err_rx_urb;
 	}
+
+	obmf_drain_stale_in(odev);
 
 	/* Fill and submit continuous Bulk IN URB */
 	usb_fill_bulk_urb(odev->rx_urb, odev->udev,
@@ -731,10 +783,12 @@ void obmf_transport_exit(struct obmf_device *odev)
 /* obmf_send_request — synchronous request/response for all channels   */
 /* ------------------------------------------------------------------ */
 
-int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
-		      const void *payload, int payload_len,
-		      void *resp_buf, int resp_buf_len,
-		      unsigned long timeout_ms)
+static int obmf_send_request_expect(struct obmf_device *odev,
+				    struct obmf_channel *ch,
+				    const void *payload, int payload_len,
+				    void *resp_buf, int resp_buf_len,
+				    unsigned long timeout_ms,
+				    u8 expect_trans, int expect_len)
 {
 	struct obmf_common_hdr *hdr;
 	int total_len;
@@ -771,6 +825,8 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 	ch->resp_len = resp_buf_len;
 	ch->status   = -ETIMEDOUT;
 	ch->waiting  = true;
+	ch->expect_trans = expect_trans;
+	ch->expect_len   = expect_len;
 	reinit_completion(&ch->done);
 	spin_unlock_irqrestore(&ch->resp_lock, flags);
 
@@ -811,6 +867,16 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 		return -ENODEV;
 
 	return ch->status ? ch->status : ch->resp_len;
+}
+
+int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
+		      const void *payload, int payload_len,
+		      void *resp_buf, int resp_buf_len,
+		      unsigned long timeout_ms)
+{
+	return obmf_send_request_expect(odev, ch, payload, payload_len,
+					resp_buf, resp_buf_len, timeout_ms,
+					OBMF_EXPECT_ANY, -1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -872,10 +938,12 @@ int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
 		return -EINVAL;
 	}
 
-	return obmf_send_request(odev, ch,
-				 payload, payload_len,
-				 rd_data, rd_len,
-				 OBMF_DEFAULT_TIMEOUT_MS);
+	return obmf_send_request_expect(odev, ch, payload, payload_len,
+					rd_data, rd_len,
+					OBMF_DEFAULT_TIMEOUT_MS, transaction,
+					(transaction == OBMF_TRANS_SHORT_READ ||
+					 transaction == OBMF_TRANS_LONG_READ) ?
+					rd_len : 0);
 }
 
 /* ------------------------------------------------------------------ */
