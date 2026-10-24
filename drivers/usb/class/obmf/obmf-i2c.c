@@ -173,14 +173,20 @@ static int obmf_i2c_do_request(struct obmf_channel *ch,
 	/*
 	 * v1.0.0 RC1: ReadLen is at bytes 1-2 (OBMF_I2C_RESP_RDLEN_OFF).
 	 * Read Data starts at byte 4 (OBMF_I2C_RESP_HDR_SIZE).
+	 * A short read must fail; otherwise the caller would get a buffer
+	 * that is only partly filled.
 	 */
-	if (rd_buf && rv > OBMF_I2C_RESP_HDR_SIZE) {
+	if (rd_buf) {
 		u16 actual_rd = get_unaligned_le16(&resp[OBMF_I2C_RESP_RDLEN_OFF]);
-		int data_len = min_t(u16, actual_rd, rd_maxlen);
 
-		if (data_len > rv - OBMF_I2C_RESP_HDR_SIZE)
-			data_len = rv - OBMF_I2C_RESP_HDR_SIZE;
-		memcpy(rd_buf, resp + OBMF_I2C_RESP_HDR_SIZE, data_len);
+		if (actual_rd != rd_maxlen ||
+		    rv < OBMF_I2C_RESP_HDR_SIZE + rd_maxlen) {
+			dev_dbg(&odev->intf->dev,
+				"ch%u: short I2C read (%u of %u bytes)\n",
+				ch->channel_id, actual_rd, rd_maxlen);
+			return -EIO;
+		}
+		memcpy(rd_buf, resp + OBMF_I2C_RESP_HDR_SIZE, rd_maxlen);
 	}
 	return rv;
 }
