@@ -8,6 +8,7 @@
  * interface — must use standalone tty_driver + tty_port.
  */
 
+#include <linux/delay.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
@@ -37,6 +38,9 @@
 #define OBMF_SERIAL_MAX_PAYLOAD		256
 #define OBMF_SERIAL_REQ_HDR_SIZE	3
 #define OBMF_SERIAL_MAX_CHARS	(OBMF_SERIAL_MAX_PAYLOAD - OBMF_SERIAL_REQ_HDR_SIZE)
+
+/* Delay before resending characters the device had no room for */
+#define OBMF_SERIAL_NACK_RETRY_MS	10
 
 struct obmf_serial_port {
 	struct obmf_channel	*ch;
@@ -134,6 +138,7 @@ static int obmf_serial_write(struct tty_struct *tty,
 	memcpy(&req[OBMF_SERIAL_REQ_HDR_SIZE], buf, tx_count);
 	send_len = OBMF_SERIAL_REQ_HDR_SIZE + tx_count;
 
+retry:
 	mutex_lock(&ch->lock);
 	rv = obmf_send_request(odev, ch,
 			       req, send_len, resp, sizeof(resp),
@@ -148,7 +153,16 @@ static int obmf_serial_write(struct tty_struct *tty,
 		accepted = get_unaligned_le16(&resp[1]);
 		if (resp[0] & OBMF_SERIAL_NACK) {
 			/* NACK: return accepted count (may be partial) */
-			return accepted > 0 ? accepted : -EAGAIN;
+			if (accepted > 0)
+				return accepted;
+
+			/*
+			 * The device has no room yet.  Failing here would cut
+			 * a blocking write() short, so wait for it to drain.
+			 */
+			if (msleep_interruptible(OBMF_SERIAL_NACK_RETRY_MS))
+				return -ERESTARTSYS;
+			goto retry;
 		}
 		return accepted > 0 ? accepted : tx_count;
 	}
