@@ -531,6 +531,13 @@ struct obmf_functional_desc {
 #define OBMF_MIN_SPEC_VERSION		0x0100	/* v1.0.0 */
 #define OBMF_SPEC_VERSION_MAJOR(v)	((v) >> 8)
 
+/* expect_trans when any response may answer the outstanding request */
+#define OBMF_EXPECT_ANY			0xFF
+
+/* Bulk IN transfers discarded before discovery, and how long each waits */
+#define OBMF_DRAIN_MAX			64
+#define OBMF_DRAIN_TIMEOUT_MS		50
+
 /* ---------- Maximum device-request queue depth ----------------------------- */
 #define OBMF_DEV_REQ_QUEUE_DEPTH	8
 
@@ -547,6 +554,8 @@ struct obmf_channel {
 
 	spinlock_t		resp_lock;	/* resp_buf/resp_len/status/waiting */
 	bool			waiting;	/* a requester waits on done */
+	u8			expect_trans;	/* MMIO: transaction of the request */
+	int			expect_len;	/* MMIO: read data bytes, 0 for writes */
 	u8			*resp_buf;	/* Response payload written by RX */
 	int			resp_len;
 	int			status;		/* Completion code */
