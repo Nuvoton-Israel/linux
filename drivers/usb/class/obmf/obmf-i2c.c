@@ -78,6 +78,13 @@
 #define OBMF_I2C_REQ_HDR_SIZE          4       /* Command(1)+Addr(1)+ReadLen(2) */
 #define OBMF_I2C_RESP_RDLEN_OFF                1       /* ReadLen offset in v1.0 response */
 
+/*
+ * An OBMF message carries at most 256 payload bytes.  The I2C request and
+ * response headers take 4 of them, which bounds a single read or write.
+ */
+#define OBMF_I2C_MAX_PAYLOAD		256
+#define OBMF_I2C_MAX_XFER_LEN		(OBMF_I2C_MAX_PAYLOAD - OBMF_I2C_REQ_HDR_SIZE)
+
 /* ====================================================================
  * Private controller state
  * ==================================================================== */
@@ -151,7 +158,7 @@ static int obmf_i2c_do_request(struct obmf_channel *ch,
 				u8 *rd_buf, u16 rd_maxlen)
 {
 	struct obmf_device *odev = ch->odev;
-	u8 resp[OBMF_I2C_RESP_HDR_SIZE + 256];
+	u8 resp[OBMF_I2C_RESP_HDR_SIZE + OBMF_I2C_MAX_XFER_LEN];
 	int rv;
 
 	mutex_lock(&ch->lock);
@@ -182,20 +189,20 @@ static int obmf_i2c_xfer(struct i2c_adapter *adap,
 {
 	struct obmf_i2c_ctrl_data *cd = i2c_get_adapdata(adap);
 	struct obmf_channel *ch = cd->ch;
-	u8 req[OBMF_I2C_REQ_HDR_SIZE + 256];
+	u8 req[OBMF_I2C_REQ_HDR_SIZE + OBMF_I2C_MAX_XFER_LEN];
 	int i, rv;
 
 	/*
 	 * Optimise write-then-read into a single SMBus Write Read request
 	 * (cmd=3, OBMF-ICP §4.6.1) when both messages share the same address.
 	 * This saves one full USB round-trip compared to separate Write + Read.
+	 * Message lengths are already bounded by obmf_i2c_quirks.
 	 */
 	if (num == 2 &&
 	    !(msgs[0].flags & I2C_M_RD) &&
 	      (msgs[1].flags & I2C_M_RD) &&
 	    msgs[0].addr == msgs[1].addr &&
-	    msgs[0].len > 0 && msgs[0].len <= 256 &&
-	    msgs[1].len > 0 && msgs[1].len <= 256) {
+	    msgs[0].len > 0 && msgs[1].len > 0) {
 		req[0] = OBMF_I2C_CMD_SMBUS_WRITE_READ; /* bit[7]=0: send STOP */
 		req[1] = msgs[0].addr;
 		put_unaligned_le16(msgs[1].len, &req[2]);
@@ -276,6 +283,12 @@ static int obmf_i2c_unreg_slave(struct i2c_client *client)
 }
 #endif /* CONFIG_I2C_SLAVE */
 
+/* Let the I2C core reject messages that do not fit one OBMF message. */
+static const struct i2c_adapter_quirks obmf_i2c_quirks = {
+	.max_read_len  = OBMF_I2C_MAX_XFER_LEN,
+	.max_write_len = OBMF_I2C_MAX_XFER_LEN,
+};
+
 static const struct i2c_algorithm obmf_i2c_algo = {
 	.master_xfer   = obmf_i2c_xfer,
 	.functionality = obmf_i2c_func,
@@ -301,6 +314,7 @@ int obmf_i2c_register(struct obmf_device *odev, struct obmf_channel *ch)
 
 	cd->adap.owner      = THIS_MODULE;
 	cd->adap.algo       = &obmf_i2c_algo;
+	cd->adap.quirks     = &obmf_i2c_quirks;
 	cd->adap.dev.parent = &odev->intf->dev;
 	cd->adap.dev.of_node = obmf_i2c_get_of_node(odev, ch);
 	snprintf(cd->adap.name, sizeof(cd->adap.name),
