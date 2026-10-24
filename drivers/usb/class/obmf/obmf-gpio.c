@@ -272,6 +272,7 @@ static void obmf_gpio_irq_bus_sync_unlock(struct irq_data *d)
 	bool have = test_bit(hwirq, gd->irq_enabled);
 	u8 cfg;
 	u16 pair;
+	int rv;
 
 	if (want == have) {
 		mutex_unlock(&gd->irq_lock);
@@ -280,12 +281,17 @@ static void obmf_gpio_irq_bus_sync_unlock(struct irq_data *d)
 
 	cfg = want ? gd->irq_type[hwirq] : OBMF_GPIO_IRQ_DISABLE;
 	pair = OBMF_GPIO_PACK(hwirq, cfg);
-	obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_IRQ_CFG, &pair, 1, NULL, 0);
-
-	if (want)
+	rv = obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_IRQ_CFG, &pair, 1, NULL, 0);
+	if (rv < 0) {
+		/* Keep the old state so the next sync retries the request */
+		dev_warn_ratelimited(gc->parent,
+				     "line %lu: set interrupt config %u failed: %d\n",
+				     hwirq, cfg, rv);
+	} else if (want) {
 		set_bit(hwirq, gd->irq_enabled);
-	else
+	} else {
 		clear_bit(hwirq, gd->irq_enabled);
+	}
 
 	mutex_unlock(&gd->irq_lock);
 }
