@@ -189,11 +189,11 @@ static int obmf_parse_functional_desc(struct usb_interface *intf,
 }
 
 /* ------------------------------------------------------------------ */
-/* Set CHANNEL_CONTROL.ENABLE for a successfully registered channel     */
+/* Set or clear CHANNEL_CONTROL.ENABLE of a channel                    */
 /* ------------------------------------------------------------------ */
 
-static void obmf_channel_set_enabled(struct obmf_device *odev,
-				     struct obmf_channel *ch)
+static void obmf_channel_set_enable(struct obmf_device *odev,
+				    struct obmf_channel *ch, bool enable)
 {
 	struct obmf_channel *ch0 = &odev->channels[0];
 	u32 ctrl_addr;
@@ -215,22 +215,25 @@ static void obmf_channel_set_enabled(struct obmf_device *odev,
 		return;
 	}
 
-	if (ctrl & OBMF_CHCTL_ENABLE)
-		return; /* already enabled */
+	if (!!(ctrl & OBMF_CHCTL_ENABLE) == enable)
+		return; /* already in the requested state */
 
-	ctrl |= OBMF_CHCTL_ENABLE;
+	if (enable)
+		ctrl |= OBMF_CHCTL_ENABLE;
+	else
+		ctrl &= ~OBMF_CHCTL_ENABLE;
 
-	/* Write back CHANNEL_CONTROL with ENABLE bit set */
+	/* Write back CHANNEL_CONTROL with the new ENABLE bit */
 	rv = obmf_send_mmio_request(odev, ch0, OBMF_TRANS_SHORT_WRITE,
 				    ctrl_addr, &ctrl, 1, NULL, 0);
 	if (rv < 0)
 		dev_warn(&odev->intf->dev,
-			 "ch%u: failed to set CHANNEL_CONTROL.ENABLE: %d\n",
+			 "ch%u: failed to write CHANNEL_CONTROL.ENABLE: %d\n",
 			 ch->channel_id, rv);
 	else
 		dev_dbg(&odev->intf->dev,
-			"ch%u: CHANNEL_CONTROL.ENABLE set (ctrl=0x%02x)\n",
-			ch->channel_id, ctrl);
+			"ch%u: CHANNEL_CONTROL.ENABLE=%d (ctrl=0x%02x)\n",
+			ch->channel_id, enable, ctrl);
 }
 
 /* ------------------------------------------------------------------ */
@@ -241,6 +244,14 @@ static void obmf_register_channel(struct obmf_device *odev,
 				  struct obmf_channel *ch)
 {
 	int rv = 0;
+
+	/*
+	 * Enable the channel before registering it: registration already
+	 * uses it (I3C bus initialisation, probes of I2C clients on a new
+	 * adapter), and the device answers requests on a disabled channel
+	 * with "Channel not ready".
+	 */
+	obmf_channel_set_enable(odev, ch, true);
 
 	switch (ch->channel_type) {
 	case OBMF_TYPE_I3C:
@@ -298,12 +309,12 @@ static void obmf_register_channel(struct obmf_device *odev,
 		break;
 	}
 
-	if (rv)
+	if (rv) {
 		dev_err(&odev->intf->dev,
 			"ch%u: failed to register type 0x%02x: %d\n",
 			ch->channel_id, ch->channel_type, rv);
-	else
-		obmf_channel_set_enabled(odev, ch);
+		obmf_channel_set_enable(odev, ch, false);
+	}
 
 	/* Create sysfs "device" symlink for non-MMIO/non-IO channels */
 	if (!rv && ch->sysfs_dev && ch->kobj &&
@@ -741,7 +752,7 @@ static int obmf_post_reset(struct usb_interface *intf)
 		struct obmf_channel *ch = &odev->channels[i];
 
 		if (ch->channel_type != 0xFF)
-			obmf_channel_set_enabled(odev, ch);
+			obmf_channel_set_enable(odev, ch, true);
 	}
 
 	odev->bulk_in_stall_count  = 0;
