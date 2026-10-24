@@ -276,6 +276,15 @@ static int obmf_status_to_errno(u8 channel_type, u8 status)
 		if (status == OBMF_SERIAL_STATUS_LINE_TIMEOUT)
 			return -ETIMEDOUT;
 		break;
+	case OBMF_TYPE_I2C:
+		/* Table 25 */
+		switch (status) {
+		case OBMF_I2C_STATUS_TIMEOUT:	return -ETIMEDOUT;
+		case OBMF_I2C_STATUS_ARB_LOST:	return -EAGAIN;
+		case OBMF_I2C_STATUS_BUS_BUSY:	return -EBUSY;
+		case OBMF_I2C_STATUS_NACK:	return -ENXIO;
+		}
+		break;
 	}
 
 	/* Bus/framing/parity faults, I2C Target errors, reserved codes */
