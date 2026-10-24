@@ -30,6 +30,14 @@
 
 #define OBMF_SERIAL_MAX_PORTS	4
 
+/*
+ * An OBMF message carries at most 256 payload bytes.  The serial request
+ * header takes 3 of them, which bounds the characters sent per request.
+ */
+#define OBMF_SERIAL_MAX_PAYLOAD		256
+#define OBMF_SERIAL_REQ_HDR_SIZE	3
+#define OBMF_SERIAL_MAX_CHARS	(OBMF_SERIAL_MAX_PAYLOAD - OBMF_SERIAL_REQ_HDR_SIZE)
+
 struct obmf_serial_port {
 	struct obmf_channel	*ch;
 	struct tty_port		port;
@@ -96,7 +104,7 @@ static int obmf_serial_write(struct tty_struct *tty,
 	struct obmf_serial_port *sp = tty->driver_data;
 	struct obmf_channel *ch = sp->ch;
 	struct obmf_device *odev = ch->odev;
-	u8 req[3 + 512]; /* op/event + charcount(2) + data */
+	u8 req[OBMF_SERIAL_REQ_HDR_SIZE + OBMF_SERIAL_MAX_CHARS];
 	u8 resp[3];      /* ack/nack(1) + accepted_count(2) */
 	int tx_count;
 	int send_len;
@@ -106,15 +114,16 @@ static int obmf_serial_write(struct tty_struct *tty,
 	if (count <= 0)
 		return 0;
 
-	if (count > 512)
-		count = 512;
+	/* The tty layer sends the remainder in further calls */
+	if (count > OBMF_SERIAL_MAX_CHARS)
+		count = OBMF_SERIAL_MAX_CHARS;
 
 	tx_count = (int)count;
 
 	req[0] = 0; /* Operation/Event = 0 (normal TX) */
 	put_unaligned_le16((u16)tx_count, &req[1]);
-	memcpy(&req[3], buf, tx_count);
-	send_len = 3 + tx_count;
+	memcpy(&req[OBMF_SERIAL_REQ_HDR_SIZE], buf, tx_count);
+	send_len = OBMF_SERIAL_REQ_HDR_SIZE + tx_count;
 
 	mutex_lock(&ch->lock);
 	rv = obmf_send_request(odev, ch,
@@ -140,7 +149,7 @@ static int obmf_serial_write(struct tty_struct *tty,
 
 static unsigned int obmf_serial_write_room(struct tty_struct *tty)
 {
-	return 256;
+	return OBMF_SERIAL_MAX_CHARS;
 }
 
 static int obmf_serial_install(struct tty_driver *driver,
