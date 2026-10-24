@@ -113,6 +113,7 @@ int obmf_discover_channels(struct obmf_device *odev)
 	odev->channels[0].odev         = odev;
 	mutex_init(&odev->channels[0].lock);
 	init_completion(&odev->channels[0].done);
+	spin_lock_init(&odev->channels[0].resp_lock);
 
 	/* Step 1: Read OBMF_VER (2B at 0x00) */
 	rv = obmf_disc_read16(odev, OBMF_DISC_OBMF_VER, &obmf_ver);
@@ -191,6 +192,7 @@ int obmf_discover_channels(struct obmf_device *odev)
 
 		mutex_init(&new_chs[0].lock);
 		init_completion(&new_chs[0].done);
+		spin_lock_init(&new_chs[0].resp_lock);
 		new_chs[0].odev = odev;
 	}
 
@@ -200,6 +202,7 @@ int obmf_discover_channels(struct obmf_device *odev)
 		odev->channels[i].odev       = odev;
 		mutex_init(&odev->channels[i].lock);
 		init_completion(&odev->channels[i].done);
+		spin_lock_init(&odev->channels[i].resp_lock);
 	}
 
 	/* Step 5: Read CHANNEL_OFFSET[i] and Channel Config Common Headers */

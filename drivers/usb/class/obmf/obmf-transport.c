@@ -35,6 +35,20 @@ static struct obmf_channel *obmf_find_channel(struct obmf_device *odev,
 	return NULL;
 }
 
+/*
+ * Give up on the outstanding request of @ch: a response that still arrives
+ * is dropped instead of being copied into the requester's buffer.
+ */
+static void obmf_stop_waiting(struct obmf_channel *ch)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ch->resp_lock, flags);
+	ch->waiting  = false;
+	ch->resp_buf = NULL;
+	spin_unlock_irqrestore(&ch->resp_lock, flags);
+}
+
 /* Allocate a work item with an inline variable-length payload buffer. */
 static struct obmf_dev_req *obmf_alloc_dev_req(int payload_len)
 {
@@ -279,8 +293,22 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 		/* Response to our earlier request */
 		int copy_len;
 		u8 hdr_status = OBMF_HDR_STATUS(hdr);
+		unsigned long flags;
 
-		ch->status = hdr_status;
+		/*
+		 * The requester may have timed out and returned, taking its
+		 * resp_buf with it: only a waiting requester gets the response.
+		 */
+		spin_lock_irqsave(&ch->resp_lock, flags);
+		if (!ch->waiting) {
+			spin_unlock_irqrestore(&ch->resp_lock, flags);
+			dev_warn_ratelimited(&odev->intf->dev,
+					     "ch%u: response with no request waiting, dropped\n",
+					     channel_id);
+			return;
+		}
+		ch->waiting = false;
+
 		/* Check response status from header byte 2[7:1] */
 		if (hdr_status != OBMF_STATUS_SUCCESS) {
 			dev_dbg(&odev->intf->dev,
@@ -289,6 +317,7 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 			ch->status = obmf_status_to_errno(ch->channel_type,
 							  hdr_status);
 			complete(&ch->done);
+			spin_unlock_irqrestore(&ch->resp_lock, flags);
 			return;
 		}
 
@@ -324,6 +353,7 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 		ch->resp_len = copy_len;
 		ch->status = 0;
 		complete(&ch->done);
+		spin_unlock_irqrestore(&ch->resp_lock, flags);
 	} else {
 		dev_dbg(&odev->intf->dev,
 			"OBMF RX: channel=%u ch_type=0x%02x status_rqresp=0x%02x size=%u\n",
@@ -710,7 +740,7 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 	int total_len;
 	int actual_len;
 	int rv;
-	unsigned long remaining;
+	unsigned long remaining, flags;
 
 	if (odev->disconnected)
 		return -ENODEV;
@@ -736,10 +766,13 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 		memcpy(odev->tx_buf + OBMF_COMMON_HDR_SIZE, payload, payload_len);
 
 	/* Prepare channel for response */
+	spin_lock_irqsave(&ch->resp_lock, flags);
 	ch->resp_buf = resp_buf;
 	ch->resp_len = resp_buf_len;
 	ch->status   = -ETIMEDOUT;
+	ch->waiting  = true;
 	reinit_completion(&ch->done);
+	spin_unlock_irqrestore(&ch->resp_lock, flags);
 
 	/* Send via synchronous Bulk OUT */
 	rv = usb_bulk_msg(odev->udev,
@@ -750,6 +783,7 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 	mutex_unlock(&odev->tx_lock);
 
 	if (rv) {
+		obmf_stop_waiting(ch);
 		if (rv == -EPIPE) {
 			odev->bulk_out_stall_count++;
 			if (odev->bulk_out_stall_count >= OBMF_STALL_THRESHOLD)
@@ -768,8 +802,10 @@ int obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 	/* Wait for RX callback to deliver the response */
 	remaining = wait_for_completion_timeout(&ch->done,
 						msecs_to_jiffies(timeout_ms));
-	if (!remaining)
+	if (!remaining) {
+		obmf_stop_waiting(ch);
 		return -ETIMEDOUT;
+	}
 
 	if (odev->disconnected)
 		return -ENODEV;
