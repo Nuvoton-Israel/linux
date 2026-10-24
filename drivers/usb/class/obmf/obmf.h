@@ -142,9 +142,9 @@ struct obmf_mmio_subhdr {
 #define OBMF_GPIO_UNPACK_IDX(v)		((v) & 0x0FFF)
 #define OBMF_GPIO_UNPACK_DATA(v)	(((v) >> 12) & 0x0F)
 
-/* GPIO values for Get/Set Values (data nibble) */
-#define OBMF_GPIO_VAL_HIGH		0x00
-#define OBMF_GPIO_VAL_LOW		0x01
+/* GPIO values for Get/Set Values (data nibble), spec Table 18/19 */
+#define OBMF_GPIO_VAL_LOW		0x00
+#define OBMF_GPIO_VAL_HIGH		0x01
 
 /* GPIO IRQ config values (data nibble for Get/Set IRQ Config) */
 #define OBMF_GPIO_IRQ_DISABLE		0x00
