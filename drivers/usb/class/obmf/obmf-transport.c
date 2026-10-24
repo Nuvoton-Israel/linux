@@ -271,6 +271,11 @@ static int obmf_status_to_errno(u8 channel_type, u8 status)
 		case OBMF_GPIO_STATUS_INVALID_OPERATION:   return -EPERM;
 		}
 		break;
+	case OBMF_TYPE_SERIAL:
+		/* Table 21 */
+		if (status == OBMF_SERIAL_STATUS_LINE_TIMEOUT)
+			return -ETIMEDOUT;
+		break;
 	}
 
 	/* Bus/framing/parity faults, I2C Target errors, reserved codes */
