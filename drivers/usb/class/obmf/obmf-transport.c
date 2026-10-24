@@ -263,6 +263,14 @@ static int obmf_status_to_errno(u8 channel_type, u8 status)
 		case OBMF_MMIO_STATUS_ACCESS_DENIED:	 return -EACCES;
 		}
 		break;
+	case OBMF_TYPE_GPIO:
+		/* Table 17 */
+		switch (status) {
+		case OBMF_GPIO_STATUS_INDEX_NOT_SUPPORTED: return -EINVAL;
+		case OBMF_GPIO_STATUS_INT_NOT_SUPPORTED:   return -EOPNOTSUPP;
+		case OBMF_GPIO_STATUS_INVALID_OPERATION:   return -EPERM;
+		}
+		break;
 	}
 
 	/* Bus/framing/parity faults, I2C Target errors, reserved codes */
