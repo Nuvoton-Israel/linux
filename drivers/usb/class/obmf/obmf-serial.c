@@ -93,6 +93,15 @@ static void obmf_serial_close(struct tty_struct *tty, struct file *filp)
 	tty_port_close(tty->port, tty, filp);
 }
 
+/*
+ * tty_port_close() skips hung-up files, so the port open count must be
+ * reset here or it leaks on every hangup.
+ */
+static void obmf_serial_hangup(struct tty_struct *tty)
+{
+	tty_port_hangup(tty->port);
+}
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 static ssize_t obmf_serial_write(struct tty_struct *tty,
 				 const u8 *buf, size_t count)
@@ -208,6 +217,7 @@ static const struct tty_operations obmf_serial_ops = {
 	.cleanup      = obmf_serial_cleanup,
 	.open         = obmf_serial_open,
 	.close        = obmf_serial_close,
+	.hangup       = obmf_serial_hangup,
 	.write        = obmf_serial_write,
 	.write_room   = obmf_serial_write_room,
 	.set_termios  = obmf_serial_set_termios,
