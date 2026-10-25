@@ -285,6 +285,16 @@ static int obmf_status_to_errno(u8 channel_type, u8 status)
 		case OBMF_I2C_STATUS_NACK:	return -ENXIO;
 		}
 		break;
+	case OBMF_TYPE_I3C:
+		/* Table 34 */
+		switch (status) {
+		case OBMF_I3C_STATUS_BUS_TIMEOUT: return -ETIMEDOUT;
+		case OBMF_I3C_STATUS_ARB_LOST:	  return -EAGAIN;
+		case OBMF_I3C_STATUS_BUS_BUSY:	  return -EBUSY;
+		case OBMF_I3C_STATUS_NACK:	  return -ENXIO;
+		case OBMF_I3C_STATUS_ILLEGAL_CCC: return -EPROTO;
+		}
+		break;
 	}
 
 	/* Bus/framing/parity faults, I2C Target errors, reserved codes */
