@@ -72,10 +72,10 @@ struct obmf_i3c_priv {
 	/* Capabilities from channel configuration data (§4.13.2) */
 	u8	max_chained_ops;	/* MAX_CHAINED_OPS */
 	u16	max_payload_size;	/* MAX_PAYLOAD_SIZE */
-	u16	max_ibi_payload;	/* MAX_IBI_PAYLOAD_SIZE */
 	u16	max_scl_pp_khz;		/* MAX_SCL_PP_KHZ */
 	u16	max_scl_od_khz;		/* MAX_SCL_OD_KHZ */
 	u8	feature_flags;		/* I3C_FEATURE_FLAGS */
+	u8	ibi_target_count;	/* IBI_TARGET_COUNT at bus init */
 
 	struct work_struct	hotjoin_work;	/* deferred from demux */
 };
@@ -168,7 +168,7 @@ static int obmf_i3c_read_config(struct obmf_i3c_priv *priv)
 	priv->feature_flags    = cfg[OBMF_I3C_CFG_FEATURE_FLAGS];
 	priv->max_chained_ops  = cfg[OBMF_I3C_CFG_MAX_CHAINED_OPS];
 	priv->max_payload_size = get_unaligned_le16(&cfg[OBMF_I3C_CFG_MAX_PAYLOAD]);
-	priv->max_ibi_payload  = get_unaligned_le16(&cfg[OBMF_I3C_CFG_MAX_IBI_PAYLOAD]);
+	priv->ibi_target_count = cfg[OBMF_I3C_CFG_IBI_TARGET_COUNT];
 
 	/* Sanity: enforce lower bounds */
 	if (!priv->max_chained_ops)
@@ -177,11 +177,11 @@ static int obmf_i3c_read_config(struct obmf_i3c_priv *priv)
 		priv->max_payload_size = 256;
 
 	dev_err(&odev->intf->dev,
-		"ch%u I3C config: pp=%ukHz od=%ukHz max_ops=%u payload=%u ibi=%u feat=0x%02x\n",
+		"ch%u I3C config: pp=%ukHz od=%ukHz max_ops=%u payload=%u ibi_targets=%u feat=0x%02x\n",
 		ch->channel_id,
 		priv->max_scl_pp_khz, priv->max_scl_od_khz,
 		priv->max_chained_ops, priv->max_payload_size,
-		priv->max_ibi_payload, priv->feature_flags);
+		priv->ibi_target_count, priv->feature_flags);
 	return 0;
 }
 
@@ -825,18 +825,51 @@ static void obmf_i3c_detach_i3c_dev(struct i3c_dev_desc *dev)
 /* IBI ops                                                             */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Largest IBI payload the producer takes for @dyn_addr: its entry's
+ * CONFIGURED_MAX_IBI_PAYLOAD_LEN in IBI_TARGET_CONFIG_ARRAY (Table 82),
+ * which the device fills in when it registers the target after DAA.  A
+ * target without an entry falls back to MAX_PAYLOAD_SIZE.
+ */
+static u16 obmf_i3c_ibi_limit(struct obmf_i3c_priv *priv, u8 dyn_addr)
+{
+	struct obmf_device  *odev = priv->odev;
+	struct obmf_channel *ch   = priv->ch;
+	struct obmf_channel *ch0  = &odev->channels[0];
+	u32 base = ch->config_offset + OBMF_CHCFG_CONFIG_DATA;
+	u8 count, ent[OBMF_I3C_IBI_TGT_SIZE];
+	int i, rv;
+
+	rv = obmf_send_mmio_request(odev, ch0, OBMF_TRANS_SHORT_READ,
+				    base + OBMF_I3C_CFG_IBI_TARGET_COUNT,
+				    NULL, 0, &count, 1);
+	for (i = 0; rv >= 0 && i < count; i++) {
+		rv = obmf_send_mmio_request(odev, ch0, OBMF_TRANS_SHORT_READ,
+					    base + OBMF_I3C_CFG_IBI_TARGETS +
+					    i * OBMF_I3C_IBI_TGT_SIZE,
+					    NULL, 0, ent, sizeof(ent));
+		if (rv >= 0 && (ent[OBMF_I3C_IBI_TGT_DYN_ADDR] & 0x7f) == dyn_addr)
+			return get_unaligned_le16(&ent[OBMF_I3C_IBI_TGT_MAX_IBI_LEN]);
+	}
+
+	dev_dbg(&odev->intf->dev, "ch%u: no IBI target entry for 0x%02x\n",
+		ch->channel_id, dyn_addr);
+	return priv->max_payload_size;
+}
+
 static int obmf_i3c_request_ibi(struct i3c_dev_desc *dev,
 				const struct i3c_ibi_setup *req)
 {
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct obmf_i3c_priv *priv = to_i3c_priv(m);
 	struct obmf_i3c_dev_data *data = i3c_dev_get_master_data(dev);
+	u16 limit = obmf_i3c_ibi_limit(priv, dev->info.dyn_addr);
 
-	if (dev->ibi->max_payload_len > priv->max_ibi_payload) {
+	if (dev->ibi->max_payload_len > limit) {
 		dev_err(&priv->odev->intf->dev,
 			"ch%u: IBI payload %u exceeds hw max %u\n",
 			priv->ch->channel_id,
-			dev->ibi->max_payload_len, priv->max_ibi_payload);
+			dev->ibi->max_payload_len, limit);
 		return -ERANGE;
 	}
 
