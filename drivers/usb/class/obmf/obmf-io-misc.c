@@ -350,9 +350,18 @@ static ssize_t obmf_io_read(struct file *file, char __user *buf,
 			struct obmf_io_subhdr *ihdr =
 				(struct obmf_io_subhdr *)resp;
 
+			/* Build IO sub-header for response */
+			ihdr->transaction = transaction;
+			ihdr->tag         = id->dev_req_tag;
+
+			/* Answer a malformed request so it can't block the channel */
 			if (data_size == 0 || (data_size % width) != 0 ||
 			    id->dev_req_len < min_len) {
+				id->dev_req_ready = false;
 				mutex_unlock(&id->flock);
+				obmf_send_response(odev, ch->channel_id,
+						   OBMF_STATUS_INVALID_CMD,
+						   resp, sizeof(resp));
 				return -EIO;
 			}
 
@@ -366,9 +375,6 @@ static ssize_t obmf_io_read(struct file *file, char __user *buf,
 				return -EFAULT;
 			}
 
-			/* Build IO sub-header for response */
-			ihdr->transaction = transaction;
-			ihdr->tag         = id->dev_req_tag;
 			id->dev_req_ready = false;
 			mutex_unlock(&id->flock);
 
