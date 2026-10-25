@@ -343,14 +343,13 @@ struct obmf_mmio_subhdr {
 /* ---------- I/O Port Channel (v0.9.2, Channel Type 09h) ------------------- */
 
 /*
- * I/O Sub-Header (2 bytes, Channel Type 09h, spec §4.11):
- *   Byte 0 [3:0]: Transaction type (4-bit; spec says [2:0] but values go to 11)
+ * I/O Header (1 byte, Channel Type 09h, OBMF-ICP 1.0.0 Table 52):
+ *   Byte 0 [3:0]: Transaction type
  *   Byte 0 [7:4]: Reserved
- *   Byte 1 [7:0]: Tag (alternates 0 <-> 1)
+ * The transaction payload starts at byte 1; there is no Tag.
  */
 struct obmf_io_subhdr {
 	u8	transaction;
-	u8	tag;
 } __packed;
 
 #define OBMF_IO_SUBHDR_SIZE	sizeof(struct obmf_io_subhdr)
@@ -561,8 +560,6 @@ struct obmf_channel {
 	u8			channel_id;
 	u8			channel_type;
 	u8			channel_cfg;
-	u8			io_tag;		/* IO only: host→device tag, alternates 0/1 */
-	u8			io_dev_tag;	/* IO only: device→host expected tag, alternates 0/1 */
 
 	struct mutex		lock;		/* One outstanding request per ch */
 	struct completion	done;		/* Signalled by RX demux */
@@ -604,7 +601,6 @@ struct obmf_dev_req {
 	u8			channel_id;
 	u8			channel_type;
 	u8			transaction;	/* MMIO/IO only */
-	u8			tag;		/* IO only */
 	int			data_len;
 	u8			data[];
 };
@@ -868,7 +864,7 @@ void obmf_mmio_handle_dev_request(struct obmf_channel *ch,
 int  obmf_io_register(struct obmf_device *odev, struct obmf_channel *ch);
 void obmf_io_unregister(struct obmf_channel *ch);
 void obmf_io_handle_dev_request(struct obmf_channel *ch,
-				u8 transaction, u8 tag,
+				u8 transaction,
 				const u8 *data, int len);
 
 /* ---------- Transport: IO port request (obmf-transport.c) ----------------- */
