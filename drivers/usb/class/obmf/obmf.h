@@ -219,8 +219,16 @@ struct obmf_mmio_subhdr {
 #define OBMF_I3C_CFG_MAX_READ_TA	0x08	/* u16 LE: MAX_READ_TURNAROUND (µs) */
 #define OBMF_I3C_CFG_MAX_DEV_NACK	0x0A	/* u16 LE: MAX_DEV_NACK_RETRY (hw cap) */
 #define OBMF_I3C_CFG_MAX_PAYLOAD	0x0C	/* u16 LE: MAX_PAYLOAD_SIZE */
-#define OBMF_I3C_CFG_MAX_IBI_PAYLOAD	0x0E	/* u16 LE: MAX_IBI_PAYLOAD_SIZE */
-#define OBMF_I3C_CFG_DATA_SIZE		0x10	/* Total config data bytes */
+#define OBMF_I3C_CFG_IBI_TARGET_COUNT	0x0E	/* u8:  IBI_TARGET_COUNT */
+#define OBMF_I3C_CFG_IBI_TARGETS	0x0F	/* IBI_TARGET_CONFIG_ARRAY */
+#define OBMF_I3C_CFG_DATA_SIZE		0x0F	/* Fixed part, before the array */
+
+/* IBI_TARGET_CONFIG_ARRAY entry (Table 82), 6 bytes */
+#define OBMF_I3C_IBI_TGT_SIZE		6
+#define OBMF_I3C_IBI_TGT_DYN_ADDR	0x00	/* u8:  DYNAMIC_ADDR */
+#define OBMF_I3C_IBI_TGT_FLAGS		0x01	/* u8:  CONTROL_FLAGS */
+#define OBMF_I3C_IBI_TGT_MAX_IBI_LEN	0x02	/* u16 LE: incl. the MDB */
+#define OBMF_I3C_IBI_TGT_MAX_PEND_LEN	0x04	/* u16 LE */
 
 /* ---------- I2C Controller Optimised Channel (OBMF-ICP v1.0.0 RC1) -------- */
 #define OBMF_I2C_CMD_READ		0x00
