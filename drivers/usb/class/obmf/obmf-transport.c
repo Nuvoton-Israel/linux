@@ -301,6 +301,15 @@ static int obmf_status_to_errno(u8 channel_type, u8 status)
 		case OBMF_I3C_STATUS_ILLEGAL_CCC: return -EPROTO;
 		}
 		break;
+	case OBMF_TYPE_MEM_DEV:
+		/* Table 60 */
+		switch (status) {
+		case OBMF_MEM_DEV_STATUS_ACCESS_DENIED:	    return -EACCES;
+		case OBMF_MEM_DEV_STATUS_UNSUPPORTED_SIZE:  return -EMSGSIZE;
+		case OBMF_MEM_DEV_STATUS_ERASE_NOT_ALIGNED: return -EINVAL;
+		case OBMF_MEM_DEV_STATUS_WRITE_PROTECTED:   return -EROFS;
+		}
+		break;
 	}
 
 	/* Bus/framing/parity faults, I2C Target errors, reserved codes */
