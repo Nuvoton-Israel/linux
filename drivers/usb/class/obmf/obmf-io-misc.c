@@ -271,6 +271,11 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 				  rd_buf, xfer.rd_len);
 	mutex_unlock(&ch->lock);
 
+	/* A read response must carry exactly the requested number of bytes */
+	if (rv >= 0 && !obmf_io_is_write_trans(xfer.transaction) &&
+	    rv != xfer.rd_len)
+		rv = -EIO;
+
 	if (rv < 0) {
 		xfer.status = OBMF_STATUS_PERMANENT_ERROR;
 		if (copy_to_user(argp, &xfer, sizeof(xfer)))
@@ -279,12 +284,9 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 	}
 
 	xfer.status = OBMF_STATUS_SUCCESS;
-	if (!obmf_io_is_write_trans(xfer.transaction) && rv > 0) {
-		if (copy_to_user(u64_to_user_ptr(xfer.rd_data_ptr),
-				 rd_buf, rv))
-			return -EFAULT;
-		xfer.rd_len = rv;
-	}
+	if (!obmf_io_is_write_trans(xfer.transaction) &&
+	    copy_to_user(u64_to_user_ptr(xfer.rd_data_ptr), rd_buf, xfer.rd_len))
+		return -EFAULT;
 
 	if (copy_to_user(argp, &xfer, sizeof(xfer)))
 		return -EFAULT;
