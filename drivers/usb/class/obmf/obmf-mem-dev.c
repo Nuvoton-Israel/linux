@@ -101,17 +101,16 @@ static void obmf_mem_dev_get_mtd_name(struct obmf_channel *ch,
 /* ------------------------------------------------------------------ */
 
 /*
- * obmf_mem_dev_reply - send a response with the §4.12.2 payload Status
- * byte prepended, in addition to the Common Header status.
- * @data: when non-NULL, must already have status stored at data[0].
+ * obmf_mem_dev_reply - send a response.  The status goes in the common
+ * header; the payload is the read data of a successful Memory Read and is
+ * empty otherwise (OBMF-ICP 1.0.0 Table 62).
  */
 static void obmf_mem_dev_reply(struct obmf_channel *ch, u8 status,
 			       const void *data, int len)
 {
-	if (!data || len <= 0) {
-		obmf_send_response(ch->odev, ch->channel_id, status,
-				   &status, 1);
-		return;
+	if (status != OBMF_STATUS_SUCCESS || !data || len <= 0) {
+		data = NULL;
+		len = 0;
 	}
 	obmf_send_response(ch->odev, ch->channel_id, status, data, len);
 }
@@ -146,14 +145,14 @@ void obmf_mem_dev_handle_dev_request(struct obmf_channel *ch,
 			return;
 		}
 
-		resp = kmalloc(1 + size, GFP_KERNEL);
+		resp = kmalloc(size, GFP_KERNEL);
 		if (!resp) {
 			obmf_mem_dev_reply(ch, OBMF_STATUS_PERMANENT_ERROR,
 					   NULL, 0);
 			return;
 		}
 
-		rv = mtd_read(mtd, addr, size, &retlen, resp + 1);
+		rv = mtd_read(mtd, addr, size, &retlen, resp);
 		if (rv && rv != -EUCLEAN) {
 			kfree(resp);
 			obmf_mem_dev_reply(ch, OBMF_STATUS_PERMANENT_ERROR,
@@ -161,8 +160,7 @@ void obmf_mem_dev_handle_dev_request(struct obmf_channel *ch,
 			return;
 		}
 
-		resp[0] = OBMF_STATUS_SUCCESS;
-		obmf_mem_dev_reply(ch, OBMF_STATUS_SUCCESS, resp, 1 + retlen);
+		obmf_mem_dev_reply(ch, OBMF_STATUS_SUCCESS, resp, retlen);
 		kfree(resp);
 		return;
 
