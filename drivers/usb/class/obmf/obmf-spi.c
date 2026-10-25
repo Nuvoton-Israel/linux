@@ -225,7 +225,8 @@ static void obmf_nor_fill_addr(struct obmf_spi_data *sd, u8 *buf, u32 addr)
  * obmf_spi_max_wr_payload - largest SPI request payload (opcode + addr +
  * write data) that fits in a single Bulk OUT transfer, after subtracting
  * the OBMF Common Header and SPI request sub-header from the device's
- * negotiated max_wr_transfer_size.  Always capped at OBMF_SPI_MAX_XFER,
+ * negotiated max_wr_transfer_size, and the channel's advertised
+ * MAX_REQUEST_PAYLOAD_SIZE if non-zero.  Always capped at OBMF_SPI_MAX_XFER,
  * which sizes the stack buffer in obmf_spi_xfer().
  */
 static u32 obmf_spi_max_wr_payload(struct obmf_channel *ch)
@@ -236,6 +237,12 @@ static u32 obmf_spi_max_wr_payload(struct obmf_channel *ch)
 	if (ch->odev->max_wr_transfer_size <= overhead)
 		return 0;
 	avail = ch->odev->max_wr_transfer_size - overhead;
+	if (ch->max_request_payload) {
+		if (ch->max_request_payload <= OBMF_SPI_REQ_SUBHDR_SIZE)
+			return 0;
+		avail = min_t(u32, avail,
+			      ch->max_request_payload - OBMF_SPI_REQ_SUBHDR_SIZE);
+	}
 	return min_t(u32, avail, OBMF_SPI_MAX_XFER - OBMF_SPI_REQ_SUBHDR_SIZE);
 }
 
@@ -243,8 +250,9 @@ static u32 obmf_spi_max_wr_payload(struct obmf_channel *ch)
  * obmf_spi_max_rd_payload - largest SPI response payload (read data) that
  * fits in a single Bulk IN transfer, after subtracting the OBMF Common
  * Header and SPI response sub-header from the device's negotiated
- * max_rd_transfer_size.  Always capped at OBMF_SPI_MAX_XFER, which sizes
- * the stack buffer in obmf_spi_xfer().
+ * max_rd_transfer_size, and the channel's advertised
+ * MAX_RESPONSE_PAYLOAD_SIZE if non-zero.  Always capped at OBMF_SPI_MAX_XFER,
+ * which sizes the stack buffer in obmf_spi_xfer().
  */
 static u32 obmf_spi_max_rd_payload(struct obmf_channel *ch)
 {
@@ -254,6 +262,12 @@ static u32 obmf_spi_max_rd_payload(struct obmf_channel *ch)
 	if (ch->odev->max_rd_transfer_size <= overhead)
 		return 0;
 	avail = ch->odev->max_rd_transfer_size - overhead;
+	if (ch->max_response_payload) {
+		if (ch->max_response_payload <= OBMF_SPI_RESP_SUBHDR_SIZE)
+			return 0;
+		avail = min_t(u32, avail,
+			      ch->max_response_payload - OBMF_SPI_RESP_SUBHDR_SIZE);
+	}
 	return min_t(u32, avail, OBMF_SPI_MAX_XFER - OBMF_SPI_RESP_SUBHDR_SIZE);
 }
 
