@@ -94,6 +94,12 @@ static bool obmf_io_is_write_trans(u8 transaction)
 	}
 }
 
+/* Fixed Port I/O repeats every access on the same port */
+static bool obmf_io_is_fixed_trans(u8 transaction)
+{
+	return transaction >= OBMF_IO_TRANS_FIXED_READ_8;
+}
+
 /* Returns the data-bus width (bytes) for an I/O transaction type */
 static int obmf_io_data_width(u8 transaction)
 {
@@ -217,6 +223,7 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 	u8 wr_buf[256];
 	u8 rd_buf[256];
 	void *wr_data = NULL;
+	bool fixed;
 	int width;
 	int rv;
 
@@ -233,6 +240,7 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 		return -EOPNOTSUPP;
 
 	width = obmf_io_data_width(xfer.transaction);
+	fixed = obmf_io_is_fixed_trans(xfer.transaction);
 
 	/* Copy write data from userspace */
 	if (obmf_io_is_write_trans(xfer.transaction)) {
@@ -240,7 +248,8 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 		if (width > 1 && (xfer.wr_len % width) != 0)
 			return -EINVAL;
-		if (!obmf_io_port_allowed(id, xfer.port_addr, xfer.wr_len))
+		if (!obmf_io_port_allowed(id, xfer.port_addr,
+					  fixed ? width : xfer.wr_len))
 			return -EPERM;
 		if (copy_from_user(wr_buf, u64_to_user_ptr(xfer.wr_data_ptr),
 				   xfer.wr_len))
@@ -251,7 +260,8 @@ static long obmf_io_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 		if (width > 1 && (xfer.rd_len % width) != 0)
 			return -EINVAL;
-		if (!obmf_io_port_allowed(id, xfer.port_addr, xfer.rd_len))
+		if (!obmf_io_port_allowed(id, xfer.port_addr,
+					  fixed ? width : xfer.rd_len))
 			return -EPERM;
 	}
 
