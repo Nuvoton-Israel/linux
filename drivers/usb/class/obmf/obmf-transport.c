@@ -181,7 +181,6 @@ static void obmf_dev_request_work(struct work_struct *work)
 		 * Fast-path for POST codes (port 0x0080) is in the misc handler.
 		 */
 		obmf_io_handle_dev_request(ch, dreq->transaction,
-					   dreq->tag,
 					   dreq->data, dreq->data_len);
 		break;
 	case OBMF_TYPE_GPIO:
@@ -400,21 +399,9 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 			return;
 		}
 
-		/* IO: validate tag in 2-byte sub-header */
+		/* IO: skip the 1-byte header */
 		if (ch->channel_type == OBMF_TYPE_IO &&
 		    payload_len >= OBMF_IO_SUBHDR_SIZE) {
-			struct obmf_io_subhdr *ihdr =
-				(struct obmf_io_subhdr *)payload;
-
-			if (ihdr->tag != ch->io_tag) {
-				dev_err(&odev->intf->dev,
-					"ch%u: IO tag mismatch (got %u exp %u)\n",
-					channel_id, ihdr->tag, ch->io_tag);
-				ch->status = -EIO;
-				complete(&ch->done);
-				return;
-			}
-			ch->io_tag ^= 1;
 			/* Skip sub-header for payload copy */
 			payload     += OBMF_IO_SUBHDR_SIZE;
 			payload_len -= OBMF_IO_SUBHDR_SIZE;
@@ -449,15 +436,6 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 				(struct obmf_io_subhdr *)payload;
 			u8 trans = ihdr->transaction & 0x0F;
 
-			/* Validate incoming tag from device */
-			if (ihdr->tag != ch->io_dev_tag) {
-				dev_err(&odev->intf->dev,
-					"ch%u: IO dev-req tag mismatch (got %u exp %u), dropping\n",
-					channel_id, ihdr->tag, ch->io_dev_tag);
-				return;
-			}
-			ch->io_dev_tag ^= 1;
-
 			{
 				struct obmf_dev_req *dreq;
 				int req_payload_len;
@@ -475,7 +453,6 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 					dreq->channel_id = channel_id;
 					dreq->channel_type = OBMF_TYPE_IO;
 					dreq->transaction = trans;
-					dreq->tag = ihdr->tag;
 					dreq->data_len = req_payload_len;
 					if (dreq->data_len > 0)
 						memcpy(dreq->data,
@@ -512,7 +489,6 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 					dreq->channel_id = channel_id;
 					dreq->channel_type = OBMF_TYPE_MMIO;
 					dreq->transaction = trans;
-					dreq->tag = 0;
 					dreq->data_len = req_payload_len;
 					if (dreq->data_len > 0)
 						memcpy(dreq->data,
@@ -539,7 +515,6 @@ static void obmf_dispatch_message(struct obmf_device *odev,
 				dreq->channel_id = channel_id;
 				dreq->channel_type = ch->channel_type;
 				dreq->transaction = 0;
-				dreq->tag = 0;
 				dreq->data_len = payload_len;
 				if (dreq->data_len > 0)
 					memcpy(dreq->data, payload,
@@ -1070,7 +1045,7 @@ int obmf_send_mmio_request(struct obmf_device *odev, struct obmf_channel *ch,
 }
 
 /* ------------------------------------------------------------------ */
-/* obmf_send_io_request — I/O port read/write with sub-header + tag    */
+/* obmf_send_io_request — I/O port read/write with the 1-byte header  */
 /*                                                                     */
 /* Payload layout after IO sub-header:                                 */
 /*   port_addr (2B LE) + size (1B) + [write data (N)]                 */
@@ -1084,7 +1059,7 @@ int obmf_send_io_request(struct obmf_device *odev, struct obmf_channel *ch,
 			 const void *wr_data, int wr_len,
 			 void *rd_data, int rd_len)
 {
-	/* IO sub-header(2) + port_addr(2) + size(1) + data(up to 255) */
+	/* IO header(1) + port_addr(2) + size(1) + data(up to 255) */
 	u8 payload[OBMF_IO_SUBHDR_SIZE + 2 + 1 + 255];
 	struct obmf_io_subhdr *ihdr = (struct obmf_io_subhdr *)payload;
 	int payload_len;
@@ -1095,9 +1070,8 @@ int obmf_send_io_request(struct obmf_device *odev, struct obmf_channel *ch,
 	if (!is_write && (rd_len <= 0 || rd_len > 255))
 		return -EINVAL;
 
-	/* Build IO sub-header */
-	ihdr->transaction = transaction;
-	ihdr->tag         = ch->io_tag;
+	/* Build IO header (reserved bits zero) */
+	ihdr->transaction = transaction & 0x0F;
 
 	/* port_addr (2B LE) */
 	put_unaligned_le16(port_addr, payload + OBMF_IO_SUBHDR_SIZE);

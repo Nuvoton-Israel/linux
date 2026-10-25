@@ -18,7 +18,8 @@
  *   write() — send response to device-initiated requests
  *   poll()  — check for pending device-initiated requests
  *
- * Kernel manages IO Sub-Header (Transaction + Tag) in both directions.
+ * Kernel manages the 1-byte IO header (Transaction, no Tag) in both
+ * directions.
  *
  * POST code fast-path:
  *   When the device writes to port 0x0080 (Sequential or Fixed Write,
@@ -67,7 +68,6 @@ struct obmf_io_data {
 	u8			dev_req_buf[512];
 	int			dev_req_len;
 	u8			dev_req_transaction;
-	u8			dev_req_tag;
 	bool			dev_req_ready;
 	bool			dev_resp_pending;	/* write() expected */
 
@@ -350,9 +350,8 @@ static ssize_t obmf_io_read(struct file *file, char __user *buf,
 			struct obmf_io_subhdr *ihdr =
 				(struct obmf_io_subhdr *)resp;
 
-			/* Build IO sub-header for response */
+			/* Build IO header for response */
 			ihdr->transaction = transaction;
-			ihdr->tag         = id->dev_req_tag;
 
 			/* Answer a malformed request so it can't block the channel */
 			if (data_size == 0 || (data_size % width) != 0 ||
@@ -434,7 +433,6 @@ static ssize_t obmf_io_write(struct file *file, const char __user *buf,
 	}
 
 	ihdr->transaction = id->dev_req_transaction;
-	ihdr->tag         = id->dev_req_tag;
 
 	/* Copy userspace response: [Status(1B)][Data(NB)] */
 	if (copy_from_user(resp + OBMF_IO_SUBHDR_SIZE, buf, count)) {
@@ -574,7 +572,7 @@ void obmf_io_unregister(struct obmf_channel *ch)
 /* ------------------------------------------------------------------ */
 
 void obmf_io_handle_dev_request(struct obmf_channel *ch,
-				u8 transaction, u8 tag,
+				u8 transaction,
 				const u8 *data, int len)
 {
 	struct obmf_io_data *id = ch->priv;
@@ -584,7 +582,6 @@ void obmf_io_handle_dev_request(struct obmf_channel *ch,
 
 	mutex_lock(&id->flock);
 	id->dev_req_transaction = transaction;
-	id->dev_req_tag         = tag;
 	id->dev_req_len = min_t(int, len, (int)sizeof(id->dev_req_buf));
 	if (id->dev_req_len > 0)
 		memcpy(id->dev_req_buf, data, id->dev_req_len);
