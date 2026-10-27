@@ -41,6 +41,7 @@
 
 /* Delay before resending characters the device had no room for */
 #define OBMF_SERIAL_NACK_RETRY_MS	10
+#define OBMF_SERIAL_NACK_TIMEOUT_MS	5000
 
 struct obmf_serial_port {
 	struct obmf_channel	*ch;
@@ -123,6 +124,7 @@ static int obmf_serial_write(struct tty_struct *tty,
 	int send_len;
 	int rv;
 	u16 accepted;
+	unsigned long nack_deadline;
 
 	if (count <= 0)
 		return 0;
@@ -137,6 +139,7 @@ static int obmf_serial_write(struct tty_struct *tty,
 	put_unaligned_le16((u16)tx_count, &req[1]);
 	memcpy(&req[OBMF_SERIAL_REQ_HDR_SIZE], buf, tx_count);
 	send_len = OBMF_SERIAL_REQ_HDR_SIZE + tx_count;
+	nack_deadline = jiffies + msecs_to_jiffies(OBMF_SERIAL_NACK_TIMEOUT_MS);
 
 retry:
 	mutex_lock(&ch->lock);
@@ -158,8 +161,11 @@ retry:
 
 			/*
 			 * The device has no room yet.  Failing here would cut
-			 * a blocking write() short, so wait for it to drain.
+			 * a blocking write() short, so wait for it to drain,
+			 * but not for ever if the device never does.
 			 */
+			if (time_after(jiffies, nack_deadline))
+				return -ETIMEDOUT;
 			if (msleep_interruptible(OBMF_SERIAL_NACK_RETRY_MS))
 				return -ERESTARTSYS;
 			goto retry;
