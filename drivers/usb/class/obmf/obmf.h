@@ -489,6 +489,7 @@ struct obmf_functional_desc {
 /* Per-channel DEVICE_ROLE values (offset OBMF_CHCFG_DEVICE_ROLE) */
 #define OBMF_ROLE_PRODUCER		0
 #define OBMF_ROLE_CONSUMER		1
+#define OBMF_ROLE_SYMMETRIC		2
 
 /* ---------- Channel Config Common Header (spec §4.13) --------------------- */
 #define OBMF_CHCFG_TYPE			0x00	/* 1B */
@@ -566,6 +567,7 @@ struct obmf_channel {
 	u32			config_size;	/* Size of channel config data area */
 	u16			max_request_payload;	/* MAX_REQUEST_PAYLOAD_SIZE, 0=unknown */
 	u16			max_response_payload;	/* MAX_RESPONSE_PAYLOAD_SIZE, 0=unknown */
+	u8			device_role;	/* DEVICE_ROLE, OBMF_ROLE_* */
 	u16			gpio_count;	/* GPIO channels: number of GPIO lines */
 
 	struct kobject		*kobj;		/* sysfs: /obmf/channel/<N> */
