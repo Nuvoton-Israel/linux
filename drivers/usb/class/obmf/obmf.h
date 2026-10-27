@@ -568,6 +568,7 @@ struct obmf_channel {
 	u16			max_request_payload;	/* MAX_REQUEST_PAYLOAD_SIZE, 0=unknown */
 	u16			max_response_payload;	/* MAX_RESPONSE_PAYLOAD_SIZE, 0=unknown */
 	u8			device_role;	/* DEVICE_ROLE, OBMF_ROLE_* */
+	bool			registered;	/* subsystem set up, ch->priv valid */
 	u16			gpio_count;	/* GPIO channels: number of GPIO lines */
 
 	struct kobject		*kobj;		/* sysfs: /obmf/channel/<N> */
