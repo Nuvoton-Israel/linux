@@ -543,6 +543,12 @@ struct obmf_functional_desc {
 #define OBMF_DEV_REQ_QUEUE_DEPTH	8
 
 /* ---------- Per-channel state --------------------------------------------- */
+struct obmf_stale_req {
+	struct list_head	node;
+	int			len;
+	u8			data[];
+};
+
 struct obmf_channel {
 	u8			channel_id;
 	u8			channel_type;
@@ -608,6 +614,7 @@ struct obmf_device {
 	struct usb_interface	*intf;
 	struct kref		kref;
 	bool			disconnected;
+	struct list_head	stale_reqs;	/* requests queued before probe */
 	int			device_index;	/* Global obmf device number */
 
 	/* Endpoints */
@@ -701,6 +708,7 @@ void obmf_stall_recovery_work(struct work_struct *work);
 /* ---------- Transport layer (obmf-transport.c) ---------------------------- */
 int  obmf_transport_init(struct obmf_device *odev);
 void obmf_transport_exit(struct obmf_device *odev);
+void obmf_replay_stale_in(struct obmf_device *odev);
 
 int  obmf_send_request(struct obmf_device *odev, struct obmf_channel *ch,
 		       const void *payload, int payload_len,

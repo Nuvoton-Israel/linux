@@ -580,6 +580,8 @@ static int obmf_probe(struct usb_interface *intf,
 	 */
 	obmf_i2c_target_finalize_pairing(odev);
 
+	obmf_replay_stale_in(odev);
+
 	usb_set_intfdata(intf, odev);
 
 	dev_info(&intf->dev,
