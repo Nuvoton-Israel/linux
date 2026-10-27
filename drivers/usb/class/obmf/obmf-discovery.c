@@ -93,6 +93,8 @@ static int obmf_disc_read_bytes(struct obmf_device *odev, u32 offset,
 /* obmf_discover_channels (v0.9)                                       */
 /* ------------------------------------------------------------------ */
 
+#define OBMF_DISC_VER_TRIES	3
+
 int obmf_discover_channels(struct obmf_device *odev)
 {
 	u16 obmf_ver, vendor_id, device_id;
@@ -116,7 +118,15 @@ int obmf_discover_channels(struct obmf_device *odev)
 	spin_lock_init(&odev->channels[0].resp_lock);
 
 	/* Step 1: Read OBMF_VER (2B at 0x00) */
-	rv = obmf_disc_read16(odev, OBMF_DISC_OBMF_VER, &obmf_ver);
+	/*
+	 * The device may still be finishing a request left by a previous
+	 * driver instance, so the first read can time out: retry it.
+	 */
+	for (i = 0; i < OBMF_DISC_VER_TRIES; i++) {
+		rv = obmf_disc_read16(odev, OBMF_DISC_OBMF_VER, &obmf_ver);
+		if (rv != -ETIMEDOUT)
+			break;
+	}
 	if (rv) {
 		dev_err(&odev->intf->dev,
 			"discovery: failed to read OBMF_VER: %d\n", rv);
