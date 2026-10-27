@@ -659,29 +659,79 @@ resubmit:
 /* ------------------------------------------------------------------ */
 
 /*
- * Responses to requests that a previous driver instance left in flight can
- * still be queued at the device.  Read and drop them before discovery, so
- * that they are not taken as answers to its Channel 0 reads.
+ * Transfers queued at the device before this driver started: responses to
+ * requests that a previous driver instance left in flight, and requests the
+ * device raised while no host driver was listening (e.g. POST codes).
+ * Read them before discovery so that responses are not taken as answers to
+ * its Channel 0 reads.  Responses are dropped; single-transfer requests on
+ * a channel other than 0 are kept and answered by obmf_replay_stale_in()
+ * once the channels are registered.
  */
 static void obmf_drain_stale_in(struct obmf_device *odev)
 {
-	int i, len;
+	int i, len, dropped = 0, kept = 0;
 
 	for (i = 0; i < OBMF_DRAIN_MAX; i++) {
+		struct obmf_common_hdr *hdr = (struct obmf_common_hdr *)odev->rx_buf;
+		struct obmf_stale_req *sr;
+
 		if (usb_bulk_msg(odev->udev,
 				 usb_rcvbulkpipe(odev->udev, odev->bulk_in_ep),
 				 odev->rx_buf, odev->max_rd_transfer_size,
 				 &len, OBMF_DRAIN_TIMEOUT_MS))
 			break;
+
+		if (len < OBMF_COMMON_HDR_SIZE || hdr->channel == 0 ||
+		    OBMF_HDR_IS_RESPONSE(hdr) ||
+		    len - OBMF_COMMON_HDR_SIZE != le16_to_cpu(hdr->size)) {
+			dropped++;
+			continue;
+		}
+		sr = kmalloc(struct_size(sr, data, len), GFP_KERNEL);
+		if (!sr) {
+			dropped++;
+			continue;
+		}
+		sr->len = len;
+		memcpy(sr->data, odev->rx_buf, len);
+		list_add_tail(&sr->node, &odev->stale_reqs);
+		kept++;
 	}
-	if (i)
+	if (dropped || kept)
 		dev_info(&odev->intf->dev,
-			 "dropped %d stale Bulk IN transfer(s)\n", i);
+			 "stale Bulk IN transfers: %d dropped, %d kept for replay\n",
+			 dropped, kept);
+}
+
+static void obmf_free_stale_in(struct obmf_device *odev)
+{
+	struct obmf_stale_req *sr, *tmp;
+
+	list_for_each_entry_safe(sr, tmp, &odev->stale_reqs, node) {
+		list_del(&sr->node);
+		kfree(sr);
+	}
+}
+
+/* Dispatch the requests kept by obmf_drain_stale_in() */
+void obmf_replay_stale_in(struct obmf_device *odev)
+{
+	struct obmf_stale_req *sr, *tmp;
+
+	list_for_each_entry_safe(sr, tmp, &odev->stale_reqs, node) {
+		obmf_dispatch_message(odev, (struct obmf_common_hdr *)sr->data,
+				      sr->data + OBMF_COMMON_HDR_SIZE,
+				      sr->len - OBMF_COMMON_HDR_SIZE);
+		list_del(&sr->node);
+		kfree(sr);
+	}
 }
 
 int obmf_transport_init(struct obmf_device *odev)
 {
 	int rv;
+
+	INIT_LIST_HEAD(&odev->stale_reqs);
 
 	/* Workqueue for device-initiated requests */
 	odev->dev_req_wq = alloc_workqueue("obmf_devreq", WQ_UNBOUND, 0);
@@ -773,6 +823,8 @@ void obmf_transport_exit(struct obmf_device *odev)
 		destroy_workqueue(odev->dev_req_wq);
 		odev->dev_req_wq = NULL;
 	}
+
+	obmf_free_stale_in(odev);
 
 	usb_free_urb(odev->rx_urb);
 	usb_free_urb(odev->int_in_urb);
