@@ -122,10 +122,29 @@ static int obmf_gpio_get(struct gpio_chip *gc, unsigned int offset)
 	return OBMF_GPIO_UNPACK_DATA(pair_out) == OBMF_GPIO_VAL_HIGH ? 1 : 0;
 }
 
+/* Send a Set Values batch; on failure put the cached levels back */
+static void obmf_gpio_flush_set(struct obmf_gpio_data *gd, const u16 *pairs,
+				const unsigned int *lines, const bool *was,
+				int n)
+{
+	int rv, i;
+
+	rv = obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_VALUES,
+			    pairs, n, NULL, 0);
+	if (rv >= 0)
+		return;
+
+	dev_warn(gd->gc.parent, "gpio set of %d lines failed: %d\n", n, rv);
+	for (i = 0; i < n; i++)
+		assign_bit(lines[i], gd->output_val, was[i]);
+}
+
 static void obmf_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
 {
 	struct obmf_gpio_data *gd = gpiochip_get_data(gc);
+	bool old = test_bit(offset, gd->output_val);
 	u16 pair_in;
+	int rv;
 
 	if (value)
 		set_bit(offset, gd->output_val);
@@ -134,8 +153,13 @@ static void obmf_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
 
 	pair_in = OBMF_GPIO_PACK(obmf_gpio_index(gd, offset),
 				 value ? OBMF_GPIO_VAL_HIGH : OBMF_GPIO_VAL_LOW);
-	obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_VALUES,
-		       &pair_in, 1, NULL, 0);
+	rv = obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_VALUES,
+			    &pair_in, 1, NULL, 0);
+	if (rv < 0) {
+		/* gpio_chip.set cannot fail; keep the cache true to the line */
+		dev_warn(gc->parent, "gpio %u: set failed: %d\n", offset, rv);
+		assign_bit(offset, gd->output_val, old);
+	}
 }
 
 static void obmf_gpio_set_multiple(struct gpio_chip *gc,
@@ -143,30 +167,29 @@ static void obmf_gpio_set_multiple(struct gpio_chip *gc,
 {
 	struct obmf_gpio_data *gd = gpiochip_get_data(gc);
 	u16 pairs[256];
+	unsigned int lines[256];
+	bool was[256];
 	int n = 0;
 	unsigned int i;
 
 	for_each_set_bit(i, mask, gc->ngpio) {
 		int val = test_bit(i, bits);
 
-		if (val)
-			set_bit(i, gd->output_val);
-		else
-			clear_bit(i, gd->output_val);
+		lines[n] = i;
+		was[n] = test_bit(i, gd->output_val);
+		assign_bit(i, gd->output_val, val);
 
 		pairs[n++] = OBMF_GPIO_PACK(obmf_gpio_index(gd, i),
 				val ? OBMF_GPIO_VAL_HIGH : OBMF_GPIO_VAL_LOW);
 
 		if (n == 256) {
-			obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_VALUES,
-				       pairs, n, NULL, 0);
+			obmf_gpio_flush_set(gd, pairs, lines, was, n);
 			n = 0;
 		}
 	}
 
 	if (n > 0)
-		obmf_gpio_xfer(gd->ch, OBMF_GPIO_CMD_SET_VALUES,
-			       pairs, n, NULL, 0);
+		obmf_gpio_flush_set(gd, pairs, lines, was, n);
 }
 
 static int obmf_gpio_get_direction(struct gpio_chip *gc, unsigned int offset)
