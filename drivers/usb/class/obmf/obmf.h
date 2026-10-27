@@ -581,6 +581,8 @@ struct obmf_channel {
 	u8			device_role;	/* DEVICE_ROLE, OBMF_ROLE_* */
 	bool			registered;	/* subsystem set up, ch->priv valid */
 	u16			gpio_count;	/* GPIO channels: number of GPIO lines */
+	u16			mem_dev_read_max;	/* MEM_DEV_CFG max Read size, 0=unknown */
+	u16			mem_dev_write_max;	/* MEM_DEV_CFG max Write size, 0=unknown */
 
 	struct kobject		*kobj;		/* sysfs: /obmf/channel/<N> */
 	struct device		*sysfs_dev;	/* device for sysfs "device" symlink */
