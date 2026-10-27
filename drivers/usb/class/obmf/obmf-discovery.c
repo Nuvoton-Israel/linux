@@ -263,13 +263,24 @@ int obmf_discover_channels(struct obmf_device *odev)
 		obmf_disc_read16(odev, ch_offset + OBMF_CHCFG_MAX_RESPONSE_PAYLOAD,
 				 &ch->max_response_payload);
 
+		rv = obmf_disc_read8(odev, ch_offset + OBMF_CHCFG_DEVICE_ROLE,
+				     &ch->device_role);
+		if (rv || ch->device_role > OBMF_ROLE_SYMMETRIC) {
+			if (!rv)
+				dev_warn(&odev->intf->dev,
+					 "ch%d: reserved DEVICE_ROLE %u, assuming Producer\n",
+					 i + 1, ch->device_role);
+			ch->device_role = OBMF_ROLE_PRODUCER;
+		}
+
 		ch->channel_id   = ch_number;
 		ch->channel_type = ch_type;
 		ch->config_size  = config_size;
 
 		dev_info(&odev->intf->dev,
-			 "ch%u: type=0x%02x name=\"%s\" config_offset=0x%08x config_size=%u\n",
-			 ch_number, ch_type, ch_name, ch_offset, config_size);
+			 "ch%u: type=0x%02x role=%u name=\"%s\" config_offset=0x%08x config_size=%u\n",
+			 ch_number, ch_type, ch->device_role, ch_name,
+			 ch_offset, config_size);
 	}
 
 	return 0;
