@@ -283,6 +283,16 @@ int obmf_discover_channels(struct obmf_device *odev)
 			ch->device_role = OBMF_ROLE_PRODUCER;
 		}
 
+		if (ch_type == OBMF_TYPE_MEM_DEV &&
+		    config_size >= OBMF_MEM_DEV_CFG_WRITE_SIZE + 2) {
+			u32 cfg = ch_offset + OBMF_CHCFG_CONFIG_DATA;
+
+			obmf_disc_read16(odev, cfg + OBMF_MEM_DEV_CFG_READ_SIZE,
+					 &ch->mem_dev_read_max);
+			obmf_disc_read16(odev, cfg + OBMF_MEM_DEV_CFG_WRITE_SIZE,
+					 &ch->mem_dev_write_max);
+		}
+
 		ch->channel_id   = ch_number;
 		ch->channel_type = ch_type;
 		ch->config_size  = config_size;

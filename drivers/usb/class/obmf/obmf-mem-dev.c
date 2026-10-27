@@ -139,6 +139,11 @@ void obmf_mem_dev_handle_dev_request(struct obmf_channel *ch,
 
 	switch (cmd) {
 	case OBMF_MEM_DEV_CMD_READ:
+		if (ch->mem_dev_read_max && size > ch->mem_dev_read_max) {
+			obmf_mem_dev_reply(ch, OBMF_MEM_DEV_STATUS_UNSUPPORTED_SIZE,
+					   NULL, 0);
+			return;
+		}
 		if ((u64)addr + size > mtd->size) {
 			obmf_mem_dev_reply(ch, OBMF_MEM_DEV_STATUS_ACCESS_DENIED,
 					   NULL, 0);
@@ -165,6 +170,11 @@ void obmf_mem_dev_handle_dev_request(struct obmf_channel *ch,
 		return;
 
 	case OBMF_MEM_DEV_CMD_WRITE:
+		if (ch->mem_dev_write_max && size > ch->mem_dev_write_max) {
+			obmf_mem_dev_reply(ch, OBMF_MEM_DEV_STATUS_UNSUPPORTED_SIZE,
+					   NULL, 0);
+			return;
+		}
 		if (len < OBMF_MEM_DEV_REQ_SUBHDR_SIZE + size) {
 			obmf_mem_dev_reply(ch, OBMF_STATUS_SIZE_NOT_SUPPORTED,
 					   NULL, 0);
