@@ -99,6 +99,7 @@
 struct obmf_i2c_ctrl_data {
 	struct i2c_adapter       adap;
 	struct obmf_channel     *ch;
+	struct i2c_adapter_quirks quirks;
 #if IS_ENABLED(CONFIG_I2C_SLAVE)
 	struct i2c_client       *slave;
 	spinlock_t               slave_lock;
@@ -283,11 +284,28 @@ static int obmf_i2c_unreg_slave(struct i2c_client *client)
 }
 #endif /* CONFIG_I2C_SLAVE */
 
-/* Let the I2C core reject messages that do not fit one OBMF message. */
-static const struct i2c_adapter_quirks obmf_i2c_quirks = {
-	.max_read_len  = OBMF_I2C_MAX_XFER_LEN,
-	.max_write_len = OBMF_I2C_MAX_XFER_LEN,
-};
+/*
+ * Let the I2C core reject messages that do not fit one OBMF message.  A
+ * write is carried after the 4-byte request header and a read returns after
+ * the 4-byte response header, so each is bounded by the channel's
+ * MAX_REQUEST_PAYLOAD_SIZE / MAX_RESPONSE_PAYLOAD_SIZE minus that header.
+ */
+static void obmf_i2c_set_quirks(struct obmf_i2c_ctrl_data *cd)
+{
+	struct obmf_channel *ch = cd->ch;
+	u16 wr = OBMF_I2C_MAX_XFER_LEN;
+	u16 rd = OBMF_I2C_MAX_XFER_LEN;
+
+	if (ch->max_request_payload)
+		wr = min_t(u16, wr, ch->max_request_payload > OBMF_I2C_REQ_HDR_SIZE ?
+			   ch->max_request_payload - OBMF_I2C_REQ_HDR_SIZE : 0);
+	if (ch->max_response_payload)
+		rd = min_t(u16, rd, ch->max_response_payload > OBMF_I2C_RESP_HDR_SIZE ?
+			   ch->max_response_payload - OBMF_I2C_RESP_HDR_SIZE : 0);
+
+	cd->quirks.max_write_len = wr;
+	cd->quirks.max_read_len = rd;
+}
 
 static const struct i2c_algorithm obmf_i2c_algo = {
 	.master_xfer   = obmf_i2c_xfer,
@@ -314,7 +332,8 @@ int obmf_i2c_register(struct obmf_device *odev, struct obmf_channel *ch)
 
 	cd->adap.owner      = THIS_MODULE;
 	cd->adap.algo       = &obmf_i2c_algo;
-	cd->adap.quirks     = &obmf_i2c_quirks;
+	obmf_i2c_set_quirks(cd);
+	cd->adap.quirks     = &cd->quirks;
 	cd->adap.dev.parent = &odev->intf->dev;
 	cd->adap.dev.of_node = obmf_i2c_get_of_node(odev, ch);
 	snprintf(cd->adap.name, sizeof(cd->adap.name),
