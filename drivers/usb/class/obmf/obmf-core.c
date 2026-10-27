@@ -314,6 +314,8 @@ static void obmf_register_channel(struct obmf_device *odev,
 			"ch%u: failed to register type 0x%02x: %d\n",
 			ch->channel_id, ch->channel_type, rv);
 		obmf_channel_set_enable(odev, ch, false);
+	} else {
+		smp_store_release(&ch->registered, true);
 	}
 
 	/* Create sysfs "device" symlink for non-MMIO/non-IO channels */
@@ -325,6 +327,8 @@ static void obmf_register_channel(struct obmf_device *odev,
 
 static void obmf_unregister_channel(struct obmf_channel *ch)
 {
+	smp_store_release(&ch->registered, false);
+
 	/* Remove sysfs "device" symlink for non-MMIO/non-IO channels */
 	if (ch->sysfs_dev && ch->kobj &&
 	    ch->channel_type != OBMF_TYPE_MMIO &&
@@ -751,7 +755,7 @@ static int obmf_post_reset(struct usb_interface *intf)
 	for (i = 1; i < odev->num_channels; i++) {
 		struct obmf_channel *ch = &odev->channels[i];
 
-		if (ch->channel_type != 0xFF)
+		if (ch->registered)
 			obmf_channel_set_enable(odev, ch, true);
 	}
 

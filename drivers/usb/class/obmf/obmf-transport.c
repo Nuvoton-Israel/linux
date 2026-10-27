@@ -146,6 +146,17 @@ static void obmf_dev_request_work(struct work_struct *work)
 		goto out;
 	}
 
+	/*
+	 * The channel is enabled before its subsystem is set up, so the device
+	 * can already send requests; the handlers need ch->priv.  A channel
+	 * whose registration failed stays unserved.
+	 */
+	if (!smp_load_acquire(&ch->registered)) {
+		obmf_send_response(odev, dreq->channel_id,
+				   OBMF_STATUS_NOT_READY, NULL, 0);
+		goto out;
+	}
+
 	switch (dreq->channel_type) {
 	case OBMF_TYPE_MMIO:
 	case OBMF_TYPE_CONFIG: {
