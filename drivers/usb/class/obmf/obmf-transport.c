@@ -263,6 +263,13 @@ static int obmf_status_to_errno(u8 channel_type, u8 status)
 		case OBMF_MMIO_STATUS_ACCESS_DENIED:	 return -EACCES;
 		}
 		break;
+	case OBMF_TYPE_SPI:
+		/* Table 49 */
+		switch (status) {
+		case OBMF_SPI_STATUS_MODE_UNSUPPORTED:	return -EOPNOTSUPP;
+		case OBMF_SPI_STATUS_TRANSFER_ERROR:	return -EIO;
+		}
+		break;
 	case OBMF_TYPE_GPIO:
 		/* Table 17 */
 		switch (status) {
