@@ -571,10 +571,31 @@ static void obmf_rx_complete(struct urb *urb)
 	hdr = (struct obmf_common_hdr *)odev->rx_buf;
 	ch = obmf_find_channel(odev, hdr->channel);
 	if (!ch) {
-		/* No reassembly state: let the dispatcher answer a request */
+		/*
+		 * No channel to hold reassembly state, so follow the Size
+		 * field here and let the dispatcher answer a request once,
+		 * when its last fragment arrives.
+		 */
+		actual_payload = urb->actual_length - OBMF_COMMON_HDR_SIZE;
+		if (odev->unk_active &&
+		    odev->unk_channel == hdr->channel &&
+		    odev->unk_status_rqresp == hdr->status_rqresp) {
+			odev->unk_remaining -= actual_payload;
+		} else {
+			odev->unk_remaining = le16_to_cpu(hdr->size) -
+					      actual_payload;
+			odev->unk_channel = hdr->channel;
+			odev->unk_status_rqresp = hdr->status_rqresp;
+		}
+		if (odev->unk_remaining > 0) {
+			odev->unk_active = true;
+			goto resubmit;
+		}
+		odev->unk_active = false;
+
 		obmf_dispatch_message(odev, hdr,
 				      odev->rx_buf + OBMF_COMMON_HDR_SIZE,
-				      urb->actual_length - OBMF_COMMON_HDR_SIZE);
+				      actual_payload);
 		goto resubmit;
 	}
 

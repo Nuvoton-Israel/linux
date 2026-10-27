@@ -671,6 +671,12 @@ struct obmf_device {
 
 	/* STALL recovery */
 	unsigned int		bulk_in_stall_count;
+
+	/* Progress of a message addressed to a channel that does not exist */
+	bool			unk_active;
+	u8			unk_channel;
+	u8			unk_status_rqresp;
+	int			unk_remaining;
 	unsigned int		bulk_out_stall_count;
 	struct work_struct	stall_work;
 	unsigned long		stall_flags;
