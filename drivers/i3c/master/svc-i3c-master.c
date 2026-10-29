@@ -664,8 +664,15 @@ static int svc_i3c_master_handle_ibiwon(struct svc_i3c_master *master)
 	switch (ibitype) {
 	case SVC_I3C_MSTATUS_IBITYPE_IBI:
 		dev = svc_i3c_master_dev_from_addr(master, ibiaddr);
-		/* Bypass the invalid ibi with address 0 */
-		if (!dev || ibiaddr == 0) {
+		data = dev ? i3c_dev_get_master_data(dev) : NULL;
+		/*
+		 * Bypass the invalid ibi with address 0, and NACK IBIs from
+		 * devices without a live and enabled IBI. ibi_pool and ibi_map
+		 * are updated under req_lock, which is held here.
+		 */
+		if (!dev || ibiaddr == 0 || !data || !data->ibi_pool ||
+		    data->ibi < 0 || !(master->ibi_map & BIT(data->ibi))) {
+			dev = NULL;
 			svc_i3c_master_nack_ibi(master);
 			break;
 		}
@@ -2163,14 +2170,20 @@ static void svc_i3c_master_free_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	struct i3c_generic_ibi_pool *pool;
 	unsigned long flags;
+
+	spin_lock_irqsave(&master->req_lock, flags);
+	pool = data->ibi_pool;
+	data->ibi_pool = NULL;
+	spin_unlock_irqrestore(&master->req_lock, flags);
 
 	spin_lock_irqsave(&master->ibi.lock, flags);
 	master->ibi.slots[data->ibi] = NULL;
 	data->ibi = -1;
 	spin_unlock_irqrestore(&master->ibi.lock, flags);
 
-	i3c_generic_ibi_free_pool(data->ibi_pool);
+	i3c_generic_ibi_free_pool(pool);
 }
 
 static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
@@ -2178,6 +2191,7 @@ static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	unsigned long flags;
 	int ret;
 
 	ret = pm_runtime_resume_and_get(master->dev);
@@ -2186,12 +2200,21 @@ static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 		return ret;
 	}
 
-	ret = i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
-	if (ret)
-		return ret;
-
+	/* Mark enabled before ENEC so an immediate IBI is not NACKed */
+	spin_lock_irqsave(&master->req_lock, flags);
 	if (data->ibi >= 0)
-		master->ibi_map |= (1 << data->ibi);
+		master->ibi_map |= BIT(data->ibi);
+	spin_unlock_irqrestore(&master->req_lock, flags);
+
+	ret = i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
+	if (ret) {
+		spin_lock_irqsave(&master->req_lock, flags);
+		if (data->ibi >= 0)
+			master->ibi_map &= ~BIT(data->ibi);
+		spin_unlock_irqrestore(&master->req_lock, flags);
+		return ret;
+	}
+
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
 
 	return 0;
@@ -2202,10 +2225,13 @@ static int svc_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	unsigned long flags;
 	int ret;
 
+	spin_lock_irqsave(&master->req_lock, flags);
 	if (data->ibi >= 0)
-		master->ibi_map &= ~(1 << data->ibi);
+		master->ibi_map &= ~BIT(data->ibi);
+	spin_unlock_irqrestore(&master->req_lock, flags);
 	if (!master->ibi_map && !master->en_hj)
 		writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MINTCLR);
 
