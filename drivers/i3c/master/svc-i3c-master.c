@@ -610,7 +610,16 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 	switch (ibitype) {
 	case SVC_I3C_MSTATUS_IBITYPE_IBI:
 		dev = svc_i3c_master_dev_from_addr(master, ibiaddr);
-		if (!dev || !is_events_enabled(master, SVC_I3C_EVENT_IBI)) {
+		data = dev ? i3c_dev_get_master_data(dev) : NULL;
+		/*
+		 * Bypass the invalid ibi with address 0, and NACK IBIs from
+		 * devices without a live and enabled IBI. IBI state is protected
+		 * by ibi.lock, which is held by the interrupt handler.
+		 */
+		if (!dev || ibiaddr == 0 || !data || !data->ibi_pool ||
+		    data->ibi < 0 ||
+		    !(master->enabled_events & BIT(data->ibi))) {
+			dev = NULL;
 			svc_i3c_master_nack_ibi(master);
 		} else {
 			if (dev->info.bcr & I3C_BCR_IBI_PAYLOAD)
@@ -683,6 +692,7 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 {
 	struct svc_i3c_master *master = (struct svc_i3c_master *)dev_id;
+	unsigned long flags;
 	u32 active = readl(master->regs + SVC_I3C_MSTATUS);
 
 	if (!SVC_I3C_MSTATUS_SLVSTART(active))
@@ -709,7 +719,9 @@ static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 	 * Receive the request in the interrupt context to respond promptly
 	 * and restore the bus to idle state.
 	 */
+	spin_lock_irqsave(&master->ibi.lock, flags);
 	svc_i3c_master_ibi_isr(master);
+	spin_unlock_irqrestore(&master->ibi.lock, flags);
 
 	return IRQ_HANDLED;
 }
@@ -1864,6 +1876,7 @@ static int svc_i3c_master_request_ibi(struct i3c_dev_desc *dev,
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	struct i3c_generic_ibi_pool *pool;
 	unsigned long flags;
 	unsigned int i;
 
@@ -1873,15 +1886,17 @@ static int svc_i3c_master_request_ibi(struct i3c_dev_desc *dev,
 		return -ERANGE;
 	}
 
-	data->ibi_pool = i3c_generic_ibi_alloc_pool(dev, req);
-	if (IS_ERR(data->ibi_pool))
-		return PTR_ERR(data->ibi_pool);
+	pool = i3c_generic_ibi_alloc_pool(dev, req);
+	if (IS_ERR(pool))
+		return PTR_ERR(pool);
 
 	spin_lock_irqsave(&master->ibi.lock, flags);
+	data->ibi = -1;
 	for (i = 0; i < master->ibi.num_slots; i++) {
 		if (!master->ibi.slots[i]) {
 			data->ibi = i;
 			master->ibi.slots[i] = dev;
+			data->ibi_pool = pool;
 			break;
 		}
 	}
@@ -1890,8 +1905,7 @@ static int svc_i3c_master_request_ibi(struct i3c_dev_desc *dev,
 	if (i < master->ibi.num_slots)
 		return 0;
 
-	i3c_generic_ibi_free_pool(data->ibi_pool);
-	data->ibi_pool = NULL;
+	i3c_generic_ibi_free_pool(pool);
 
 	return -ENOSPC;
 }
@@ -1901,14 +1915,22 @@ static void svc_i3c_master_free_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	struct i3c_generic_ibi_pool *pool;
 	unsigned long flags;
 
 	spin_lock_irqsave(&master->ibi.lock, flags);
-	master->ibi.slots[data->ibi] = NULL;
-	data->ibi = -1;
+	pool = data->ibi_pool;
+	data->ibi_pool = NULL;
+	if (data->ibi >= 0) {
+		master->enabled_events &= ~BIT(data->ibi);
+		master->ibi.slots[data->ibi] = NULL;
+		data->ibi = -1;
+	}
+	if (!master->enabled_events)
+		svc_i3c_master_disable_interrupts(master);
 	spin_unlock_irqrestore(&master->ibi.lock, flags);
 
-	i3c_generic_ibi_free_pool(data->ibi_pool);
+	i3c_generic_ibi_free_pool(pool);
 }
 
 static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
@@ -1916,6 +1938,7 @@ static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	unsigned long flags;
 	int ret;
 
 	ret = pm_runtime_resume_and_get(master->dev);
@@ -1924,12 +1947,23 @@ static int svc_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 		return ret;
 	}
 
-	ret = i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
-	if (ret)
-		return ret;
-
+	/* Mark enabled before accepting an immediate IBI */
+	spin_lock_irqsave(&master->ibi.lock, flags);
 	if (data->ibi >= 0)
-		master->enabled_events |= (1 << data->ibi);
+		master->enabled_events |= BIT(data->ibi);
+	spin_unlock_irqrestore(&master->ibi.lock, flags);
+
+	ret = i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
+	if (ret) {
+		spin_lock_irqsave(&master->ibi.lock, flags);
+		if (data->ibi >= 0)
+			master->enabled_events &= ~BIT(data->ibi);
+		if (!master->enabled_events)
+			svc_i3c_master_disable_interrupts(master);
+		spin_unlock_irqrestore(&master->ibi.lock, flags);
+		return ret;
+	}
+
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
 
 	return 0;
@@ -1940,12 +1974,15 @@ static int svc_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	unsigned long flags;
 	int ret;
 
+	spin_lock_irqsave(&master->ibi.lock, flags);
 	if (data->ibi >= 0)
-		master->enabled_events &= ~(1 << data->ibi);
+		master->enabled_events &= ~BIT(data->ibi);
 	if (!master->enabled_events)
 		svc_i3c_master_disable_interrupts(master);
+	spin_unlock_irqrestore(&master->ibi.lock, flags);
 
 	ret = i3c_master_disec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
 
@@ -1958,6 +1995,7 @@ static int svc_i3c_master_enable_hotjoin(struct i3c_master_controller *m)
 {
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
 	int ret;
+	unsigned long flags;
 
 	ret = pm_runtime_resume_and_get(master->dev);
 	if (ret < 0) {
@@ -1965,7 +2003,9 @@ static int svc_i3c_master_enable_hotjoin(struct i3c_master_controller *m)
 		return ret;
 	}
 
+	spin_lock_irqsave(&master->ibi.lock, flags);
 	master->enabled_events |= SVC_I3C_EVENT_HOTJOIN;
+	spin_unlock_irqrestore(&master->ibi.lock, flags);
 
 	i3c_master_enec_locked(m, I3C_BROADCAST_ADDR, I3C_CCC_EVENT_HJ);
 	svc_i3c_master_enable_interrupts(master, SVC_I3C_MINT_SLVSTART);
@@ -1976,11 +2016,14 @@ static int svc_i3c_master_enable_hotjoin(struct i3c_master_controller *m)
 static int svc_i3c_master_disable_hotjoin(struct i3c_master_controller *m)
 {
 	struct svc_i3c_master *master = to_svc_i3c_master(m);
+	unsigned long flags;
 
+	spin_lock_irqsave(&master->ibi.lock, flags);
 	master->enabled_events &= ~SVC_I3C_EVENT_HOTJOIN;
 
 	if (!master->enabled_events)
 		svc_i3c_master_disable_interrupts(master);
+	spin_unlock_irqrestore(&master->ibi.lock, flags);
 
 	pm_runtime_put_autosuspend(master->dev);
 
@@ -2071,6 +2114,7 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 	}
 	INIT_WORK(&master->hj_work, svc_i3c_master_hj_work);
 	mutex_init(&master->lock);
+	spin_lock_init(&master->ibi.lock);
 
 	ret = devm_request_irq(dev, master->irq, svc_i3c_master_irq_handler,
 			       IRQF_NO_SUSPEND, "svc-i3c-irq", master);
@@ -2082,7 +2126,6 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 	spin_lock_init(&master->xferqueue.lock);
 	INIT_LIST_HEAD(&master->xferqueue.list);
 
-	spin_lock_init(&master->ibi.lock);
 	master->ibi.num_slots = SVC_I3C_MAX_DEVS;
 	master->ibi.slots = devm_kcalloc(&pdev->dev, master->ibi.num_slots,
 					 sizeof(*master->ibi.slots),
