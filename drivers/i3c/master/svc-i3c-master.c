@@ -436,9 +436,9 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 {
 	struct svc_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
 	struct i3c_ibi_slot *slot;
-	unsigned int count;
-	u32 mdatactrl;
-	int ret, val;
+	unsigned int count, max_len;
+	u32 mdatactrl, val;
+	int ret;
 	u8 *buf;
 
 	/*
@@ -459,16 +459,29 @@ static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 		return -ENOSPC;
 	}
 
+	/* Slot buffers are sized by the consumer's max_payload_len */
+	max_len = min_t(unsigned int, dev->ibi->max_payload_len,
+			SVC_I3C_FIFO_SIZE);
 	slot->len = 0;
 	buf = slot->data;
 
-	while (SVC_I3C_MSTATUS_RXPEND(readl(master->regs + SVC_I3C_MSTATUS))  &&
-	       slot->len < SVC_I3C_FIFO_SIZE) {
+	while (SVC_I3C_MSTATUS_RXPEND(readl(master->regs + SVC_I3C_MSTATUS)) &&
+	       slot->len < max_len) {
 		mdatactrl = readl(master->regs + SVC_I3C_MDATACTRL);
-		count = SVC_I3C_MDATACTRL_RXCOUNT(mdatactrl);
+		count = min_t(unsigned int, SVC_I3C_MDATACTRL_RXCOUNT(mdatactrl),
+			      max_len - slot->len);
+		if (!count)
+			break;
 		readsb(master->regs + SVC_I3C_MRDATAB, buf, count);
 		slot->len += count;
 		buf += count;
+	}
+
+	if (SVC_I3C_MSTATUS_RXPEND(readl(master->regs + SVC_I3C_MSTATUS))) {
+		dev_dbg_ratelimited(master->dev,
+				    "IBI payload exceeds %u bytes, truncated\n",
+				    max_len);
+		writel(SVC_I3C_MDATACTRL_FLUSHRB, master->regs + SVC_I3C_MDATACTRL);
 	}
 
 	master->ibi.tbq_slot = slot;
