@@ -15,25 +15,12 @@
 #include <linux/platform_device.h>
 #include <linux/poll.h>
 #include <linux/regmap.h>
+#include <linux/soc/nuvoton/npcm-espi.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/npcm_flash.h>
 
 #define DEVICE_NAME "npcm-espi-flash"
-#define ESPIIE 0x0C
-#define  ESPIIE_CFGUPDIE BIT(1)
-#define  ESPIIE_FLASHRXIE BIT(4)
-#define  ESPIIE_SFLASHRDIE BIT(5)
-
-#define ESPICFG 0x04
-#define  ESPICFG_HFLASHCHANEN BIT(7)
-#define  ESPICFG_FLASHCHANEN BIT(3)
-
-#define ESPISTS 0x08
-#define  ESPISTS_FLASHRX BIT(4)
-#define  ESPISTS_SFLASHRD BIT(5)
-#define  ESPISTS_CFGUPD BIT(1)
-
 #define FLASHRXRDHEAD 0x28
 #define FLASHTXWRHEAD 0x2C
 
@@ -377,10 +364,10 @@ static irqreturn_t npcm_espi_flash_irq_handler(int irq, void *arg)
 	uint16_t length;
 	bool tovr;
 
-	regmap_read(priv->espi_regmap, ESPISTS, &val);
+	regmap_read(priv->espi_regmap, NPCM_ESPI_ESPISTS, &val);
 
-	if (val & ESPISTS_SFLASHRD) {
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_SFLASHRD);
+	if (val & NPCM_ESPI_SFLASHRD) {
+		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_SFLASHRD);
 		regmap_update_bits(priv->espi_regmap, FLASHCTL,
 				   FLASHCTL_RSTBUFHEADS, FLASHCTL_RSTBUFHEADS);
 
@@ -393,8 +380,8 @@ static irqreturn_t npcm_espi_flash_irq_handler(int irq, void *arg)
 				   FLASHCTL_FLASH_ACC_NP_FREE);
 	}
 
-	if (val & ESPISTS_FLASHRX) {
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_FLASHRX);
+	if (val & NPCM_ESPI_FLASHRX) {
+		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_FLASHRX);
 
 		regmap_read(priv->espi_regmap, FLASHRXRDHEAD, &val);
 
@@ -424,19 +411,19 @@ static irqreturn_t npcm_espi_flash_irq_handler(int irq, void *arg)
 			npcm_espi_flash_erase(priv, tag, address, length, tovr);
 	}
 
-	if (val & ESPISTS_CFGUPD) {
-		regmap_read(priv->espi_regmap, ESPICFG, &reg);
-		if (reg & ESPICFG_HFLASHCHANEN) {
+	if (val & NPCM_ESPI_CFGUPD) {
+		regmap_read(priv->espi_regmap, NPCM_ESPI_ESPICFG, &reg);
+		if (reg & NPCM_ESPI_ESPICFG_HFLASHCHANEN) {
 			regmap_update_bits(priv->espi_regmap, FLASHCTL,
 					   FLASHCTL_SAF_AUTO_READ, 0);
 			regmap_update_bits(priv->espi_regmap, FLASHCFG,
 					   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68),
 					   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68));
 			regmap_read(priv->espi_regmap, FLASHCTL, &reg);
-			regmap_update_bits(priv->espi_regmap, ESPICFG,
-					   ESPICFG_FLASHCHANEN, ESPICFG_FLASHCHANEN);
+			regmap_update_bits(priv->espi_regmap, NPCM_ESPI_ESPICFG,
+					   NPCM_ESPI_ESPICFG_FLASHCHANEN, NPCM_ESPI_ESPICFG_FLASHCHANEN);
 		}
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_CFGUPD);
+		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_CFGUPD);
 	}
 
 	return IRQ_HANDLED;
@@ -492,10 +479,10 @@ static void npcm_espi_flash_enable(struct npcm_espi_flash *priv)
 {
 	regmap_update_bits(priv->gcr_regmap, INTCR4,
 			   INTCR4_ESPI_SAFSEN, INTCR4_ESPI_SAFSEN);
-	regmap_update_bits(priv->espi_regmap, ESPIIE, ESPIIE_FLASHRXIE |
-			   ESPIIE_SFLASHRDIE | ESPIIE_CFGUPDIE,
-			   ESPIIE_FLASHRXIE | ESPIIE_SFLASHRDIE |
-			   ESPIIE_CFGUPDIE);
+	regmap_update_bits(priv->espi_regmap, NPCM_ESPI_ESPIIE, NPCM_ESPI_FLASHRX |
+			   NPCM_ESPI_SFLASHRD | NPCM_ESPI_CFGUPD,
+			   NPCM_ESPI_FLASHRX | NPCM_ESPI_SFLASHRD |
+			   NPCM_ESPI_CFGUPD);
 	regmap_update_bits(priv->espi_regmap, FLASHCTL,
 			   FLASHCTL_SAF_AUTO_READ, 0);
 	regmap_update_bits(priv->espi_regmap, FLASHCFG,
