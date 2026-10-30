@@ -17,6 +17,7 @@
 #include <linux/regmap.h>
 #include <linux/sched/signal.h>
 #include <linux/spinlock.h>
+#include <linux/notifier.h>
 #include <linux/uaccess.h>
 #include <linux/soc/nuvoton/npcm-espi.h>
 
@@ -25,7 +26,7 @@
 struct npcm_espi_slave {
 	struct regmap		*espi_regmap;
 	struct device		*dev;
-	int			irq;
+	struct notifier_block	nb;
 
 	/* for PLTRST_N signal monitoring interface */
 	struct miscdevice	miscdev;
@@ -36,78 +37,54 @@ struct npcm_espi_slave {
 };
 
 
-/*
- * CFGUPD is shared with spi-npcm-flash, which is the only one that clears the
- * status when the flash channel is built in.  Its enable therefore belongs to
- * it, and @cfgupd lets the caller say whether this driver may switch the bit
- * on: never while spi-npcm-flash may still be waiting to probe, always once a
- * reset has cleared an enable it had already set.
- */
-static void npcm_espi_slave_config_irq(struct npcm_espi_slave *priv,
-				       bool cfgupd)
+static void npcm_espi_slave_report(struct npcm_espi_slave *priv, char pltrstn)
 {
-	u32 ie = NPCM_ESPI_IRQ_SLAVE;
+	unsigned long flags;
 
-	if (cfgupd)
-		ie |= NPCM_ESPI_CFGUPD;
+	spin_lock_irqsave(&priv->pltrstn_lock, flags);
+	priv->pltrstn = pltrstn;
+	priv->pltrstn_in_avail = true;
+	spin_unlock_irqrestore(&priv->pltrstn_lock, flags);
 
-	regmap_update_bits(priv->espi_regmap, NPCM_ESPI_ESPIIE, ie, ie);
+	wake_up_interruptible(&priv->pltrstn_waitq);
 }
 
-static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
+static irqreturn_t npcm_espi_slave_pltrst_irq(int irq, void *arg)
 {
-	struct npcm_espi_slave *priv = arg;
-	u32 sts, evms1, handled = 0;
+	npcm_espi_slave_report(arg, '0');
 
-	regmap_read(priv->espi_regmap, NPCM_ESPI_ESPISTS, &sts);
-	regmap_read(priv->espi_regmap, NPCM_ESPI_VWEVMS(1), &evms1);
+	return IRQ_HANDLED;
+}
 
-	if (sts & NPCM_ESPI_PLTRST) {
-		spin_lock(&priv->pltrstn_lock);
-		priv->pltrstn = '0';
-		priv->pltrstn_in_avail = true;
-		spin_unlock(&priv->pltrstn_lock);
-		wake_up_interruptible(&priv->pltrstn_waitq);
+static irqreturn_t npcm_espi_slave_espirst_irq(int irq, void *arg)
+{
+	npcm_espi_slave_report(arg, 'U');
 
-		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_PLTRST);
-		handled |= NPCM_ESPI_PLTRST;
-	}
+	return IRQ_HANDLED;
+}
 
-	if (sts & NPCM_ESPI_ESPIRST) {
-		spin_lock(&priv->pltrstn_lock);
-		priv->pltrstn = 'U';
-		priv->pltrstn_in_avail = true;
-		spin_unlock(&priv->pltrstn_lock);
-		wake_up_interruptible(&priv->pltrstn_waitq);
+/*
+ * Until the host has told us what PLTRST_N is doing the level is reported
+ * as 'U'.  It says so as part of a configuration update, which is not an
+ * interrupt of ours, so take it from the broadcast the eSPI block makes.
+ */
+static int npcm_espi_slave_cfgupd(struct notifier_block *nb,
+				  unsigned long event, void *data)
+{
+	struct npcm_espi_slave *priv = container_of(nb, struct npcm_espi_slave,
+						    nb);
+	unsigned int evms1;
 
-		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_ESPIRST);
-		handled |= NPCM_ESPI_ESPIRST;
+	if (event != NPCM_ESPI_EVENT_CFGUPD)
+		return NOTIFY_DONE;
 
-		npcm_espi_slave_config_irq(priv, true);
-	}
+	if (regmap_read(priv->espi_regmap, NPCM_ESPI_VWEVMS(1), &evms1))
+		return NOTIFY_DONE;
 
-	if (sts & NPCM_ESPI_CFGUPD) {
-		spin_lock(&priv->pltrstn_lock);
-		priv->pltrstn = (evms1 & NPCM_ESPI_VWEVMS_PLTRST) ? '1' : '0';
-		priv->pltrstn_in_avail = true;
-		spin_unlock(&priv->pltrstn_lock);
-		wake_up_interruptible(&priv->pltrstn_waitq);
+	npcm_espi_slave_report(priv,
+			       (evms1 & NPCM_ESPI_VWEVMS_PLTRST) ? '1' : '0');
 
-		/*
-		 * Sampling the state is all this driver does with CFGUPD; the
-		 * status belongs to spi-npcm-flash, which has more work to do
-		 * before it may be cleared.  Leave it out of @handled so that
-		 * a stuck bit reaches the spurious interrupt detector instead
-		 * of being reported as serviced.
-		 */
-		if (!IS_ENABLED(CONFIG_SPI_NPCM_FLASH)) {
-			regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS,
-				     NPCM_ESPI_CFGUPD);
-			handled |= NPCM_ESPI_CFGUPD;
-		}
-	}
-
-	return handled ? IRQ_HANDLED : IRQ_NONE;
+	return NOTIFY_OK;
 }
 
 static inline struct npcm_espi_slave *to_npcm_espi_slave(struct file *filp)
@@ -211,7 +188,7 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct npcm_espi_slave *priv;
-	int ret;
+	int irq, ret;
 
 	priv = devm_kzalloc(dev, sizeof(struct npcm_espi_slave), GFP_KERNEL);
 	if (!priv)
@@ -232,10 +209,6 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	priv->irq = platform_get_irq(pdev, 0);
-	if (priv->irq < 0)
-		return priv->irq;
-
 	spin_lock_init(&priv->pltrstn_lock);
 	init_waitqueue_head(&priv->pltrstn_waitq);
 
@@ -244,30 +217,37 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(dev, priv);
 
-	/*
-	 * Drop what the bootloader left latched, but only for the status this
-	 * driver owns.  A latched CFGUPD is what makes the interrupt fire once
-	 * spi-npcm-flash enables it, and both drivers still need that first
-	 * event: one to set the flash channel up, the other to learn the
-	 * PLTRST_N level it reports as 'U' until then.
-	 */
-	regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS,
-		     NPCM_ESPI_IRQ_SLAVE);
+	priv->nb.notifier_call = npcm_espi_slave_cfgupd;
+	ret = devm_npcm_espi_register_notifier(dev, &priv->nb);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to subscribe to cfgupd\n");
 
-	ret = devm_request_irq(dev, priv->irq, npcm_espi_slave_irq_handler,
-			       IRQF_SHARED, "espi-slave", priv);
-	if (ret) {
-		dev_err(dev, "failed to request IRQ\n");
-		return ret;
-	}
+	irq = platform_get_irq_byname(pdev, "pltrst");
+	if (irq < 0)
+		return irq;
+
+	ret = devm_request_threaded_irq(dev, irq, NULL,
+					npcm_espi_slave_pltrst_irq, IRQF_ONESHOT,
+					"espi-pltrst", priv);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to request pltrst\n");
+
+	irq = platform_get_irq_byname(pdev, "espirst");
+	if (irq < 0)
+		return irq;
+
+	ret = devm_request_threaded_irq(dev, irq, NULL,
+					npcm_espi_slave_espirst_irq, IRQF_ONESHOT,
+					"espi-espirst", priv);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to request espirst\n");
 
 	ret = misc_register(&priv->miscdev);
 	if (ret) {
 		dev_err(dev, "Unable to register device\n");
 		return ret;
 	}
-
-	npcm_espi_slave_config_irq(priv, !IS_ENABLED(CONFIG_SPI_NPCM_FLASH));
 
 	return 0;
 

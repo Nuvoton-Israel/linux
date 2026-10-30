@@ -66,4 +66,34 @@ static_assert(!(NPCM_ESPI_IRQ_SLAVE & NPCM_ESPI_IRQ_VWGPIO),
 static_assert(!(NPCM_ESPI_IRQ_FLASH & NPCM_ESPI_IRQ_VWGPIO),
 	      "espi-flash and espi-vwgpio claim the same status bit");
 
+/*
+ * Interrupt lines the eSPI block offers its children.  These are the
+ * numbers a child names in its "interrupts" property; they are an index
+ * into the controller's domain and are unrelated to the bit positions
+ * above.  Keep them in sync with the bindings.
+ */
+#define NPCM_ESPI_IRQ_LINE_CFGUPD	0
+#define NPCM_ESPI_IRQ_LINE_FLASHRX	1
+#define NPCM_ESPI_IRQ_LINE_SFLASHRD	2
+#define NPCM_ESPI_IRQ_LINE_VWUPD	3
+#define NPCM_ESPI_IRQ_LINE_ESPIRST	4
+#define NPCM_ESPI_IRQ_LINE_PLTRST	5
+
+/* Events broadcast by the eSPI block to its children. */
+#define NPCM_ESPI_EVENT_CFGUPD		0
+
+struct device;
+struct notifier_block;
+
+#if IS_ENABLED(CONFIG_NPCM_ESPI)
+int devm_npcm_espi_register_notifier(struct device *dev,
+				     struct notifier_block *nb);
+#else
+static inline int devm_npcm_espi_register_notifier(struct device *dev,
+						   struct notifier_block *nb)
+{
+	return -ENODEV;
+}
+#endif
+
 #endif /* __SOC_NUVOTON_NPCM_ESPI_H */
