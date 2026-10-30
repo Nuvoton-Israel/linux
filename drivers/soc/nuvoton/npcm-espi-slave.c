@@ -18,21 +18,9 @@
 #include <linux/sched/signal.h>
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
+#include <linux/soc/nuvoton/npcm-espi.h>
 
 #define DEVICE_NAME "espi-pltrstn"
-
-#define ESPISTS			0x008
-#define  ESPISTS_PLTRST		BIT(10)
-#define  ESPISTS_ESPIRST	BIT(9)
-#define  ESPISTS_CFGUPD		BIT(1)
-
-#define ESPIIE			0x00C
-#define  ESPIIE_PLTRSTIE	BIT(10)
-#define  ESPIIE_ESPIRSTIE	BIT(9)
-#define  ESPIIE_CFGUPDIE	BIT(1)
-
-#define VWEVMS1			0x144
-#define  VWEVMS1_PLTRST		BIT(1)
 
 struct npcm_espi_slave {
 	struct regmap		*espi_regmap;
@@ -57,12 +45,12 @@ struct npcm_espi_slave {
 static void npcm_espi_slave_config_irq(struct npcm_espi_slave *priv,
 				       bool cfgupd)
 {
-	u32 ie = ESPIIE_PLTRSTIE | ESPIIE_ESPIRSTIE;
+	u32 ie = NPCM_ESPI_IRQ_SLAVE;
 
 	if (cfgupd)
-		ie |= ESPIIE_CFGUPDIE;
+		ie |= NPCM_ESPI_CFGUPD;
 
-	regmap_update_bits(priv->espi_regmap, ESPIIE, ie, ie);
+	regmap_update_bits(priv->espi_regmap, NPCM_ESPI_ESPIIE, ie, ie);
 }
 
 static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
@@ -70,36 +58,36 @@ static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 	struct npcm_espi_slave *priv = arg;
 	u32 sts, evms1, handled = 0;
 
-	regmap_read(priv->espi_regmap, ESPISTS, &sts);
-	regmap_read(priv->espi_regmap, VWEVMS1, &evms1);
+	regmap_read(priv->espi_regmap, NPCM_ESPI_ESPISTS, &sts);
+	regmap_read(priv->espi_regmap, NPCM_ESPI_VWEVMS(1), &evms1);
 
-	if (sts & ESPISTS_PLTRST) {
+	if (sts & NPCM_ESPI_PLTRST) {
 		spin_lock(&priv->pltrstn_lock);
 		priv->pltrstn = '0';
 		priv->pltrstn_in_avail = true;
 		spin_unlock(&priv->pltrstn_lock);
 		wake_up_interruptible(&priv->pltrstn_waitq);
 
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_PLTRST);
-		handled |= ESPISTS_PLTRST;
+		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_PLTRST);
+		handled |= NPCM_ESPI_PLTRST;
 	}
 
-	if (sts & ESPISTS_ESPIRST) {
+	if (sts & NPCM_ESPI_ESPIRST) {
 		spin_lock(&priv->pltrstn_lock);
 		priv->pltrstn = 'U';
 		priv->pltrstn_in_avail = true;
 		spin_unlock(&priv->pltrstn_lock);
 		wake_up_interruptible(&priv->pltrstn_waitq);
 
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_ESPIRST);
-		handled |= ESPISTS_ESPIRST;
+		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_ESPIRST);
+		handled |= NPCM_ESPI_ESPIRST;
 
 		npcm_espi_slave_config_irq(priv, true);
 	}
 
-	if (sts & ESPISTS_CFGUPD) {
+	if (sts & NPCM_ESPI_CFGUPD) {
 		spin_lock(&priv->pltrstn_lock);
-		priv->pltrstn = (evms1 & VWEVMS1_PLTRST) ? '1' : '0';
+		priv->pltrstn = (evms1 & NPCM_ESPI_VWEVMS_PLTRST) ? '1' : '0';
 		priv->pltrstn_in_avail = true;
 		spin_unlock(&priv->pltrstn_lock);
 		wake_up_interruptible(&priv->pltrstn_waitq);
@@ -112,9 +100,9 @@ static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 		 * of being reported as serviced.
 		 */
 		if (!IS_ENABLED(CONFIG_SPI_NPCM_FLASH)) {
-			regmap_write(priv->espi_regmap, ESPISTS,
-				     ESPISTS_CFGUPD);
-			handled |= ESPISTS_CFGUPD;
+			regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS,
+				     NPCM_ESPI_CFGUPD);
+			handled |= NPCM_ESPI_CFGUPD;
 		}
 	}
 
@@ -258,8 +246,8 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 	 * event: one to set the flash channel up, the other to learn the
 	 * PLTRST_N level it reports as 'U' until then.
 	 */
-	regmap_write(priv->espi_regmap, ESPISTS,
-		     ESPISTS_PLTRST | ESPISTS_ESPIRST);
+	regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS,
+		     NPCM_ESPI_IRQ_SLAVE);
 
 	ret = devm_request_irq(dev, priv->irq, npcm_espi_slave_irq_handler,
 			       IRQF_SHARED, "espi-slave", priv);
