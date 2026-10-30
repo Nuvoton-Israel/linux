@@ -14,6 +14,7 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/poll.h>
+#include <linux/notifier.h>
 #include <linux/regmap.h>
 #include <linux/soc/nuvoton/npcm-espi.h>
 
@@ -122,8 +123,8 @@ struct npcm_espi_flash
 	dma_addr_t		phys_addr;
 	resource_size_t		flash_size;
 	u8 __iomem		*vaddr;
-	int			irq;
 	struct miscdevice	miscdev;
+	struct notifier_block	nb;
 };
 
 static bool npcm_espi_check_tag_ovr(struct npcm_espi_flash *priv,
@@ -356,77 +357,92 @@ static long npcm_espi_flash_erase(struct npcm_espi_flash *priv, int tag,
 	return ret;
 }
 
-static irqreturn_t npcm_espi_flash_irq_handler(int irq, void *arg)
+static irqreturn_t npcm_espi_flash_sflashrd_irq(int irq, void *arg)
 {
 	struct npcm_espi_flash *priv = arg;
-	uint32_t val, address, reg;
-	uint8_t command, tag;
-	uint16_t length;
-	bool tovr;
 
-	regmap_read(priv->espi_regmap, NPCM_ESPI_ESPISTS, &val);
+	regmap_update_bits(priv->espi_regmap, FLASHCTL,
+			   FLASHCTL_RSTBUFHEADS, FLASHCTL_RSTBUFHEADS);
 
-	if (val & NPCM_ESPI_SFLASHRD) {
-		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_SFLASHRD);
-		regmap_update_bits(priv->espi_regmap, FLASHCTL,
-				   FLASHCTL_RSTBUFHEADS, FLASHCTL_RSTBUFHEADS);
-
-		/*
-		 * In case the FLASHRX and SFLASHRD irq arrive at same time,
-		 * set FLASHCTL_FLASH_ACC_NP_FREE bit after the SFLASHRD occurred.
-		 */
-		regmap_update_bits(priv->espi_regmap, FLASHCTL,
-				   FLASHCTL_FLASH_ACC_NP_FREE,
-				   FLASHCTL_FLASH_ACC_NP_FREE);
-	}
-
-	if (val & NPCM_ESPI_FLASHRX) {
-		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_FLASHRX);
-
-		regmap_read(priv->espi_regmap, FLASHRXRDHEAD, &val);
-
-		// Handle type. tag and length
-		command = (uint8_t)((val & 0x0000FF00) >> 8);
-		tag = (uint8_t)((val & 0x00F00000) >> 20);
-		length = (uint16_t)(((val & 0xFF000000) >> 24) |
-			 ((val & 0x000F0000) >> 8));
-
-		regmap_read(priv->espi_regmap, FLASHRXRDHEAD, &val);
-
-		// Handle address
-		address = ((val & 0xFF000000) >> 24) |
-			  ((val & 0x00FF0000) >> 8) |
-			  ((val & 0x0000FF00) << 8) |
-			  ((val & 0x000000FF) << 24);
-
-		tovr = npcm_espi_check_addr(priv, command, tag, address);
-
-		trace_npcm_flash(command, address, length);
-
-		if (command == ESPI_SAF_CMD_READ)
-			npcm_espi_flash_read(priv, tag, address, length, tovr);
-		else if (command == ESPI_SAF_CMD_WRITE)
-			npcm_espi_flash_write(priv, tag, address, length, tovr);
-		else if (command == ESPI_SAF_CMD_ERASE)
-			npcm_espi_flash_erase(priv, tag, address, length, tovr);
-	}
-
-	if (val & NPCM_ESPI_CFGUPD) {
-		regmap_read(priv->espi_regmap, NPCM_ESPI_ESPICFG, &reg);
-		if (reg & NPCM_ESPI_ESPICFG_HFLASHCHANEN) {
-			regmap_update_bits(priv->espi_regmap, FLASHCTL,
-					   FLASHCTL_SAF_AUTO_READ, 0);
-			regmap_update_bits(priv->espi_regmap, FLASHCFG,
-					   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68),
-					   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68));
-			regmap_read(priv->espi_regmap, FLASHCTL, &reg);
-			regmap_update_bits(priv->espi_regmap, NPCM_ESPI_ESPICFG,
-					   NPCM_ESPI_ESPICFG_FLASHCHANEN, NPCM_ESPI_ESPICFG_FLASHCHANEN);
-		}
-		regmap_write(priv->espi_regmap, NPCM_ESPI_ESPISTS, NPCM_ESPI_CFGUPD);
-	}
+	/*
+	 * In case the FLASHRX and SFLASHRD irq arrive at same time,
+	 * set FLASHCTL_FLASH_ACC_NP_FREE bit after the SFLASHRD occurred.
+	 */
+	regmap_update_bits(priv->espi_regmap, FLASHCTL,
+			   FLASHCTL_FLASH_ACC_NP_FREE,
+			   FLASHCTL_FLASH_ACC_NP_FREE);
 
 	return IRQ_HANDLED;
+}
+
+static irqreturn_t npcm_espi_flash_flashrx_irq(int irq, void *arg)
+{
+	struct npcm_espi_flash *priv = arg;
+	u32 val, address;
+	u8 command, tag;
+	u16 length;
+	bool tovr;
+
+	regmap_read(priv->espi_regmap, FLASHRXRDHEAD, &val);
+
+	// Handle type. tag and length
+	command = (uint8_t)((val & 0x0000FF00) >> 8);
+	tag = (uint8_t)((val & 0x00F00000) >> 20);
+	length = (uint16_t)(((val & 0xFF000000) >> 24) |
+		 ((val & 0x000F0000) >> 8));
+
+	regmap_read(priv->espi_regmap, FLASHRXRDHEAD, &val);
+
+	// Handle address
+	address = ((val & 0xFF000000) >> 24) |
+		  ((val & 0x00FF0000) >> 8) |
+		  ((val & 0x0000FF00) << 8) |
+		  ((val & 0x000000FF) << 24);
+
+	tovr = npcm_espi_check_addr(priv, command, tag, address);
+
+	trace_npcm_flash(command, address, length);
+
+	if (command == ESPI_SAF_CMD_READ)
+		npcm_espi_flash_read(priv, tag, address, length, tovr);
+	else if (command == ESPI_SAF_CMD_WRITE)
+		npcm_espi_flash_write(priv, tag, address, length, tovr);
+	else if (command == ESPI_SAF_CMD_ERASE)
+		npcm_espi_flash_erase(priv, tag, address, length, tovr);
+
+	return IRQ_HANDLED;
+}
+
+/*
+ * The host enables the flash channel as part of a configuration update,
+ * which is a broadcast rather than an interrupt of ours because the
+ * peripheral channel has to see it too.
+ */
+static int npcm_espi_flash_cfgupd(struct notifier_block *nb,
+				  unsigned long event, void *data)
+{
+	struct npcm_espi_flash *priv = container_of(nb, struct npcm_espi_flash,
+						    nb);
+	unsigned int cfg = *(unsigned int *)data;
+	u32 reg;
+
+	if (event != NPCM_ESPI_EVENT_CFGUPD)
+		return NOTIFY_DONE;
+
+	if (!(cfg & NPCM_ESPI_ESPICFG_HFLASHCHANEN))
+		return NOTIFY_OK;
+
+	regmap_update_bits(priv->espi_regmap, FLASHCTL,
+			   FLASHCTL_SAF_AUTO_READ, 0);
+	regmap_update_bits(priv->espi_regmap, FLASHCFG,
+			   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68),
+			   FLASHCAPA(3) | TRGFLASHEBLKSIZE(68));
+	regmap_read(priv->espi_regmap, FLASHCTL, &reg);
+	regmap_update_bits(priv->espi_regmap, NPCM_ESPI_ESPICFG,
+			   NPCM_ESPI_ESPICFG_FLASHCHANEN,
+			   NPCM_ESPI_ESPICFG_FLASHCHANEN);
+
+	return NOTIFY_OK;
 }
 
 static int npcm_espi_flash_mtd_read(struct mtd_info *mtd,
@@ -479,10 +495,6 @@ static void npcm_espi_flash_enable(struct npcm_espi_flash *priv)
 {
 	regmap_update_bits(priv->gcr_regmap, INTCR4,
 			   INTCR4_ESPI_SAFSEN, INTCR4_ESPI_SAFSEN);
-	regmap_update_bits(priv->espi_regmap, NPCM_ESPI_ESPIIE, NPCM_ESPI_FLASHRX |
-			   NPCM_ESPI_SFLASHRD | NPCM_ESPI_CFGUPD,
-			   NPCM_ESPI_FLASHRX | NPCM_ESPI_SFLASHRD |
-			   NPCM_ESPI_CFGUPD);
 	regmap_update_bits(priv->espi_regmap, FLASHCTL,
 			   FLASHCTL_SAF_AUTO_READ, 0);
 	regmap_update_bits(priv->espi_regmap, FLASHCFG,
@@ -493,6 +505,7 @@ static void npcm_espi_flash_enable(struct npcm_espi_flash *priv)
 static int npcm_espi_flash_probe(struct platform_device *pdev)
 {
 	int ret;
+	int irq;
 	struct device_node *node;
 	struct resource resm;
 	struct mtd_info *mtd;
@@ -561,16 +574,31 @@ static int npcm_espi_flash_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	priv->irq = platform_get_irq(pdev, 0);
-	if (priv->irq < 0)
-		return priv->irq;
+	irq = platform_get_irq_byname(pdev, "flashrx");
+	if (irq < 0)
+		return irq;
 
-	ret = devm_request_irq(dev, priv->irq, npcm_espi_flash_irq_handler,
-			       IRQF_SHARED, "espi-flash", priv);
-	if (ret) {
-		dev_err(dev, "failed to request IRQ\n");
-		return ret;
-	}
+	ret = devm_request_threaded_irq(dev, irq, NULL,
+					npcm_espi_flash_flashrx_irq, IRQF_ONESHOT,
+					"espi-flashrx", priv);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to request flashrx\n");
+
+	irq = platform_get_irq_byname(pdev, "sflashrd");
+	if (irq < 0)
+		return irq;
+
+	ret = devm_request_threaded_irq(dev, irq, NULL,
+					npcm_espi_flash_sflashrd_irq, IRQF_ONESHOT,
+					"espi-sflashrd", priv);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to request sflashrd\n");
+
+	priv->nb.notifier_call = npcm_espi_flash_cfgupd;
+	ret = devm_npcm_espi_register_notifier(dev, &priv->nb);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to subscribe to cfgupd\n");
 
 	priv->dev = &pdev->dev;
 
