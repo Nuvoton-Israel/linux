@@ -230,15 +230,8 @@ out:
 static irqreturn_t npcm_vwgpio_irq_handler(int irq, void *dev_id)
 {
 	struct npcm_vwgpio *vwgpio = dev_id;
-	u32 status;
 	int i;
 
-	regmap_read(vwgpio->map, NPCM_ESPI_ESPISTS, &status);
-	if (!(status & NPCM_ESPI_VWUPD))
-		return IRQ_HANDLED;
-
-	/* Clear NPCM_ESPI_VWUPD status */
-	regmap_write(vwgpio->map, NPCM_ESPI_ESPISTS, NPCM_ESPI_VWUPD);
 	/* Check all events */
 	for (i = 0; i < VW_MSGPIO_NUM + VW_MSEV_NUM; i++)
 		npcm_vwgpio_check_event(vwgpio, i);
@@ -399,8 +392,6 @@ static void npcm_vwgpio_init(struct npcm_vwgpio *vwgpio)
 		vwgpio->events[i].state =
 			vwgpio_get_value(&vwgpio->chip, VM_MSGPIO_START + i);
 
-	/* enable VWUPD interrupt */
-	regmap_set_bits(vwgpio->map, NPCM_ESPI_ESPIIE, NPCM_ESPI_VWUPD);
 }
 
 static void npcm_vwgpio_config(struct npcm_vwgpio *vwgpio, u8 intwin,
@@ -521,15 +512,13 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 			return rc;
 		}
 
-		/* Clear NPCM_ESPI_VWUPD status */
-		regmap_write(vwgpio->map, NPCM_ESPI_ESPISTS, NPCM_ESPI_VWUPD);
 		/* Clear NPCM_ESPI_ESPIERR_VWERR status */
 		regmap_write(vwgpio->map, NPCM_ESPI_ESPIERR, NPCM_ESPI_ESPIERR_VWERR);
-		/* Disable VWUPD interrupt */
-		regmap_clear_bits(vwgpio->map, NPCM_ESPI_ESPIIE, NPCM_ESPI_VWUPD);
 
-		rc = devm_request_irq(dev, vwgpio->irq, npcm_vwgpio_irq_handler,
-				      IRQF_SHARED, "espi-vw-gpio", vwgpio);
+		rc = devm_request_threaded_irq(dev, vwgpio->irq, NULL,
+					       npcm_vwgpio_irq_handler,
+					       IRQF_ONESHOT, "espi-vw-gpio",
+					       vwgpio);
 		if (rc) {
 			dev_err(dev, "failed to request IRQ\n");
 			return rc;
