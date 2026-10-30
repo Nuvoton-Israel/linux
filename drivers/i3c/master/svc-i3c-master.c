@@ -209,6 +209,7 @@ struct svc_i3c_drvdata {
  * @addrs: Array containing the dynamic addresses of each attached device
  * @descs: Array of descriptors, one per attached device
  * @hj_work: Hot-join work
+ * @disec_work: Work sending DISEC to targets whose IBIs were NACKed
  * @irq: Main interrupt
  * @num_clks: I3C clock number
  * @fclk: Fast clock (bus)
@@ -226,6 +227,7 @@ struct svc_i3c_drvdata {
  * @drvdata: Driver data
  * @enabled_events: Bit masks for enable events (IBI, HotJoin).
  * @mctrl_config: Configuration value in SVC_I3C_MCTRL for setting speed back.
+ * @disec_addrs: Addresses pending DISEC, protected by @ibi.lock
  */
 struct svc_i3c_master {
 	struct i3c_master_controller base;
@@ -236,6 +238,7 @@ struct svc_i3c_master {
 	u8 addrs[SVC_I3C_MAX_DEVS];
 	struct i3c_dev_desc *descs[SVC_I3C_MAX_DEVS];
 	struct work_struct hj_work;
+	struct work_struct disec_work;
 	int irq;
 	int num_clks;
 	struct clk *fclk;
@@ -263,6 +266,7 @@ struct svc_i3c_master {
 	const struct svc_i3c_drvdata *drvdata;
 	u64 enabled_events;
 	u32 mctrl_config;
+	DECLARE_BITMAP(disec_addrs, I3C_MAX_ADDR + 1);
 };
 
 /**
@@ -431,6 +435,52 @@ static void svc_i3c_master_emit_stop(struct svc_i3c_master *master)
 			   SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
 }
 
+static void svc_i3c_master_disec_work(struct work_struct *work)
+{
+	struct svc_i3c_master *master;
+	struct svc_i3c_i2c_dev_data *data;
+	struct i3c_dev_desc *dev;
+	unsigned long flags, addr;
+	bool enabled;
+
+	master = container_of(work, struct svc_i3c_master, disec_work);
+
+	down_write(&master->base.bus.lock);
+	for (;;) {
+		spin_lock_irqsave(&master->ibi.lock, flags);
+		addr = find_first_bit(master->disec_addrs, I3C_MAX_ADDR + 1);
+		if (addr > I3C_MAX_ADDR) {
+			spin_unlock_irqrestore(&master->ibi.lock, flags);
+			break;
+		}
+		__clear_bit(addr, master->disec_addrs);
+		/*
+		 * The bus lock excludes enable_ibi(), so skip the DISEC if the
+		 * IBI got enabled after the NACK, otherwise it would undo ENEC.
+		 */
+		dev = svc_i3c_master_dev_from_addr(master, addr);
+		data = dev ? i3c_dev_get_master_data(dev) : NULL;
+		enabled = data && data->ibi >= 0 &&
+			  (master->enabled_events & BIT(data->ibi));
+		spin_unlock_irqrestore(&master->ibi.lock, flags);
+
+		if (!enabled)
+			i3c_master_disec_locked(&master->base, addr,
+						I3C_CCC_EVENT_SIR);
+	}
+
+	/*
+	 * The IBI from an unknown target is NACKed without a STOP. Emit it
+	 * here in case no DISEC was sent (skipped, or failed before reaching
+	 * the bus), otherwise the bus stays busy. No-op if already IDLE.
+	 */
+	spin_lock_irqsave(&master->xferqueue.lock, flags);
+	svc_i3c_master_emit_stop(master);
+	spin_unlock_irqrestore(&master->xferqueue.lock, flags);
+
+	up_write(&master->base.bus.lock);
+}
+
 static int svc_i3c_master_handle_ibi(struct svc_i3c_master *master,
 				     struct i3c_dev_desc *dev)
 {
@@ -546,6 +596,7 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 	struct svc_i3c_i2c_dev_data *data;
 	unsigned int ibitype, ibiaddr;
 	struct i3c_dev_desc *dev;
+	bool unknown_addr = false;
 	u32 status, val;
 	int ret;
 
@@ -609,6 +660,7 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 	switch (ibitype) {
 	case SVC_I3C_MSTATUS_IBITYPE_IBI:
 		dev = svc_i3c_master_dev_from_addr(master, ibiaddr);
+		unknown_addr = !dev && ibiaddr && ibiaddr != I3C_BROADCAST_ADDR;
 		data = dev ? i3c_dev_get_master_data(dev) : NULL;
 		/*
 		 * Bypass the invalid ibi with address 0, and NACK IBIs from
@@ -662,6 +714,12 @@ static void svc_i3c_master_ibi_isr(struct svc_i3c_master *master)
 	/* Handle the non critical tasks */
 	switch (ibitype) {
 	case SVC_I3C_MSTATUS_IBITYPE_IBI:
+		/* Disable the IBI of an unknown target to avoid an IBI storm. */
+		if (unknown_addr) {
+			__set_bit(ibiaddr, master->disec_addrs);
+			queue_work(master->base.wq, &master->disec_work);
+			break;
+		}
 		svc_i3c_master_emit_stop(master);
 		if (dev) {
 			i3c_master_queue_ibi(dev, master->ibi.tbq_slot);
@@ -2112,6 +2170,7 @@ static int svc_i3c_master_probe(struct platform_device *pdev)
 		reset_control_deassert(reset);
 	}
 	INIT_WORK(&master->hj_work, svc_i3c_master_hj_work);
+	INIT_WORK(&master->disec_work, svc_i3c_master_disec_work);
 	mutex_init(&master->lock);
 	spin_lock_init(&master->ibi.lock);
 
@@ -2183,6 +2242,7 @@ static void svc_i3c_master_remove(struct platform_device *pdev)
 	struct svc_i3c_master *master = platform_get_drvdata(pdev);
 
 	cancel_work_sync(&master->hj_work);
+	cancel_work_sync(&master->disec_work);
 	i3c_master_unregister(&master->base);
 
 	pm_runtime_dont_use_autosuspend(&pdev->dev);
