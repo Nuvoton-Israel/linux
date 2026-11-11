@@ -58,6 +58,8 @@ struct npcm_bpc {
 	struct device		*dev;
 	int			irq;
 	bool			en_dwcap;
+	int			dwcnt;
+	u8			data[4];
 	struct npcm_bpc_channel	ch[NUM_BPC_CHANNELS];
 };
 
@@ -123,41 +125,53 @@ static irqreturn_t npcm_bpc_irq(int irq, void *arg)
 	struct npcm_bpc *bpc = arg;
 	u8 fifo_st, host_st, data;
 	bool isr_flag = false;
-	u8 code_size = 0;
 	u8 padzero[3] = {0};
 	u8 addr_index = 0;
 
 	fifo_st = ioread8(bpc->base + NPCM_BPCFSTAT_REG);
 	while (FIFO_DATA_VALID & fifo_st) {
-		 /* If dwcapture enabled only channel 0 (FIFO 0) used */
+		/* If dwcapture enabled only channel 0 (FIFO 0) used */
 		if (!bpc->en_dwcap)
 			addr_index = fifo_st & FIFO_ADDR_DECODE;
 		else
-			code_size++;
+			addr_index = 0;
+
+		if (bpc->dwcnt && bpc->en_dwcap && (fifo_st & FIFO_ADDR_DECODE)) {
+			while (kfifo_avail(&bpc->ch[addr_index].fifo) < 4)
+				kfifo_skip(&bpc->ch[addr_index].fifo);
+			kfifo_in(&bpc->ch[addr_index].fifo, bpc->data,
+				 bpc->dwcnt);
+			if (bpc->dwcnt < 4)
+				kfifo_in(&bpc->ch[addr_index].fifo, padzero,
+					 4 - bpc->dwcnt);
+			bpc->dwcnt = 0;
+			isr_flag = true;
+		}
 
 		/* Read data from FIFO to clear interrupt */
 		data = ioread8(bpc->base + NPCM_BPCFDATA_REG);
-		if (kfifo_is_full(&bpc->ch[addr_index].fifo))
-			kfifo_skip(&bpc->ch[addr_index].fifo);
-		kfifo_put(&bpc->ch[addr_index].fifo, data);
+		if (bpc->en_dwcap) {
+			bpc->data[bpc->dwcnt] = data;
+			bpc->dwcnt++;
+			if (bpc->dwcnt == 4) {
+				while (kfifo_avail(&bpc->ch[addr_index].fifo) < 4)
+					kfifo_skip(&bpc->ch[addr_index].fifo);
+				kfifo_in(&bpc->ch[addr_index].fifo, bpc->data,
+					 bpc->dwcnt);
+				bpc->dwcnt = 0;
+				isr_flag = true;
+			}
+		} else {
+			if (kfifo_is_full(&bpc->ch[addr_index].fifo))
+				kfifo_skip(&bpc->ch[addr_index].fifo);
+			kfifo_put(&bpc->ch[addr_index].fifo, data);
+			isr_flag = true;
+		}
+
 		if (fifo_st & FIFO_OVERFLOW)
-			dev_warn_ratelimited(bpc->dev, "BIOS Post Codes FIFO Overflow\n");
+			dev_warn(bpc->dev, "BIOS Post Codes FIFO Overflow\n");
 
 		fifo_st = ioread8(bpc->base + NPCM_BPCFSTAT_REG);
-		if (bpc->en_dwcap) {
-			if ((fifo_st & FIFO_ADDR_DECODE) ||
-			    ((FIFO_DATA_VALID & fifo_st) == 0)) {
-				while (kfifo_avail(&bpc->ch[addr_index].fifo) < (4 - code_size))
-					kfifo_skip(&bpc->ch[addr_index].fifo);
-				if (4 - code_size > 0) {
-					kfifo_in(&bpc->ch[addr_index].fifo,
-						 padzero, 4 - code_size);
-				}
-			}
-			if (code_size == 4)
-				code_size = 0;
-		}
-		isr_flag = true;
 	}
 
 	host_st = ioread8(bpc->base + NPCM_BPCFMSTAT_REG);
@@ -320,6 +334,7 @@ static int npcm_bpc_probe(struct platform_device *pdev)
 		of_property_read_bool(dev->of_node, "nuvoton,bpc-en-dwcapture");
 
 	bpc->dev = dev;
+	bpc->dwcnt = 0;
 
 	err = npcm_bpc_config_irq(bpc, pdev);
 	if (err)
