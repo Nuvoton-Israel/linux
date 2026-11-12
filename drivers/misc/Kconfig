@@ -617,6 +617,12 @@ config NPCM_PCI_MBOX
 	  Expose the NPCM BMC PCI MBOX registers found on Nuvoton SOCs
 	  to userspace.
 
+config NPCM7XX_JTAG_MASTER
+	tristate "NPCM7xx JTAG Master driver"
+	depends on (ARCH_NPCM7XX || COMPILE_TEST)
+	help
+	  Control PSPI/GPIO to transmit jtag signals to support jtag master function.
+
 config NPCM8XX_JTAG_MASTER
 	tristate "NPCM8xx JTAG Master driver"
 	depends on (ARCH_NPCM || COMPILE_TEST)
