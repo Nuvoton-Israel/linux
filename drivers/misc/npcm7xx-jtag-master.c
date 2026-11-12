@@ -15,7 +15,7 @@
 
 #define JTAG_PSPI_SPEED		(10 * 1000000)
 #define JTAG_SCAN_LEN		256
-#define JTAG_MAX_XFER_DATA_LEN	65535
+#define JTAG_MAX_XFER_DATA_LEN	0xFFFFFFFF
 #define MAX_SPI_XFER_BYTES	0x20000
 
 struct tck_bitbang {
