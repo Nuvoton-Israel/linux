@@ -2747,15 +2747,20 @@ L:	openbmc@lists.ozlabs.org (moderated for non-subscribers)
 S:	Supported
 F:	Documentation/devicetree/bindings/*/*/*npcm*
 F:	Documentation/devicetree/bindings/*/*npcm*
+F:	Documentation/devicetree/bindings/soc/nuvoton/nuvoton,npcm845-composite-eat.yaml
 F:	Documentation/devicetree/bindings/rtc/nuvoton,nct3018y.yaml
 F:	arch/arm/boot/dts/nuvoton/nuvoton-npcm*
 F:	arch/arm/mach-npcm/
 F:	arch/arm64/boot/dts/nuvoton/
 F:	drivers/*/*/*npcm*
 F:	drivers/*/*npcm*
+F:	drivers/soc/nuvoton/npcm-composite-eat-internal.h
+F:	drivers/soc/nuvoton/npcm-composite-eat-test.c
+F:	drivers/soc/nuvoton/npcm-composite-eat.c
 F:	drivers/rtc/rtc-nct3018y.c
 F:	include/dt-bindings/clock/nuvoton,npcm7xx-clock.h
 F:	include/dt-bindings/clock/nuvoton,npcm845-clk.h
+F:	include/uapi/linux/npcm-composite-eat.h
 
 ARM/NUVOTON NPCM VIDEO ENGINE DRIVER
 M:	Joseph Liu <kwliu@nuvoton.com>
