@@ -304,7 +304,7 @@
 
 		rng_tip: rng_tip@0 {
 			compatible = "nuvoton,npcm845-rng-tip";
-			reg = <0x0 0xf0800E54 0x0 0x10>;
+			reg = <0x0 0xf0800E54 0x0 0x0c>;
 			status = "disabled";
 		};
 
