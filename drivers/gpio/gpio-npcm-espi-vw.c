@@ -12,22 +12,10 @@
 #include <linux/regmap.h>
 #include <linux/spinlock.h>
 #include <linux/mfd/syscon.h>
+#include <linux/soc/nuvoton/npcm-espi.h>
 
-#define ESPI_ESPICFG		0x004
-#define   ESPICFG_VWCHANEN	BIT(1)
-#define   ESPICFG_VWCHN_SUPP	BIT(25)
-#define ESPI_ESPISTS		0x008
-#define   ESPISTS_VWUPD		BIT(8)
-#define ESPI_ESPIIE		0x00C
-#define   ESPIIE_VWUPDIE	BIT(8)
-#define ESPI_VWEVMS(n)		(0x140 + (4*(n)))
-#define   VWEVMS_INDEX_EN	BIT(15)
-#define   VWEVMS_MODIFIED	BIT(16)
-#define   VWEVMS_IE		BIT(18)
 #define ESPI_VWGPSM(n)		(0x180 + (4*(n)))
 #define   VWGPSM_INDEX_EN	BIT(15)
-#define ESPI_ESPIERR		0x03C
-#define   ESPIERR_VWERR		BIT(11)
 #define ESPI_VWGPMS(n)		(0x1C0 + (4*(n)))
 #define   VWGPMS_INDEX_EN	BIT(15)
 #define   VWGPMS_MODIFIED	BIT(16)
@@ -100,7 +88,7 @@ static int vwgpio_get_value(struct gpio_chip *gc, unsigned int offset)
 			return -EIO;
 	} else {
 		index = (offset - VW_MSEV_START) / 4;
-		regmap_read(vwgpio->map, ESPI_VWEVMS(index), &val);
+		regmap_read(vwgpio->map, NPCM_ESPI_VWEVMS(index), &val);
 		/* Check wire valid bit, invalid retrun default value */
 		if (!(val & BIT(wire + 4)))
 			return !!(vwgpio->evmswire_default &
@@ -178,10 +166,10 @@ static void npcm_vwgpio_check_event(struct npcm_vwgpio *vwgpio,
 			     val | VWGPMS_MODIFIED);
 	} else {
 		index = (event_idx - VM_MSGPIO_START) / 4;
-		regmap_read(vwgpio->map, ESPI_VWEVMS(index), &val);
+		regmap_read(vwgpio->map, NPCM_ESPI_VWEVMS(index), &val);
 		/* Clear MODIFIED bit */
-		regmap_write(vwgpio->map, ESPI_VWEVMS(index),
-			     val | VWEVMS_MODIFIED);
+		regmap_write(vwgpio->map, NPCM_ESPI_VWEVMS(index),
+			     val | NPCM_ESPI_VWEVMS_MODIFIED);
 	}
 
 	raw_spin_lock_irqsave(&vwgpio->lock, flags);
@@ -244,15 +232,8 @@ out:
 static irqreturn_t npcm_vwgpio_irq_handler(int irq, void *dev_id)
 {
 	struct npcm_vwgpio *vwgpio = dev_id;
-	u32 status;
 	int i;
 
-	regmap_read(vwgpio->map, ESPI_ESPISTS, &status);
-	if (!(status & ESPISTS_VWUPD))
-		return IRQ_HANDLED;
-
-	/* Clear ESPISTS_VWUPD status */
-	regmap_write(vwgpio->map, ESPI_ESPISTS, ESPISTS_VWUPD);
 	/* Check all events */
 	for (i = 0; i < VW_MSGPIO_NUM + VW_MSEV_NUM; i++)
 		npcm_vwgpio_check_event(vwgpio, i);
@@ -365,19 +346,19 @@ static void npcm_vwgpio_irq_set_mask(struct irq_data *d, bool enable, bool set)
 			regmap_write(vwgpio->map, ESPI_VWGPMS(index), val);
 		} else {
 			index = (gpio - VW_MSEV_START) / 4;
-			regmap_read(vwgpio->map, ESPI_VWEVMS(index), &val);
+			regmap_read(vwgpio->map, NPCM_ESPI_VWEVMS(index), &val);
 
 			if (enable)
-				val |= VWEVMS_INDEX_EN;
+				val |= NPCM_ESPI_VWEVMS_INDEX_EN;
 			else
-				val &= ~VWEVMS_INDEX_EN;
+				val &= ~NPCM_ESPI_VWEVMS_INDEX_EN;
 
 			if (set)
-				val |= VWEVMS_IE;
+				val |= NPCM_ESPI_VWEVMS_IE;
 			else
-				val &= ~VWEVMS_IE;
+				val &= ~NPCM_ESPI_VWEVMS_IE;
 
-			regmap_write(vwgpio->map, ESPI_VWEVMS(index), val);
+			regmap_write(vwgpio->map, NPCM_ESPI_VWEVMS(index), val);
 		}
 	}
 
@@ -413,8 +394,6 @@ static void npcm_vwgpio_init(struct npcm_vwgpio *vwgpio)
 		vwgpio->events[i].state =
 			vwgpio_get_value(&vwgpio->chip, VM_MSGPIO_START + i);
 
-	/* enable VWUPD interrupt */
-	regmap_set_bits(vwgpio->map, ESPI_ESPIIE, ESPIIE_VWUPDIE);
 }
 
 static void npcm_vwgpio_config(struct npcm_vwgpio *vwgpio, u8 intwin,
@@ -535,15 +514,13 @@ static int npcm_vwgpio_probe(struct platform_device *pdev)
 			return rc;
 		}
 
-		/* Clear ESPISTS_VWUPD status */
-		regmap_write(vwgpio->map, ESPI_ESPISTS, ESPISTS_VWUPD);
-		/* Clear ESPIERR_VWERR status */
-		regmap_write(vwgpio->map, ESPI_ESPIERR, ESPIERR_VWERR);
-		/* Disable VWUPD interrupt */
-		regmap_clear_bits(vwgpio->map, ESPI_ESPIIE, ESPIIE_VWUPDIE);
+		/* Clear NPCM_ESPI_ESPIERR_VWERR status */
+		regmap_write(vwgpio->map, NPCM_ESPI_ESPIERR, NPCM_ESPI_ESPIERR_VWERR);
 
-		rc = devm_request_irq(dev, vwgpio->irq, npcm_vwgpio_irq_handler,
-				      IRQF_SHARED, "espi-vw-gpio", vwgpio);
+		rc = devm_request_threaded_irq(dev, vwgpio->irq, NULL,
+					       npcm_vwgpio_irq_handler,
+					       IRQF_ONESHOT, "espi-vw-gpio",
+					       vwgpio);
 		if (rc) {
 			dev_err(dev, "failed to request IRQ\n");
 			return rc;
