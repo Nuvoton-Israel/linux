@@ -56,9 +56,21 @@ config NPCM_PCI_MMBI
 	  handle the data exchange between BMC and host over the
 	  PCI Mailbox interface.
 
+config NPCM_ESPI
+	tristate "NPCM eSPI interrupt controller"
+	depends on ARCH_NPCM || COMPILE_TEST
+	select MFD_SYSCON
+	select REGMAP_IRQ
+	help
+	  Provides the interrupt controller for the eSPI block, which owns
+	  the status register the per channel drivers share and gives each
+	  of them one interrupt of their own.  Required by the eSPI slave,
+	  flash and virtual wire GPIO drivers.
+
 config NPCM_ESPI_SLAVE
 	tristate "NPCM SLAVE Driver"
 	depends on ARCH_NPCM || COMPILE_TEST
+	depends on NPCM_ESPI
 	help
 	  Provides a driver to implement the espi slave driver that
 	  handle the espi events.
