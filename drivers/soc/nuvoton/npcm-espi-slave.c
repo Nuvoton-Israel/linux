@@ -17,27 +17,16 @@
 #include <linux/regmap.h>
 #include <linux/sched/signal.h>
 #include <linux/spinlock.h>
+#include <linux/notifier.h>
 #include <linux/uaccess.h>
+#include <linux/soc/nuvoton/npcm-espi.h>
 
 #define DEVICE_NAME "espi-pltrstn"
-
-#define ESPISTS			0x008
-#define  ESPISTS_PLTRST		BIT(10)
-#define  ESPISTS_ESPIRST	BIT(9)
-#define  ESPISTS_CFGUPD		BIT(1)
-
-#define ESPIIE			0x00C
-#define  ESPIIE_PLTRSTIE	BIT(10)
-#define  ESPIIE_ESPIRSTIE	BIT(9)
-#define  ESPIIE_CFGUPDIE	BIT(1)
-
-#define VWEVMS1			0x144
-#define  VWEVMS1_PLTRST		BIT(1)
 
 struct npcm_espi_slave {
 	struct regmap		*espi_regmap;
 	struct device		*dev;
-	int			irq;
+	struct notifier_block	nb;
 
 	/* for PLTRST_N signal monitoring interface */
 	struct miscdevice	miscdev;
@@ -48,61 +37,54 @@ struct npcm_espi_slave {
 };
 
 
-static void npcm_espi_slave_config_irq(struct npcm_espi_slave *priv)
+static void npcm_espi_slave_report(struct npcm_espi_slave *priv, char pltrstn)
 {
-	regmap_update_bits(priv->espi_regmap, ESPIIE, ESPIIE_PLTRSTIE,
-			ESPIIE_PLTRSTIE);
-	regmap_update_bits(priv->espi_regmap, ESPIIE, ESPIIE_ESPIRSTIE,
-			ESPIIE_ESPIRSTIE);
-	regmap_update_bits(priv->espi_regmap, ESPIIE, ESPIIE_CFGUPDIE,
-			ESPIIE_CFGUPDIE);
+	unsigned long flags;
+
+	spin_lock_irqsave(&priv->pltrstn_lock, flags);
+	priv->pltrstn = pltrstn;
+	priv->pltrstn_in_avail = true;
+	spin_unlock_irqrestore(&priv->pltrstn_lock, flags);
+
+	wake_up_interruptible(&priv->pltrstn_waitq);
 }
 
-static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
+static irqreturn_t npcm_espi_slave_pltrst_irq(int irq, void *arg)
 {
-	struct npcm_espi_slave *priv = arg;
-	uint32_t sts, evms1;
-
-	regmap_read(priv->espi_regmap, ESPISTS, &sts);
-	regmap_read(priv->espi_regmap, VWEVMS1, &evms1);
-
-	if (sts & ESPISTS_PLTRST) {
-		spin_lock(&priv->pltrstn_lock);
-		priv->pltrstn = '0';
-		priv->pltrstn_in_avail = true;
-		spin_unlock(&priv->pltrstn_lock);
-		wake_up_interruptible(&priv->pltrstn_waitq);
-
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_PLTRST);
-	}
-
-	if (sts & ESPISTS_ESPIRST) {
-		spin_lock(&priv->pltrstn_lock);
-		priv->pltrstn = 'U';
-		priv->pltrstn_in_avail = true;
-		spin_unlock(&priv->pltrstn_lock);
-		wake_up_interruptible(&priv->pltrstn_waitq);
-
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_ESPIRST);
-
-		npcm_espi_slave_config_irq(priv);
-	}
-
-	if (sts & ESPISTS_CFGUPD) {
-		spin_lock(&priv->pltrstn_lock);
-		priv->pltrstn = (evms1 & VWEVMS1_PLTRST) ? '1' : '0';
-		priv->pltrstn_in_avail = true;
-		spin_unlock(&priv->pltrstn_lock);
-		wake_up_interruptible(&priv->pltrstn_waitq);
-#ifdef CONFIG_SPI_NPCM_FLASH
-		return IRQ_HANDLED;
-#endif
-		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_CFGUPD);
-	}
-
-	regmap_read(priv->espi_regmap, ESPISTS, &sts);
+	npcm_espi_slave_report(arg, '0');
 
 	return IRQ_HANDLED;
+}
+
+static irqreturn_t npcm_espi_slave_espirst_irq(int irq, void *arg)
+{
+	npcm_espi_slave_report(arg, 'U');
+
+	return IRQ_HANDLED;
+}
+
+/*
+ * Until the host has told us what PLTRST_N is doing the level is reported
+ * as 'U'.  It says so as part of a configuration update, which is not an
+ * interrupt of ours, so take it from the broadcast the eSPI block makes.
+ */
+static int npcm_espi_slave_cfgupd(struct notifier_block *nb,
+				  unsigned long event, void *data)
+{
+	struct npcm_espi_slave *priv = container_of(nb, struct npcm_espi_slave,
+						    nb);
+	unsigned int evms1;
+
+	if (event != NPCM_ESPI_EVENT_CFGUPD)
+		return NOTIFY_DONE;
+
+	if (regmap_read(priv->espi_regmap, NPCM_ESPI_VWEVMS(1), &evms1))
+		return NOTIFY_DONE;
+
+	npcm_espi_slave_report(priv,
+			       (evms1 & NPCM_ESPI_VWEVMS_PLTRST) ? '1' : '0');
+
+	return NOTIFY_OK;
 }
 
 static inline struct npcm_espi_slave *to_npcm_espi_slave(struct file *filp)
@@ -206,7 +188,7 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct npcm_espi_slave *priv;
-	int ret;
+	int irq, ret;
 
 	priv = devm_kzalloc(dev, sizeof(struct npcm_espi_slave), GFP_KERNEL);
 	if (!priv)
@@ -227,24 +209,6 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = misc_register(&priv->miscdev);
-	if (ret) {
-		dev_err(dev, "Unable to register device\n");
-		kfree(priv->miscdev.name);
-		return ret;
-	}
-
-	priv->irq = platform_get_irq(pdev, 0);
-	if (priv->irq < 0)
-		return priv->irq;
-
-	ret = devm_request_irq(dev, priv->irq, npcm_espi_slave_irq_handler,
-			       IRQF_SHARED, "espi-slave", priv);
-	if (ret) {
-		dev_err(dev, "failed to request IRQ\n");
-		return ret;
-	}
-
 	spin_lock_init(&priv->pltrstn_lock);
 	init_waitqueue_head(&priv->pltrstn_waitq);
 
@@ -253,7 +217,37 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(dev, priv);
 
-	npcm_espi_slave_config_irq(priv);
+	priv->nb.notifier_call = npcm_espi_slave_cfgupd;
+	ret = devm_npcm_espi_register_notifier(dev, &priv->nb);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to subscribe to cfgupd\n");
+
+	irq = platform_get_irq_byname(pdev, "pltrst");
+	if (irq < 0)
+		return irq;
+
+	ret = devm_request_threaded_irq(dev, irq, NULL,
+					npcm_espi_slave_pltrst_irq, IRQF_ONESHOT,
+					"espi-pltrst", priv);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to request pltrst\n");
+
+	irq = platform_get_irq_byname(pdev, "espirst");
+	if (irq < 0)
+		return irq;
+
+	ret = devm_request_threaded_irq(dev, irq, NULL,
+					npcm_espi_slave_espirst_irq, IRQF_ONESHOT,
+					"espi-espirst", priv);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to request espirst\n");
+
+	ret = misc_register(&priv->miscdev);
+	if (ret) {
+		dev_err(dev, "Unable to register device\n");
+		return ret;
+	}
 
 	return 0;
 
@@ -263,8 +257,6 @@ static int npcm_espi_slave_remove(struct platform_device *pdev)
 {
 	struct npcm_espi_slave *priv = dev_get_drvdata(&pdev->dev);
 	misc_deregister(&priv->miscdev);
-	kfree(priv->miscdev.name);
-	kfree(priv);
 	return 0;
 }
 

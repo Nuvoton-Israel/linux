@@ -2,6 +2,7 @@
 obj-$(CONFIG_NPCM_MBOX_CERBERUS) += npcm-cerberus.o
 obj-$(CONFIG_NPCM_SERIAL_PORT_CONTROL) += npcm-sp-ctrl.o
 obj-$(CONFIG_NPCM_ESPI_MMBI) += npcm-espi-mmbi.o
+obj-$(CONFIG_NPCM_ESPI) += npcm-espi.o
 obj-$(CONFIG_NPCM_ESPI_SLAVE) += npcm-espi-slave.o
 obj-$(CONFIG_NPCM_PCI_MMBI)	+= npcm-pci-mmbi.o
 obj-$(CONFIG_MTD_NPCM_TIP_FIU)	+= npcm_fiu_tip.o
