@@ -30,7 +30,6 @@
 /* Try 2 byte address size before switching to 1 byte */
 #define MAX_RETRY	5
 
-
 /* SBRMI REVISION REG */
 #define SBRMI_REV	0x0
 
@@ -590,12 +589,18 @@ static int create_misc_rmi_device(struct apml_sbrmi_device *rmi_dev,
 	int ret;
 
 	rmi_dev->sbrmi_misc_dev.name		= devm_kasprintf(dev, GFP_KERNEL,
-						  "sbrmi-%x", rmi_dev->dev_static_addr);
+								 "sbrmi-%x",
+								 rmi_dev->dev_static_addr);
+	if (!rmi_dev->sbrmi_misc_dev.name)
+		return -ENOMEM;
 	rmi_dev->sbrmi_misc_dev.minor		= MISC_DYNAMIC_MINOR;
 	rmi_dev->sbrmi_misc_dev.fops		= &sbrmi_fops;
 	rmi_dev->sbrmi_misc_dev.parent		= dev;
 	rmi_dev->sbrmi_misc_dev.nodename	= devm_kasprintf(dev, GFP_KERNEL,
-						  "sbrmi-%x", rmi_dev->dev_static_addr);
+								 "sbrmi-%x",
+								 rmi_dev->dev_static_addr);
+	if (!rmi_dev->sbrmi_misc_dev.nodename)
+		return -ENOMEM;
 	rmi_dev->sbrmi_misc_dev.mode		= 0600;
 
 	ret = misc_register(&rmi_dev->sbrmi_misc_dev);
@@ -651,7 +656,7 @@ static int sbrmi_i2c_identify_reg_addr_size(struct i2c_client *i2c, u32 *size, u
 
 	/*
 	 * Sending 1 byte address size in Turin cause unrecoverable error
-	 * Before trying to switch to 1 bytes, retry. 
+	 * Before trying to switch to 1 bytes, retry.
 	 */
 	for (i = 0; i < MAX_RETRY; i++) {
 		ret = sbrmi_i2c_reg_read(i2c, reg_size, rev);
@@ -722,6 +727,8 @@ static int sbrmi_i2c_probe(struct i2c_client *client)
 				      rmi_dev->dev_static_addr);
 		break;
 	}
+	if (!name)
+		return -ENOMEM;
 
 	hwmon_dev = devm_hwmon_device_register_with_info(dev, name,
 							 rmi_dev,
@@ -907,6 +914,8 @@ static int sbrmi_i3c_probe(struct i3c_device *i3cdev)
 				      rmi_dev->dev_static_addr);
 		break;
 	}
+	if (!name)
+		return -ENOMEM;
 
 	hwmon_dev = devm_hwmon_device_register_with_info(dev, name, rmi_dev,
 							 &sbrmi_chip_info, NULL);
@@ -1033,6 +1042,12 @@ static const struct i3c_device_id sbrmi_i3c_id[] = {
 	I3C_DEVICE_EXTRA_INFO(0x112, 0x0, 0x2, NULL), /* Genoa/Turin */
 	I3C_DEVICE_EXTRA_INFO(0x112, 0x0, 0x118, NULL), /* Socket:0, IOD:0 Venice*/
 	I3C_DEVICE_EXTRA_INFO(0x112, 0x100, 0x118, NULL), /* Socket:1 IOD:0 Venice */
+	I3C_DEVICE_EXTRA_INFO(0x112, 0x0, 0x119, NULL), /* SP7 Socket:0 Venice */
+	I3C_DEVICE_EXTRA_INFO(0x112, 0x100, 0x119, NULL), /* SP7 Socket:1 Venice */
+	I3C_DEVICE_EXTRA_INFO(0x112, 0x0, 0x11A, NULL), /* SP8 Socket:0, IOD:0 */
+	I3C_DEVICE_EXTRA_INFO(0x112, 0x100, 0x11A, NULL), /* SP8 Socket:1 IOD:0 */
+	I3C_DEVICE_EXTRA_INFO(0x112, 0x0, 0x11B, NULL), /* Socket:0, IOD:0 */
+	I3C_DEVICE_EXTRA_INFO(0x112, 0x100, 0x11B, NULL), /* Socket:1 IOD:0 */
 	{}
 };
 MODULE_DEVICE_TABLE(i3c, sbrmi_i3c_id);
